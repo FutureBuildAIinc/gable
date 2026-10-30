@@ -122,3 +122,13 @@ func (s *LogEmailService) SendWithAnswer(ctx context.Context, to []string, subje
 	}
 	return "logged by the log sender, not sent", nil
 }
+
+// LogsOnly reports whether svc is a sender that records emails instead of
+// transporting them: one that implements DeliveryDescription, which today is
+// the log sender alone (the SMTP sender deliberately does not implement it).
+// A send such a sender accepted never left the process, so the delivery
+// records logged, never sent.
+func LogsOnly(svc EmailService) bool {
+	_, ok := svc.(interface{ DeliveryDescription() string })
+	return ok
+}

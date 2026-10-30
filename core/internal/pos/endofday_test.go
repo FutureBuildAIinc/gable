@@ -36,33 +36,143 @@ type dayFixture struct {
 	branches []*dayBranch
 	bankIDs  []uuid.UUID
 	accounts []uuid.UUID
+	// glCodes are the GL accounts the fixture made a bank account on; they go
+	// after the branches, once no close names the bank account any more.
+	glCodes []string
 }
 
 // newDayFixture builds the fixture. The cleanup of the extra branches is
-// registered first, so it runs after the fixture's own (cleanups run last in,
-// first out) once no session or sale names a register of theirs.
+// registered after the fixture's own, so it runs before it (cleanups run
+// last in, first out): the branches' sales name the fixture's product on
+// their invoice lines, so the branches' rows go while the product still
+// stands, and the fixture's own cleanup then finds nothing of theirs left.
 func newDayFixture(t *testing.T, db *database.DB, opts ...func(*fixture)) *dayFixture {
 	t.Helper()
 	d := &dayFixture{db: db}
-	t.Cleanup(d.removeBranches)
 	d.fixture = newFixture(t, db, opts...)
+	t.Cleanup(d.removeBranches)
 	return d
 }
 
+// removeBranches removes the extra branches and everything the tests made on
+// them, children first, in the foreign key order the sweep proved: the events
+// and the ledger rows of the sales, the sales and their documents, the till
+// rows and the day closes, then the registers, the stock and the locations,
+// and last the bank rows and the GL accounts. Every scope names the fixture's
+// own rows (the branch and register ids it made), so no other test's rows are
+// reached, and a failed delete is an error, so a leak is visible.
 func (d *dayFixture) removeBranches() {
 	ctx := context.Background()
-	exec := func(sql string, args ...any) { _, _ = d.db.Pool.Exec(ctx, sql, args...) }
+	exec := func(sql string, args ...any) {
+		if _, err := d.db.Pool.Exec(ctx, sql, args...); err != nil {
+			d.t.Errorf("cleanup: %s: %v", strings.Join(strings.Fields(sql), " "), err)
+		}
+	}
+	walkIn := `(SELECT id FROM customers WHERE account_number = 'WALK-IN')`
+	for _, b := range d.branches {
+		// $1 is the branch the fixture made, $2 its registers. A statement
+		// takes only the parameters it uses.
+		regs := b.registers[:]
+		sales := `(SELECT id FROM pos_transactions WHERE branch_id = $1 OR register_id = ANY($2::text[]))`
+		pays := `(SELECT id FROM payments WHERE branch_id = $1
+			OR id IN (SELECT payment_id FROM pos_tenders WHERE transaction_id IN ` + sales + `))`
+		invs := `(SELECT id FROM invoices WHERE branch_id = $1
+			OR id IN (SELECT invoice_id FROM pos_transactions WHERE branch_id = $1))`
+		// the same scopes, spelled as text: the outbox and the audit log name
+		// their entity by a text id
+		salesTxt := `(SELECT id::text FROM pos_transactions WHERE branch_id = $1 OR register_id = ANY($2::text[]))`
+		paysTxt := `(SELECT id::text FROM payments WHERE branch_id = $1
+			OR id IN (SELECT payment_id FROM pos_tenders WHERE transaction_id IN ` + sales + `))`
+		invsTxt := `(SELECT id::text FROM invoices WHERE branch_id = $1
+			OR id IN (SELECT invoice_id FROM pos_transactions WHERE branch_id = $1))`
+		sessionsTxt := `(SELECT id::text FROM till_sessions WHERE branch_id = $1 OR register_id = ANY($2::text[]))`
+		// the ledger entries are captured before their source documents go, so
+		// the entry delete never misses one (a reversal names its original,
+		// and every entry of the branch carries its id)
+		var entryIDs []string
+		if rows, err := d.db.Pool.Query(ctx, `SELECT e.id::text FROM gl_journal_entries e WHERE e.branch_id = $1
+			OR e.source_ref_id::text IN (`+invsTxt+`
+				UNION `+paysTxt+`
+				UNION `+salesTxt+`
+				UNION `+sessionsTxt+`
+				UNION (SELECT id::text FROM till_movements WHERE branch_id = $1)
+				UNION (SELECT id::text FROM till_day_closes WHERE branch_id = $1))
+			OR e.reverses_entry_id IN (SELECT gl_entry_id FROM till_day_closes WHERE branch_id = $1 AND gl_entry_id IS NOT NULL)`,
+			b.id, regs); err == nil {
+			for rows.Next() {
+				var id string
+				if rows.Scan(&id) == nil {
+					entryIDs = append(entryIDs, id)
+				}
+			}
+			rows.Close()
+		} else {
+			d.t.Errorf("cleanup: capture the branch's entries: %v", err)
+		}
+		entities := salesTxt + ` UNION ` + invsTxt + ` UNION ` + paysTxt + ` UNION ` + sessionsTxt + `
+			UNION (SELECT id::text FROM till_movements WHERE branch_id = $1)
+			UNION (SELECT id::text FROM till_day_closes WHERE branch_id = $1)
+			UNION (SELECT $1::text)`
+		exec(`DELETE FROM events_outbox WHERE entity_id::text IN (`+entities+`)`, b.id, regs)
+		exec(`DELETE FROM audit_log WHERE entity_id::text IN (`+entities+`)`, b.id, regs)
+		exec(`DELETE FROM pos_account_overrides WHERE sale_id IN `+sales, b.id, regs)
+		exec(`DELETE FROM pos_line_items WHERE transaction_id IN `+sales, b.id, regs)
+		// the walk-in customer's rows that name one of this branch's documents
+		// go with them, its balance first; the walk-in row itself is shared by
+		// every counter in the deployment, so its rows are named by the
+		// documents (the applications and refunds too, or a sale's debit and
+		// credit would part ways) and not by the customer
+		docs := `(SELECT id FROM invoices WHERE id IN ` + invs + `
+			UNION SELECT id FROM payments WHERE id IN ` + pays + `
+			UNION ` + sales + `
+			UNION SELECT id FROM ar_applications WHERE invoice_id IN ` + invs + ` OR payment_id IN ` + pays + `
+			UNION SELECT id FROM payment_refunds WHERE payment_id IN ` + pays + `)`
+		exec(`UPDATE customers SET balance_due = balance_due - COALESCE((
+			SELECT SUM(amount)::numeric / 100 FROM customer_transactions
+			WHERE customer_id IN `+walkIn+` AND reference_id IN `+docs+`), 0)
+			WHERE id IN `+walkIn, b.id, regs)
+		exec(`DELETE FROM customer_transactions WHERE customer_id IN `+walkIn+` AND reference_id IN `+docs, b.id, regs)
+		exec(`DELETE FROM pos_tenders WHERE transaction_id IN `+sales+` OR payment_id IN `+pays, b.id, regs)
+		exec(`DELETE FROM tender_lines WHERE invoice_id IN `+invs+` OR payment_id IN `+pays, b.id, regs)
+		exec(`DELETE FROM ar_applications WHERE invoice_id IN `+invs+` OR payment_id IN `+pays, b.id, regs)
+		exec(`DELETE FROM payments WHERE id IN `+pays, b.id, regs)
+		exec(`DELETE FROM line_tally_rows WHERE invoice_line_id IN (SELECT id FROM invoice_lines WHERE invoice_id IN `+invs+`)
+			OR pos_line_item_id IN (SELECT id FROM pos_line_items WHERE transaction_id IN `+sales+`)`, b.id, regs)
+		// the sale goes before the invoice it names
+		exec(`DELETE FROM pos_transactions WHERE id IN `+sales, b.id, regs)
+		exec(`DELETE FROM invoice_lines WHERE invoice_id IN `+invs, b.id)
+		exec(`DELETE FROM invoices WHERE id IN `+invs, b.id)
+		// the z reports the closes wrote, before the sessions they name
+		exec(`DELETE FROM till_z_reports WHERE branch_id = $1 OR register_id = ANY($2::text[])`, b.id, regs)
+		// the variance policy a close's test put on the branch, before the
+		// branch goes
+		exec(`DELETE FROM till_variance_policy WHERE branch_id = $1`, b.id)
+		exec(`DELETE FROM till_movements WHERE branch_id = $1`, b.id)
+		exec(`DELETE FROM till_day_closes WHERE branch_id = $1`, b.id)
+		exec(`UPDATE bank_transactions SET matched_journal_entry_id = NULL WHERE matched_journal_entry_id = ANY($1::uuid[])`, entryIDs)
+		exec(`UPDATE till_sessions SET gl_entry_id = NULL WHERE (branch_id = $1 OR register_id = ANY($2::text[])) AND gl_entry_id IS NOT NULL`, b.id, regs)
+		if len(entryIDs) > 0 {
+			exec(`UPDATE gl_journal_entries SET reverses_entry_id = NULL WHERE reverses_entry_id = ANY($1::uuid[])`, entryIDs)
+			exec(`DELETE FROM gl_journal_lines WHERE branch_id = $1 OR journal_entry_id = ANY($2::uuid[])`, b.id, entryIDs)
+			exec(`DELETE FROM gl_journal_entries WHERE branch_id = $1 OR id = ANY($2::uuid[])`, b.id, entryIDs)
+		}
+		exec(`DELETE FROM till_sessions WHERE branch_id = $1 OR register_id = ANY($2::text[])`, b.id, regs)
+		exec(`DELETE FROM inventory WHERE location_id = $1`, b.yard)
+		exec(`DELETE FROM pos_registers WHERE branch_id = $1`, b.id)
+		exec(`DELETE FROM locations WHERE id = $1`, b.yard)
+		exec(`DELETE FROM locations WHERE id = $1`, b.id)
+	}
+	// the bank rows last, once no close names the bank account and no bank
+	// line names the branch's entries
 	for _, id := range d.bankIDs {
 		exec(`DELETE FROM bank_transactions WHERE id = $1`, id)
 	}
 	for _, id := range d.accounts {
 		exec(`DELETE FROM bank_accounts WHERE id = $1`, id)
 	}
-	for _, b := range d.branches {
-		exec(`DELETE FROM pos_registers WHERE branch_id = $1`, b.id)
-		exec(`DELETE FROM inventory WHERE location_id = $1`, b.yard)
-		exec(`DELETE FROM locations WHERE id = $1`, b.yard)
-		exec(`DELETE FROM locations WHERE id = $1`, b.id)
+	for _, code := range d.glCodes {
+		exec(`DELETE FROM gl_journal_lines WHERE account_id = (SELECT id FROM gl_accounts WHERE code = $1)`, code)
+		exec(`DELETE FROM gl_accounts WHERE code = $1`, code)
 	}
 }
 
@@ -659,15 +769,7 @@ func (d *dayFixture) netOn(code string, ids ...string) int64 {
 func TestTheDayClosePostsTheDeposit(t *testing.T) {
 	testutil.LockOutboxTables(t)
 	d := newDayFixture(t, testutil.RequireDB(t))
-	glCode := "T" + uuid.NewString()[:7]
-	mustExec(t, d.db, `INSERT INTO gl_accounts (code, name, type, subtype, normal_balance) VALUES ($1, 'test operating bank', 'ASSET', 'Current Asset', 'DEBIT')`, glCode)
-	t.Cleanup(func() {
-		_, _ = d.db.Pool.Exec(context.Background(), `DELETE FROM bank_transactions WHERE bank_account_id IN (SELECT id FROM bank_accounts WHERE gl_account_id = (SELECT id FROM gl_accounts WHERE code = $1))`, glCode)
-		_, _ = d.db.Pool.Exec(context.Background(), `DELETE FROM bank_accounts WHERE gl_account_id = (SELECT id FROM gl_accounts WHERE code = $1)`, glCode)
-		_, _ = d.db.Pool.Exec(context.Background(), `DELETE FROM gl_journal_lines WHERE account_id = (SELECT id FROM gl_accounts WHERE code = $1)`, glCode)
-		_, _ = d.db.Pool.Exec(context.Background(), `DELETE FROM gl_accounts WHERE code = $1`, glCode)
-	})
-	bank := d.bankAccountOn(glCode)
+	bank, glCode := d.bankWithGL()
 	a := d.makeBranch()
 	reg := a.registers[0]
 	s := d.openTillOn(reg, 10000)
@@ -847,18 +949,13 @@ func (d *dayFixture) reopen(closeID, reason, role, sub string) resp {
 }
 
 // bankWithGL makes a bank account on a GL account of its own, so a test reads
-// the deposit's legs apart from the cash account's, and removes both.
+// the deposit's legs apart from the cash account's; the fixture removes both,
+// once the branches whose closes name the bank account are gone.
 func (d *dayFixture) bankWithGL() (bank uuid.UUID, code string) {
 	d.t.Helper()
 	code = "T" + uuid.NewString()[:7]
 	mustExec(d.t, d.db, `INSERT INTO gl_accounts (code, name, type, subtype, normal_balance) VALUES ($1, 'test operating bank', 'ASSET', 'Current Asset', 'DEBIT')`, code)
-	d.t.Cleanup(func() {
-		ctx := context.Background()
-		_, _ = d.db.Pool.Exec(ctx, `DELETE FROM bank_transactions WHERE bank_account_id IN (SELECT id FROM bank_accounts WHERE gl_account_id = (SELECT id FROM gl_accounts WHERE code = $1))`, code)
-		_, _ = d.db.Pool.Exec(ctx, `DELETE FROM bank_accounts WHERE gl_account_id = (SELECT id FROM gl_accounts WHERE code = $1)`, code)
-		_, _ = d.db.Pool.Exec(ctx, `DELETE FROM gl_journal_lines WHERE account_id = (SELECT id FROM gl_accounts WHERE code = $1)`, code)
-		_, _ = d.db.Pool.Exec(ctx, `DELETE FROM gl_accounts WHERE code = $1`, code)
-	})
+	d.glCodes = append(d.glCodes, code)
 	return d.bankAccountOn(code), code
 }
 

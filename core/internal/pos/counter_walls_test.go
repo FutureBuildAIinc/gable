@@ -65,7 +65,7 @@ func TestTheNewCounterRoutesHoldTheBranchWall(t *testing.T) {
 		map[string]any{"signer_name": "Pat", "image_png_base64": tinyPNG}, scopedCashier...); r.status != http.StatusNotFound {
 		t.Errorf("a signature on another branch's sale = %d, want 404: %s", r.status, r.raw)
 	}
-	if n := f.scalar(`SELECT count(*) FROM pos_signatures`); n.(int64) != 0 {
+	if n := f.scalar(`SELECT count(*) FROM pos_signatures WHERE sale_id = $1`, uuid.MustParse(sale)); n.(int64) != 0 {
 		t.Errorf("a signature was sealed through the wall")
 	}
 	if r := f.do("GET", "/api/v1/pos/transactions/"+sale+"/receipt?layout=thermal80", nil, scopedCashier...); r.status != http.StatusNotFound {

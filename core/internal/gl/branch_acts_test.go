@@ -738,21 +738,9 @@ func TestPeriodAndAccountGuardsOnJournalAndAccountActs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var todayPeriodID uuid.UUID
-	var todayPeriodRev int64
-	err = db.Pool.QueryRow(ctx, `SELECT id, revision FROM gl_fiscal_periods WHERE $1::date BETWEEN start_date AND end_date LIMIT 1`, today.Format("2006-01-02")).Scan(&todayPeriodID, &todayPeriodRev)
-	if err != nil {
-		todayStr := today.Format("2006-01-02")
-		todayPeriodID = newPeriod(t, db, "m6 grd today "+uuid.NewString()[:8], todayStr, todayStr)
-		todayPeriodRev = 1
-	}
-	closedToday, err := svc.CloseFiscalPeriodFor(ctx, todayPeriodID, todayPeriodRev, "auditor")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		_, _ = db.Pool.Exec(ctx, `UPDATE gl_fiscal_periods SET status = 'OPEN', closed_at = NULL, closed_by = NULL WHERE id = $1`, todayPeriodID)
-	})
+	// The entry is made first, outside the transaction. Closing the business
+	// day's period happens inside one that always rolls back, so the period
+	// every other test posts into is never closed on the shared database.
 	unreversedEntry := &gl.JournalEntry{
 		EntryDate: time.Date(2039, 2, 14, 0, 0, 0, 0, time.UTC),
 		Memo:      "m6 grd unreversed",
@@ -768,10 +756,27 @@ func TestPeriodAndAccountGuardsOnJournalAndAccountActs(t *testing.T) {
 	if err := svc.CreateManualJournalEntry(ctx, unreversedEntry); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := svc.ReverseJournalEntry(ctx, unreversedEntry.ID, "closed today"); err == nil {
-		t.Errorf("ReverseJournalEntry when business day period is CLOSED = nil, want error")
-	}
-	if _, err := svc.ReopenFiscalPeriodFor(ctx, todayPeriodID, closedToday.Revision, "reopen today", "auditor"); err != nil {
+	errRollback := errors.New("roll back")
+	if err := db.RunInTx(ctx, func(txCtx context.Context) error {
+		var todayPeriodID uuid.UUID
+		var todayPeriodRev int64
+		err := db.GetExecutor(txCtx).QueryRow(txCtx, `SELECT id, revision FROM gl_fiscal_periods WHERE $1::date BETWEEN start_date AND end_date LIMIT 1`, today.Format("2006-01-02")).Scan(&todayPeriodID, &todayPeriodRev)
+		if err != nil {
+			todayStr := today.Format("2006-01-02")
+			todayPeriodID = uuid.New()
+			todayPeriodRev = 1
+			if _, err := db.GetExecutor(txCtx).Exec(txCtx, `INSERT INTO gl_fiscal_periods (id, name, start_date, end_date) VALUES ($1, $2, $3, $3)`, todayPeriodID, "m6 grd today "+uuid.NewString()[:8], todayStr); err != nil {
+				return err
+			}
+		}
+		if _, err := svc.CloseFiscalPeriodFor(txCtx, todayPeriodID, todayPeriodRev, "auditor"); err != nil {
+			return err
+		}
+		if _, err := svc.ReverseJournalEntry(txCtx, unreversedEntry.ID, "closed today"); err == nil {
+			t.Errorf("ReverseJournalEntry when business day period is CLOSED = nil, want error")
+		}
+		return errRollback
+	}); !errors.Is(err, errRollback) {
 		t.Fatal(err)
 	}
 

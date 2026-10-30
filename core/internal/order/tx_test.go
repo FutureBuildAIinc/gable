@@ -54,47 +54,39 @@ func (failingEvents) Write(context.Context, outbox.Event) error {
 	return errors.New("outbox insert failed")
 }
 
-func seedForTx(t *testing.T, db *dbHandle) (customerID, productID uuid.UUID) {
+func seedForTx(t *testing.T, db *dbHandle) (customerID, productID, branchID uuid.UUID) {
 	t.Helper()
 	ctx := context.Background()
 	customerID, productID = uuid.New(), uuid.New()
-	branch := `(SELECT value::uuid FROM system_settings WHERE key = 'default_branch_id')`
+	// The branch the fixture owns: a locations row of its own carrying the
+	// rate the order needs. A migrated, unseeded database has no tax rate
+	// anywhere, and the resolver refuses an order whose branch has none, so
+	// the fixture gives its orders a branch of their own. No other
+	// package's fixture writes that row, so no other fixture can move the
+	// rate an order here resolves against.
+	branchID = testutil.OwnBranch(t, db.db, "0.088750")
 	if _, err := db.Exec(ctx, `INSERT INTO customers (id, name, account_number, primary_branch_id)
-		VALUES ($1, 'Tx Order Co', $2, `+branch+`)`, customerID, "TXO-"+uuid.NewString()[:8]); err != nil {
+		VALUES ($1, 'Tx Order Co', $2, $3)`, customerID, "TXO-"+uuid.NewString()[:8], branchID); err != nil {
 		t.Fatalf("seed customer: %v", err)
 	}
 	if _, err := db.Exec(ctx, `INSERT INTO products (id, sku, description, uom_primary, base_price)
 		VALUES ($1, $2, 'Tx stud', 'EA', 5)`, productID, "TXO-"+uuid.NewString()[:8]); err != nil {
 		t.Fatalf("seed product: %v", err)
 	}
-	// A migrated, unseeded database has no branch tax rate; the resolver
-	// refuses an order without one, so the fixtures set it. The prior value
-	// is read first and restored in cleanup, so this write does not leak a
-	// rate onto the default branch for a neighbouring test in any package.
-	var oldRate *string
-	if err := db.QueryRow(ctx, `SELECT default_tax_rate::text FROM locations
-		WHERE id = (SELECT value::uuid FROM system_settings WHERE key = 'default_branch_id')`).Scan(&oldRate); err != nil {
-		t.Fatalf("read default branch rate: %v", err)
-	}
-	if _, err := db.Exec(ctx, `UPDATE locations SET default_tax_rate = 0.088750
-		WHERE id = (SELECT value::uuid FROM system_settings WHERE key = 'default_branch_id')`); err != nil {
-		t.Fatalf("seed branch rate: %v", err)
-	}
 	t.Cleanup(func() {
-		_, _ = db.Exec(ctx, `UPDATE locations SET default_tax_rate = $1
-			WHERE id = (SELECT value::uuid FROM system_settings WHERE key = 'default_branch_id')`, oldRate)
 		_, _ = db.Exec(ctx, `DELETE FROM events_outbox WHERE entity_type = 'order' AND entity_id IN (SELECT id FROM orders WHERE customer_id = $1)`, customerID)
 		_, _ = db.Exec(ctx, `DELETE FROM order_lines WHERE order_id IN (SELECT id FROM orders WHERE customer_id = $1)`, customerID)
 		_, _ = db.Exec(ctx, `DELETE FROM orders WHERE customer_id = $1`, customerID)
 		_, _ = db.Exec(ctx, `DELETE FROM products WHERE id = $1`, productID)
 		_, _ = db.Exec(ctx, `DELETE FROM customers WHERE id = $1`, customerID)
 	})
-	return customerID, productID
+	return customerID, productID, branchID
 }
 
-func draftFor(customerID, productID uuid.UUID) *order.Draft {
+func draftFor(customerID, productID, branchID uuid.UUID) *order.Draft {
 	qty := salesdoc.One * 2
 	return &order.Draft{
+		BranchID:     &branchID,
 		CustomerID:   customerID,
 		DeliveryType: order.DeliveryPickup,
 		Lines:        []salesdoc.ParsedLine{{LineType: salesdoc.LineProduct, ProductID: &productID, Quantity: qty}},
@@ -104,8 +96,8 @@ func draftFor(customerID, productID uuid.UUID) *order.Draft {
 // pricedDraftFor is draftFor with a price override and a percent discount, so
 // the line audits (order.line_price_overridden, order.line_discounted) are
 // written inside the transaction under test.
-func pricedDraftFor(customerID, productID uuid.UUID) *order.Draft {
-	d := draftFor(customerID, productID)
+func pricedDraftFor(customerID, productID, branchID uuid.UUID) *order.Draft {
+	d := draftFor(customerID, productID, branchID)
 	price := httpx.Price(40000) // the product lists at 5.00, 50000
 	pct := salesdoc.One * 10
 	d.Lines[0].UnitPrice = &price
@@ -129,7 +121,7 @@ func countRows(t *testing.T, db *dbHandle, sql string, args ...any) int {
 func TestFailedEventWriteRollsBackEachWrite(t *testing.T) {
 	testutil.LockOutboxTables(t)
 	db := testutil.RequireDB(t)
-	customerID, productID := seedForTx(t, &dbHandle{db})
+	customerID, productID, branchID := seedForTx(t, &dbHandle{db})
 	ctx := context.Background()
 
 	// Create.
@@ -143,7 +135,7 @@ func TestFailedEventWriteRollsBackEachWrite(t *testing.T) {
 			WHERE action IN ('order.line_price_overridden', 'order.line_discounted') AND changes->>'product_id' = $1`, productID.String())
 	}
 	bad := order.NewService(order.NewRepository(db)).WithOutbox(failingEvents{}).WithTxRunner(db).WithAuditLog(auditLog)
-	if _, err := bad.Create(ctx, pricedDraftFor(customerID, productID), "tx"); err == nil {
+	if _, err := bad.Create(ctx, pricedDraftFor(customerID, productID, branchID), "tx"); err == nil {
 		t.Fatal("Create succeeded though its event could not be written")
 	}
 	if n := countRows(t, &dbHandle{db}, `SELECT count(*) FROM orders WHERE customer_id = $1`, customerID); n != 0 {
@@ -157,7 +149,7 @@ func TestFailedEventWriteRollsBackEachWrite(t *testing.T) {
 	// writes the two line audits, the control that shows the assertions
 	// above can fail.
 	good := order.NewService(order.NewRepository(db)).WithOutbox(outbox.NewWriter(db, "")).WithTxRunner(db).WithAuditLog(auditLog)
-	o, err := good.Create(ctx, pricedDraftFor(customerID, productID), "tx")
+	o, err := good.Create(ctx, pricedDraftFor(customerID, productID, branchID), "tx")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -168,7 +160,7 @@ func TestFailedEventWriteRollsBackEachWrite(t *testing.T) {
 	// Update.
 	badUpdate := order.NewService(order.NewRepository(db)).WithOutbox(failingEvents{}).WithTxRunner(db).WithAuditLog(auditLog)
 	rev := int64(1)
-	if _, err := badUpdate.Update(ctx, o.ID, pricedDraftFor(customerID, productID), order.Precondition{Revision: &rev}, "tx"); err == nil {
+	if _, err := badUpdate.Update(ctx, o.ID, pricedDraftFor(customerID, productID, branchID), order.Precondition{Revision: &rev}, "tx"); err == nil {
 		t.Fatal("Update succeeded though its event could not be written")
 	}
 	if n := lineAudits(); n != 2 {
@@ -201,11 +193,11 @@ func TestFailedEventWriteRollsBackEachWrite(t *testing.T) {
 
 	// The document number of a rolled back create is abandoned (ADR 0001
 	// section 8: sequences are not transactional, gaps are expected).
-	a, err := good.Create(ctx, draftFor(customerID, productID), "tx")
+	a, err := good.Create(ctx, draftFor(customerID, productID, branchID), "tx")
 	if err != nil {
 		t.Fatal(err)
 	}
-	b, err := good.Create(ctx, draftFor(customerID, productID), "tx")
+	b, err := good.Create(ctx, draftFor(customerID, productID, branchID), "tx")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -222,7 +214,7 @@ func TestFailedEventWriteRollsBackEachWrite(t *testing.T) {
 func TestConcurrencyPool4ThreeContenders(t *testing.T) {
 	testutil.LockOutboxTables(t)
 	db := testutil.RequireDBMaxConns(t, 4)
-	customerID, productID := seedForTx(t, &dbHandle{db})
+	customerID, productID, branchID := seedForTx(t, &dbHandle{db})
 	svc := order.NewService(order.NewRepository(db)).WithOutbox(outbox.NewWriter(db, "")).WithTxRunner(db)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -240,7 +232,7 @@ func TestConcurrencyPool4ThreeContenders(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			for j := 0; j < each; j++ {
-				o, err := svc.Create(ctx, draftFor(customerID, productID), "tx")
+				o, err := svc.Create(ctx, draftFor(customerID, productID, branchID), "tx")
 				if err != nil {
 					errs <- err
 					return
@@ -322,7 +314,7 @@ func TestConcurrencyPool4ThreeContenders(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			rev := int64(1)
-			if _, err := svc.Update(ctx, o.ID, draftFor(customerID, productID), order.Precondition{Revision: &rev}, "tx"); err != nil {
+			if _, err := svc.Update(ctx, o.ID, draftFor(customerID, productID, branchID), order.Precondition{Revision: &rev}, "tx"); err != nil {
 				t.Errorf("update: %v", err)
 				return
 			}
@@ -377,7 +369,7 @@ func (g *gatedTx) RunInTx(ctx context.Context, fn func(ctx context.Context) erro
 func TestConcurrencyPool4SaturationNeedsNoSecondConnection(t *testing.T) {
 	testutil.LockOutboxTables(t)
 	db := testutil.RequireDBMaxConns(t, 4)
-	customerID, productID := seedForTx(t, &dbHandle{db})
+	customerID, productID, branchID := seedForTx(t, &dbHandle{db})
 	events := outbox.NewWriter(db, "")
 	plain := order.NewService(order.NewRepository(db)).WithOutbox(events).WithTxRunner(db)
 
@@ -387,7 +379,7 @@ func TestConcurrencyPool4SaturationNeedsNoSecondConnection(t *testing.T) {
 	const contenders = 4
 	var seed []*order.Order
 	for i := 0; i < 2*contenders; i++ {
-		o, err := plain.Create(ctx, draftFor(customerID, productID), "tx")
+		o, err := plain.Create(ctx, draftFor(customerID, productID, branchID), "tx")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -420,11 +412,11 @@ func TestConcurrencyPool4SaturationNeedsNoSecondConnection(t *testing.T) {
 
 	rev := int64(1)
 	phase("create", func(svc *order.Service, i int) error {
-		_, err := svc.Create(ctx, draftFor(customerID, productID), "tx")
+		_, err := svc.Create(ctx, draftFor(customerID, productID, branchID), "tx")
 		return err
 	})
 	phase("update", func(svc *order.Service, i int) error {
-		_, err := svc.Update(ctx, seed[i].ID, draftFor(customerID, productID), order.Precondition{Revision: &rev}, "tx")
+		_, err := svc.Update(ctx, seed[i].ID, draftFor(customerID, productID, branchID), order.Precondition{Revision: &rev}, "tx")
 		return err
 	})
 	phase("transition", func(svc *order.Service, i int) error {
@@ -443,11 +435,11 @@ func TestConcurrencyPool4SaturationNeedsNoSecondConnection(t *testing.T) {
 func TestRepositoryBranchWall(t *testing.T) {
 	testutil.LockOutboxTables(t) // this test writes events_outbox rows
 	db := testutil.RequireDB(t)
-	customerID, productID := seedForTx(t, &dbHandle{db})
+	customerID, productID, branchID := seedForTx(t, &dbHandle{db})
 	ctx := context.Background()
 	repo := order.NewRepository(db)
 	svc := order.NewService(repo).WithOutbox(outbox.NewWriter(db, "")).WithTxRunner(db)
-	o, err := svc.Create(ctx, draftFor(customerID, productID), "tx")
+	o, err := svc.Create(ctx, draftFor(customerID, productID, branchID), "tx")
 	if err != nil {
 		t.Fatal(err)
 	}

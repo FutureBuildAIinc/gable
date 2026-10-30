@@ -7,6 +7,7 @@ import { routes } from './routes.ts';
 import { branchContext } from './services/BranchContext.ts';
 import { initDates } from './lib/dates.ts';
 import { bootFramedMode, orphanedAtBoot } from './lib/framed.ts';
+import { registerPosServiceWorker } from './lib/pos-sw.ts';
 import './app.ts';
 import { initTheme } from '@gable/design-system';
 import { authCustody } from '@gable/auth';
@@ -25,6 +26,7 @@ const orphaned = orphanedAtBoot();
 const root = document.getElementById('root');
 if (root && !orphaned) {
   bootFramedMode();
+  void registerPosServiceWorker();
   root.innerHTML = '<gable-app></gable-app>';
 } else if (root && orphaned) {
   root.innerHTML =

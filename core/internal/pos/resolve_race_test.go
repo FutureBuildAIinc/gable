@@ -91,7 +91,7 @@ func TestThreeConcurrentResolutionsOfOneClaimSettleItOnce(t *testing.T) {
 	}
 	// the books moved at most once and the ties hold whichever way it went
 	done := countOf(t, f.db, `SELECT count(*) FROM pos_refund_intents WHERE id = $1 AND state = 'DONE'`, intentID)
-	refunds := countOf(t, f.db, `SELECT count(*) FROM payment_refunds`)
+	refunds := f.counterRefunds(t)
 	if done != refunds {
 		t.Errorf("%d booked refunds beside a claim settled DONE %d times: the money follows the winning outcome alone", refunds, done)
 	}

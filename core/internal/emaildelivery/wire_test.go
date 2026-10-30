@@ -121,7 +121,7 @@ func TestEmailDeliveriesListAndFilters(t *testing.T) {
 	if found != 1 {
 		t.Errorf("status filter did not find the failed row once: %s", raw)
 	}
-	for _, bad := range []string{"?bogus=1", "?document_type=Invoice", "?status=queued", "?limit=0", "?cursor=zzz"} {
+	for _, bad := range []string{"?bogus=1", "?document_type=Invoice", "?status=mailed", "?limit=0", "?cursor=zzz"} {
 		if code, _, raw := f.get("/api/v1/email-deliveries" + bad); code != http.StatusBadRequest {
 			t.Errorf("%s: %d %s, want 400", bad, code, raw)
 		}

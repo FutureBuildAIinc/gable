@@ -93,9 +93,9 @@ func TestARStatementUnappliedListFollowsTheWallAndTheBalanceDoesNot(t *testing.T
 	other := uuid.New()
 	w.exec(`INSERT INTO locations (id, type, code) VALUES ($1, 'BRANCH', $2)`, other, "UW-"+other.String()[:8])
 	t.Cleanup(func() {
-		w.exec(`UPDATE payments SET branch_id = `+arBranch+` WHERE branch_id = $1`, other)
-		w.exec(`UPDATE gl_journal_lines SET branch_id = `+arBranch+` WHERE branch_id = $1`, other)
-		w.exec(`UPDATE gl_journal_entries SET branch_id = `+arBranch+` WHERE branch_id = $1`, other)
+		w.exec(`UPDATE payments SET branch_id = `+w.branchSQL()+` WHERE branch_id = $1`, other)
+		w.exec(`UPDATE gl_journal_lines SET branch_id = `+w.branchSQL()+` WHERE branch_id = $1`, other)
+		w.exec(`UPDATE gl_journal_entries SET branch_id = `+w.branchSQL()+` WHERE branch_id = $1`, other)
 		w.exec(`DELETE FROM locations WHERE id = $1`, other)
 	})
 	otherPay := uuid.New()
