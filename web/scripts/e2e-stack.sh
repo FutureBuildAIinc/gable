@@ -35,7 +35,7 @@ up)
   mkdir -p "$E2E_DIR"
   sed "s/__CORE_PORT__/$CORE_PORT/" "$HERE/e2e/gable-api.conf" > "$E2E_DIR/gable-api.conf"
 
-  (cd "$HERE/../core" && go build -o "$E2E_DIR/core" ./cmd/core)
+  (cd "$HERE/../core" && go build -tags devauth -o "$E2E_DIR/core" ./cmd/core)
   AUTH_MODE=dev PORT="$CORE_PORT" DATABASE_URL="$DATABASE_URL" RATE_LIMIT_PER_MINUTE=5000 \
     POS_SCALE_SIMULATOR=1 \
     setsid "$E2E_DIR/core" serve >"$E2E_DIR/core.log" 2>&1 &

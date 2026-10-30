@@ -97,6 +97,9 @@ every visitor full administrative access.
 **Rules:**
 
 1. **Never set `AUTH_MODE=dev` on a public hostname or a production deploy.**
+   A binary built without the `devauth` tag (the published image, and any
+   build that does not pass `-tags devauth`) refuses to start with
+   `AUTH_MODE=dev`, so this setting cannot be switched on by configuration alone.
 2. Production must run with `AUTH_MODE` unset (or any value other than `dev`).
    The backend is **fail-closed**: with `AUTH_MODE` ≠ `dev` it *requires*
    `JWKS_URL` and refuses to start without it, and it requires `CORS_ORIGINS`
