@@ -6,9 +6,11 @@
  * demo-people.json, read by seed-demo-people.sh) are the persona cards on the
  * door: same subject, name, role and yards. A card the seed does not know
  * could not sign in for real, so the two lists must not drift apart.
+ *
+ * @vitest-environment node
  */
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -63,6 +65,49 @@ describe('the seeded demo people', () => {
         expect(run.status, String(pw)).toBe(64);
         expect(run.stderr).toContain('DEMO_PEOPLE_PASSWORD');
       }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  // P3-1: the password never sits on argv (/proc/<pid>/cmdline). A stand-in
+  // curl records its arguments and its stdin; the password must be only in
+  // the latter.
+  it('keep the password off every command line', () => {
+    const password = 'unit-test-password-0123456789';
+    const dir = mkdtempSync(join(tmpdir(), 'seed-demo-people-'));
+    try {
+      const bin = join(dir, 'bin');
+      spawnSync('mkdir', [bin]);
+      const argvLog = join(dir, 'argv.log');
+      const stdinLog = join(dir, 'stdin.log');
+      writeFileSync(
+        join(bin, 'curl'),
+        [
+          '#!/usr/bin/env bash',
+          `printf '%s\\n' "$@" >> '${argvLog}'`,
+          `cat >> '${stdinLog}'`,
+          'method=POST; out=/dev/null',
+          'while [ $# -gt 0 ]; do case "$1" in -X) method="$2";; -o) out="$2";; esac; shift; done',
+          'echo "{}" > "$out"',
+          '[ "$method" = PATCH ] && printf 200 || printf 201',
+          '',
+        ].join('\n'),
+      );
+      chmodSync(join(bin, 'curl'), 0o755);
+      const config = join(dir, 'config.json');
+      writeFileSync(
+        config,
+        JSON.stringify({ endpoint: 'http://127.0.0.1:1', projectId: 'p', teamId: 't', apiKey: 'k' }),
+      );
+      const run = spawnSync('bash', [SEED_SCRIPT, '--config', config], {
+        env: { PATH: `${bin}:${process.env.PATH}`, DEMO_PEOPLE_PASSWORD: password },
+        encoding: 'utf8',
+      });
+      expect(run.status, run.stderr).toBe(0);
+      expect(readFileSync(argvLog, 'utf8')).not.toContain(password);
+      expect(readFileSync(stdinLog, 'utf8')).toContain(password);
+      expect(run.stdout + run.stderr).not.toContain(password);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

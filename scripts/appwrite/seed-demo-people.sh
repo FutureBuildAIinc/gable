@@ -14,7 +14,10 @@
 #
 # The demo people's password comes from DEMO_PEOPLE_PASSWORD in the
 # environment only (FROM-PRINCIPAL item 329): the script holds no default and
-# refuses to run without one of at least 12 characters. It is never printed.
+# refuses to run without one of at least 12 characters. It is never printed and
+# never sits on a command line: jq reads it from its environment
+# ($ENV.DEMO_PEOPLE_PASSWORD) and curl takes each body from a pipe
+# (--data-binary @-), so /proc/<pid>/cmdline never shows it.
 #
 # What it does not do: it does not link a user to its Gable staff row or to the
 # yard grants in user_locations. Those key on the Appwrite user id and wait on
@@ -31,10 +34,11 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 [[ -n "$CONFIG" && -f "$CONFIG" ]] || { echo "seed-demo-people.sh: --config FILE (setup.sh's output) is required" >&2; exit 64; }
-PASSWORD="${DEMO_PEOPLE_PASSWORD:-}"
-(( ${#PASSWORD} >= 12 )) || { echo "seed-demo-people.sh: DEMO_PEOPLE_PASSWORD (at least 12 characters) must be set in the environment" >&2; exit 64; }
+: "${DEMO_PEOPLE_PASSWORD:=}"
+(( ${#DEMO_PEOPLE_PASSWORD} >= 12 )) || { echo "seed-demo-people.sh: DEMO_PEOPLE_PASSWORD (at least 12 characters) must be set in the environment" >&2; exit 64; }
 command -v curl >/dev/null || { echo "seed-demo-people.sh: curl not found" >&2; exit 69; }
 command -v jq >/dev/null || { echo "seed-demo-people.sh: jq not found" >&2; exit 69; }
+export DEMO_PEOPLE_PASSWORD
 
 # Invented, on a reserved domain.
 DOMAIN="demo.gable.example"
@@ -52,15 +56,20 @@ req() {
   local args=(-sS -X "$method" -H "Content-Type: application/json" -o "$RESP" -w "%{http_code}")
   local h
   for h in "${KEY[@]}"; do args+=(-H "$h"); done
-  [[ -n "$body" ]] && args+=(-d "$body")
-  curl "${args[@]}" "$ENDPOINT$path"
+  if [[ -n "$body" ]]; then
+    # printf is a builtin, so the body (it can carry the password) is on no
+    # command line; curl reads it from the pipe.
+    printf '%s' "$body" | curl "${args[@]}" --data-binary @- "$ENDPOINT$path"
+  else
+    curl "${args[@]}" "$ENDPOINT$path"
+  fi
 }
 die() { echo "seed-demo-people.sh: $1 (status ${2:-?}): $(cat "$RESP" 2>/dev/null)" >&2; exit 1; }
 
 while IFS=$'\t' read -r uid name role; do
   email="$uid@$DOMAIN"
-  code="$(req POST /v1/users "$(jq -nc --arg id "$uid" --arg email "$email" --arg pw "$PASSWORD" --arg name "$name" \
-    '{userId:$id,email:$email,password:$pw,name:$name}')")"
+  code="$(req POST /v1/users "$(jq -nc --arg id "$uid" --arg email "$email" --arg name "$name" \
+    '{userId:$id,email:$email,password:$ENV.DEMO_PEOPLE_PASSWORD,name:$name}')")"
   [[ "$code" == 201 || "$code" == 409 ]] || die "user create failed for $uid" "$code"
 
   code="$(req PATCH "/v1/users/$uid/verification" '{"emailVerification":true}')"
