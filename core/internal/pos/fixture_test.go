@@ -49,6 +49,7 @@ type fixture struct {
 	srv          *httptest.Server
 	service      *pos.Service
 	customerID   uuid.UUID
+	customerName string
 	productID    uuid.UUID
 	kitID        uuid.UUID
 	sku          string
@@ -149,8 +150,12 @@ func newCounterFixture(t *testing.T, db *database.DB, opts ...func(*fixture)) *f
 	mustExec(t, db, `INSERT INTO locations (id, type, code, name, timezone, default_tax_rate, cash_rounding_mode)
 		VALUES ($1, 'BRANCH', $2, 'Counter own branch', 'America/New_York', 0.088750, 'OFF')`,
 		f.branchID, "BR-"+f.branchID.String()[:8])
-	mustExec(t, db, `INSERT INTO customers (id, name, account_number, primary_branch_id) VALUES ($1, 'Counter Co', $2, $3)`,
-		f.customerID, "WPOS-"+uuid.NewString()[:8], f.branchID)
+	// the customer's name carries a token of this fixture, so a lookup by
+	// name can never meet another run's customer (the lookup tests assert on
+	// their own id, never on a global name count)
+	f.customerName = "Counter Co " + uuid.NewString()[:8]
+	mustExec(t, db, `INSERT INTO customers (id, name, account_number, primary_branch_id) VALUES ($1, $2, $3, $4)`,
+		f.customerID, f.customerName, "WPOS-"+uuid.NewString()[:8], f.branchID)
 	mustExec(t, db, `INSERT INTO products (id, sku, description, uom_primary, base_price, average_unit_cost) VALUES ($1, $2, '2x4x8 SPF', 'PCS', 5.5, 3.25)`,
 		f.productID, f.sku)
 	mustExec(t, db, `INSERT INTO products (id, sku, description, uom_primary, base_price, average_unit_cost, is_kit) VALUES ($1, $2, 'bundle kit', 'EA', 11.00, 6.50, TRUE)`,
@@ -366,27 +371,27 @@ func (f *fixture) cleanup() {
 		OR entity_id::text IN `+returnsTxt+`
 		OR entity_id::text IN `+sessionsTxt+`
 		OR entity_id::text IN (SELECT id::text FROM till_movements WHERE branch_id = $1)
-		OR entity_id::text IN (SELECT id::text FROM till_day_closes WHERE branch_id = $1)`,
+		OR entity_id::text IN (SELECT id::text FROM till_day_closes WHERE branch_id = $1)
+		OR entity_id = $1`,
 		f.branchID, f.customerID, f.register)
-	exec(`DELETE FROM ar_applications WHERE invoice_id IN `+invs+` OR payment_id IN `+pays+` OR credit_memo_id IN `+cms,
-		f.branchID, f.customerID, f.register)
-	exec(`DELETE FROM payment_refunds WHERE payment_id IN `+pays+` OR credit_memo_id IN `+cms,
-		f.branchID, f.customerID, f.register)
-	// the subledger: the fixture's own customer's rows, and the walk-in
-	// customer's rows that name one of the fixture's own documents (the walk
-	// in row itself is shared by every counter in the deployment, so its rows
-	// are named by the documents and not by the customer)
-	// The walk-in customer's balance follows its subledger: the rows the
-	// fixture's own documents made go, and the balance falls by exactly what
-	// they carried. The walk-in row is shared by every counter in the
-	// deployment, so the balance moves by the amount and is never reset.
+	// the subledger goes before the applications and the refunds it names:
+	// once those rows are gone the walk-in scope below could not find them,
+	// and the fixture's sales would leave orphaned rows on the shared
+	// customer. The walk-in row itself is shared by every counter in the
+	// deployment, so its rows are named by the documents and not by the
+	// customer; its balance follows its subledger down by exactly what the
+	// deleted rows carried and is never reset.
 	exec(`UPDATE customers SET balance_due = balance_due - COALESCE((
 		SELECT SUM(amount)::numeric / 100 FROM customer_transactions
 		WHERE customer_id IN `+walkIn+` AND reference_id IN `+docs+`), 0)
 		WHERE id IN (SELECT id FROM customers WHERE account_number = 'WALK-IN')`,
 		f.branchID, f.customerID, f.register)
 	exec(`DELETE FROM customer_transactions WHERE customer_id = $2
-		OR (customer_id IN `+walkIn+` AND reference_id IN `+docs+`)`,
+	OR (customer_id IN `+walkIn+` AND reference_id IN `+docs+`)`,
+		f.branchID, f.customerID, f.register)
+	exec(`DELETE FROM ar_applications WHERE invoice_id IN `+invs+` OR payment_id IN `+pays+` OR credit_memo_id IN `+cms,
+		f.branchID, f.customerID, f.register)
+	exec(`DELETE FROM payment_refunds WHERE payment_id IN `+pays+` OR credit_memo_id IN `+cms,
 		f.branchID, f.customerID, f.register)
 	exec(`DELETE FROM payment_terminal_lost_items WHERE branch_id = $1`, f.branchID)
 	exec(`DELETE FROM payment_terminal_intents WHERE branch_id = $1`, f.branchID)
