@@ -23,7 +23,6 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
-	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -363,14 +362,87 @@ func assertKeysWithin(t *testing.T, what string, body []byte, allowed []string) 
 	}
 }
 
-// assertNoNumbers fails when any of the numbers appears as a whole number in the bytes.
+// numberLeaks decodes the body as JSON and walks the whole document. It
+// returns the path of every value that is one of the numbers: a JSON number
+// equal to it, or a string that is wholly that figure (digits with an optional
+// dollar sign and thousands commas). Ids and other text never match, so a
+// UUID that happens to contain the digits is not a leak.
+func numberLeaks(body []byte, nums ...int64) ([]string, error) {
+	dec := json.NewDecoder(bytes.NewReader(body))
+	dec.UseNumber()
+	var doc any
+	if err := dec.Decode(&doc); err != nil {
+		return nil, err
+	}
+	want := map[string]int64{}
+	for _, n := range nums {
+		want[fmt.Sprint(n)] = n
+	}
+	var hits []string
+	var walk func(path string, v any)
+	walk = func(path string, v any) {
+		switch x := v.(type) {
+		case map[string]any:
+			for k, c := range x {
+				walk(path+"."+k, c)
+			}
+		case []any:
+			for i, c := range x {
+				walk(fmt.Sprintf("%s[%d]", path, i), c)
+			}
+		case json.Number:
+			if n, ok := want[x.String()]; ok {
+				hits = append(hits, fmt.Sprintf("%s = %d", path, n))
+			}
+		case string:
+			fig := strings.ReplaceAll(strings.TrimPrefix(strings.TrimSpace(x), "$"), ",", "")
+			if _, ok := want[fig]; ok {
+				hits = append(hits, fmt.Sprintf("%s = %q", path, x))
+			}
+		}
+	}
+	walk("$", doc)
+	sort.Strings(hits)
+	return hits, nil
+}
+
+// assertNoNumbers fails when any of the numbers is a value anywhere in the
+// JSON body (see numberLeaks).
 func assertNoNumbers(t *testing.T, what string, body []byte, nums ...int64) {
 	t.Helper()
-	for _, n := range nums {
-		re := regexp.MustCompile(fmt.Sprintf(`(^|[^0-9.])%d([^0-9]|$)`, n))
-		if re.Match(body) {
-			t.Errorf("%s carries the number %d: %s", what, n, truncate(body))
+	hits, err := numberLeaks(body, nums...)
+	if err != nil {
+		t.Fatalf("%s: the body is not JSON: %v: %s", what, err, truncate(body))
+	}
+	for _, h := range hits {
+		t.Errorf("%s carries a figure at %s: %s", what, h, truncate(body))
+	}
+}
+
+func TestAssertNoNumbers_ValuesNotSubstrings(t *testing.T) {
+	markup := []int64{6500}
+	cases := []struct {
+		name string
+		body string
+		leak bool
+	}{
+		{"a uuid that contains the digits", `{"id":"128a260b-6500-4c1e-9a77-0d2f5b6c7e8f","total_cents":101050}`, false},
+		{"a quantity of other digits", `{"lines":[{"quantity":"65","price_cents":55000}]}`, false},
+		{"the markup in a numeric field", `{"lines":[{"id":"x","markup_cents":6500}]}`, true},
+		{"the markup as a price string", `{"lines":[{"price":"$6,500"}]}`, true},
+		{"the markup as a bare string", `{"a":{"b":["6500"]}}`, true},
+	}
+	for _, c := range cases {
+		hits, err := numberLeaks([]byte(c.body), markup...)
+		if err != nil {
+			t.Fatalf("%s: %v", c.name, err)
 		}
+		if (len(hits) > 0) != c.leak {
+			t.Errorf("%s: leak=%v hits=%v", c.name, len(hits) > 0, hits)
+		}
+	}
+	if _, err := numberLeaks([]byte("not json"), 6500); err == nil {
+		t.Errorf("a body that is not JSON must be an error, not a pass")
 	}
 }
 

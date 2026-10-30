@@ -10,9 +10,11 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 )
 
@@ -174,14 +176,30 @@ func (c *Client) GetUser(ctx context.Context, id string) (User, error) {
 }
 
 // ListMemberships returns the user's membership in the team; found is false
-// when the user holds none. Memberships of an API created team carry the
-// confirm flag as set at creation.
+// only when Appwrite answered for that user alone and holds none. It asks for
+// the one user (a team may span many pages); an answer that is not the whole
+// of what was asked (more members than the page holds, the user not on it) is
+// an error, never a definite miss. Memberships of an API created team carry
+// the confirm flag as set at creation.
 func (c *Client) ListMemberships(ctx context.Context, teamID, userID string) (m Membership, found bool, err error) {
-	raw, err := c.do(ctx, http.MethodGet, "/v1/teams/"+teamID+"/memberships?limit=100", nil, true, "")
+	// Appwrite 1.5 and later take each query as a JSON object.
+	byUser, err := json.Marshal(map[string]any{"method": "equal", "attribute": "userId", "values": []string{userID}})
+	if err != nil {
+		return Membership{}, false, err
+	}
+	pageSize, err := json.Marshal(map[string]any{"method": "limit", "values": []int{25}})
+	if err != nil {
+		return Membership{}, false, err
+	}
+	q := url.Values{}
+	q.Add("queries[]", string(byUser))
+	q.Add("queries[]", string(pageSize))
+	raw, err := c.do(ctx, http.MethodGet, "/v1/teams/"+url.PathEscape(teamID)+"/memberships?"+q.Encode(), nil, true, "")
 	if err != nil {
 		return Membership{}, false, err
 	}
 	var out struct {
+		Total       int          `json:"total"`
 		Memberships []Membership `json:"memberships"`
 	}
 	if err := json.Unmarshal(raw, &out); err != nil {
@@ -191,6 +209,9 @@ func (c *Client) ListMemberships(ctx context.Context, teamID, userID string) (m 
 		if candidate.UserID == userID {
 			return candidate, true, nil
 		}
+	}
+	if out.Total > len(out.Memberships) {
+		return Membership{}, false, errors.New("appwrite: membership list was not read whole")
 	}
 	return Membership{}, false, nil
 }

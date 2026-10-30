@@ -1336,7 +1336,13 @@ The order is by kind, whatever document the path names:
    order or sale row and take inventory
    (step 6) after it, and the back order worker, which does not read credit,
    never takes it; the customer row (step 7) is left to the AR core as before,
-   because locking it here would put a step 7 lock before step 6;
+   because locking it here would put a step 7 lock before step 6. An offline
+   posting (ADR 0011 section 3.2) takes it after 0a, the replaced cart
+   (step 1) and the session (1b), and before it inserts the offline sale
+   row, whose customer foreign key takes the customer row `FOR KEY SHARE`:
+   holding that share while waiting here would cross a live completion,
+   which holds this lock and then takes the customer row `FOR UPDATE` at
+   step 7;
 2. payments, in id order;
 3. credit memos, in id order;
 4. invoices, in id order (a credit memo post locks the invoice it names

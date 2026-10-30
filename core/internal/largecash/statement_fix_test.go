@@ -69,7 +69,7 @@ func addEarlierCash(t *testing.T, db *database.DB, eventID uuid.UUID, cents int6
 func TestTheStatementNeedsAFiledCrossing(t *testing.T) {
 	db := testutil.RequireDB(t)
 	ctx := context.Background()
-	svc := largecash.NewService(db, nil, "")
+	svc := keyedService(t, db)
 	eventID := seedCrossing(t, db, svc, crossingOptions{country: "US",
 		cashCents: largecash.ThresholdCents + 200_000, payer: usPayer()})
 	cleanStatementRows(t, db, eventID)
@@ -98,7 +98,7 @@ func TestTheStatementNeedsAFiledCrossing(t *testing.T) {
 func TestAVoluntaryFilingIsRefusedOnAReportableCrossing(t *testing.T) {
 	db := testutil.RequireDB(t)
 	ctx := context.Background()
-	svc := largecash.NewService(db, nil, "")
+	svc := keyedService(t, db)
 	eventID := seedCrossing(t, db, svc, crossingOptions{country: "US",
 		cashCents: largecash.ThresholdCents + 200_000, payer: usPayer()})
 	cleanStatementRows(t, db, eventID)
@@ -120,7 +120,7 @@ func TestAVoluntaryFilingIsRefusedOnAReportableCrossing(t *testing.T) {
 func TestTheStatementCarriesTheDealersContactAndTheAggregateOfTheYear(t *testing.T) {
 	db := testutil.RequireDB(t)
 	ctx := context.Background()
-	svc := largecash.NewService(db, nil, "")
+	svc := keyedService(t, db)
 	eventID := seedCrossing(t, db, svc, crossingOptions{country: "US", name: "Yard Contact Branch",
 		cashCents: largecash.ThresholdCents + 200_000, payer: usPayer()})
 	cleanStatementRows(t, db, eventID)
@@ -187,7 +187,7 @@ func TestTheStatementCarriesTheDealersContactAndTheAggregateOfTheYear(t *testing
 func TestTheStatementYearIsTheBranchesOwn(t *testing.T) {
 	db := testutil.RequireDB(t)
 	ctx := context.Background()
-	svc := largecash.NewService(db, nil, "")
+	svc := keyedService(t, db)
 	eventID := seedCrossing(t, db, svc, crossingOptions{country: "US",
 		cashCents: largecash.ThresholdCents + 200_000, payer: usPayer()})
 	cleanStatementRows(t, db, eventID)
@@ -215,7 +215,7 @@ func TestTheStatementYearIsTheBranchesOwn(t *testing.T) {
 func TestThreeManagersIssuingTheSameStatementHaveOneWinner(t *testing.T) {
 	db := testutil.RequireDBMaxConns(t, 4)
 	ctx := context.Background()
-	svc := largecash.NewService(db, nil, "")
+	svc := keyedService(t, db)
 	eventID := seedCrossing(t, db, svc, crossingOptions{country: "US",
 		cashCents: largecash.ThresholdCents + 200_000, payer: usPayer()})
 	cleanStatementRows(t, db, eventID)
@@ -267,7 +267,7 @@ func TestThreeManagersIssuingTheSameStatementHaveOneWinner(t *testing.T) {
 func TestAVoluntaryFilingRowIsStillNeverStated(t *testing.T) {
 	db := testutil.RequireDB(t)
 	ctx := context.Background()
-	svc := largecash.NewService(db, nil, "")
+	svc := keyedService(t, db)
 	eventID := seedCrossing(t, db, svc, crossingOptions{country: "US",
 		cashCents: largecash.ThresholdCents + 200_000, payer: usPayer()})
 	cleanStatementRows(t, db, eventID)

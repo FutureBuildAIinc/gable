@@ -61,3 +61,13 @@ export function lostKindWords(kind: TerminalLostItem['kind']): string {
         case 'void': return 'a card void';
     }
 }
+
+/**
+ * The counter's words when a card is asked for more than is owed on it
+ * (CP-03), or null when the amount fits. Change comes out of cash only, so the
+ * card is held to the remainder; the server refuses the same case.
+ */
+export function cardOverWords(amountCents: number, owedCents: number, owedMoney: string): string | null {
+  if (amountCents <= owedCents) return null;
+  return `The card can be charged at most ${owedMoney}: the rest is cash change.`;
+}
