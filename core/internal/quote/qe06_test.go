@@ -250,6 +250,84 @@ func TestQE06_ClientPriceIgnored(t *testing.T) {
 	}
 }
 
+// TestQE06_ConfiguredLineConvertsToSpecialOrderPO proves the configured item
+// reaches the vendor: the quote line converts to an order line that carries
+// the configuration and the short description, and the special order purchase
+// order raised for it names the item the way the vendor reads it.
+func TestQE06_ConfiguredLineConvertsToSpecialOrderPO(t *testing.T) {
+	f := newConfiguredQuoteFixture(t)
+	doorType := f.option(t, "door_type", "Panel Door", 25000, 15000, 0, 0)
+	material := f.option(t, "material", "Mahogany", 0, 0, 15000, 8000)
+
+	item := f.configuredItem(t, map[string]string{
+		doorType: "Panel Door",
+		material: "Mahogany",
+	})
+	short := item.Description
+
+	code, out := f.do(t, http.MethodPost, "/api/v1/quotes", map[string]any{
+		"customer_id":   f.customerID.String(),
+		"branch_id":     f.branchID.String(),
+		"delivery_type": "pickup",
+		"lines": []map[string]any{{
+			"product_id":         item.ProductID.String(),
+			"sku":                item.SKU,
+			"description":        short,
+			"quantity":           "1",
+			"uom":                "EA",
+			"configuration_json": json.RawMessage(item.Configuration),
+		}},
+	})
+	if code != http.StatusCreated {
+		t.Fatalf("create the quote = %d: %v", code, out)
+	}
+	quoteID, _ := out["id"].(string)
+
+	// The convert creates the order, and the order line carries the
+	// configuration and the short description.
+	code, out = f.do(t, http.MethodPost, "/api/v1/quotes/"+quoteID+"/convert", nil, "If-Match", `"1"`)
+	if code != http.StatusCreated {
+		t.Fatalf("convert the quote = %d: %v", code, out)
+	}
+	orderID, _ := out["id"].(string)
+	orderLines, _ := out["lines"].([]any)
+	if len(orderLines) != 1 {
+		t.Fatalf("the order has %d lines, want 1", len(orderLines))
+	}
+	orderLine, _ := orderLines[0].(map[string]any)
+	if orderLine["configuration_json"] == nil {
+		t.Error("the order line carries no configuration")
+	}
+	if desc, _ := orderLine["description"].(string); desc != short {
+		t.Errorf("the order line's description = %q, want the short description %q", desc, short)
+	}
+	if special, _ := orderLine["is_special_order"].(bool); !special {
+		t.Error("the order line is not a special order line: a configured item is made to order, never served from stock")
+	}
+
+	// The convert raises the vendor purchase order for the special order
+	// line, and the purchase order line names the item the way the vendor
+	// reads it: the SKU and the short description.
+	ctx := context.Background()
+	var orderLineID uuid.UUID
+	if err := f.db.Pool.QueryRow(ctx,
+		`SELECT id FROM order_lines WHERE order_id = $1`, orderID).Scan(&orderLineID); err != nil {
+		t.Fatalf("read the order line: %v", err)
+	}
+	var poDescription, poProduct string
+	if err := f.db.Pool.QueryRow(ctx,
+		`SELECT l.description, l.product_id::text FROM purchase_order_lines l WHERE l.linked_so_line_id = $1`,
+		orderLineID).Scan(&poDescription, &poProduct); err != nil {
+		t.Fatalf("read the purchase order line: %v", err)
+	}
+	if !strings.Contains(poDescription, short) {
+		t.Errorf("the purchase order line's description = %q, want it to carry the short description %q", poDescription, short)
+	}
+	if poProduct != item.ProductID.String() {
+		t.Errorf("the purchase order line names product %s, want the configured product %s", poProduct, item.ProductID)
+	}
+}
+
 // TestQE06_ConfigStoredOnLine proves the configuration rides the line: it is
 // stored on the quote line and carried to the order line, and every document
 // shows the item as a short description.

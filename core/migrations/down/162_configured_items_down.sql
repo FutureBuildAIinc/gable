@@ -15,6 +15,10 @@
 -- the sum over its selected options of their base and their adjustment, so
 -- rolling the bases back to zero changes what every configured item costs
 -- until the options are seeded again. The down script says so and stops.
+--
+-- The schema_migrations row is removed by hand, so the migration can apply
+-- again:
+--   psql "$DATABASE_URL" -c "DELETE FROM schema_migrations WHERE version = '162_configured_items.sql';"
 
 -- The lines that carry a configuration must lose it first.
 ALTER TABLE quote_lines DROP COLUMN IF EXISTS configuration_json;

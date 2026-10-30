@@ -19,6 +19,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/gablelbm/gable/internal/configurator"
 	"github.com/gablelbm/gable/internal/millwork"
@@ -37,9 +38,21 @@ type configuredFixture struct {
 }
 
 func newConfiguredFixture(t *testing.T) *configuredFixture {
+	return newConfiguredFixtureAt(t, 0)
+}
+
+// newConfiguredFixtureAt builds the same fixture over a pool of the caller's
+// choosing: the concurrency proof runs it at pool size 4, so a write that
+// waited on a second pool connection would show.
+func newConfiguredFixtureAt(t *testing.T, maxConns int32) *configuredFixture {
 	t.Helper()
 	t.Setenv("AUTH_MODE", "dev")
-	db := testutil.RequireDB(t)
+	var db *database.DB
+	if maxConns > 0 {
+		db = testutil.RequireDBMaxConns(t, maxConns)
+	} else {
+		db = testutil.RequireDB(t)
+	}
 	f := &configuredFixture{t: t, db: db, prefix: "qe6" + uuid.NewString()[:8]}
 
 	productSvc := product.NewService(product.NewRepository(db))
@@ -145,10 +158,10 @@ func TestQE06_BuildSKUServerPrice(t *testing.T) {
 	}
 }
 
-// TestQE06_SameConfigSameSKU proves the SKU is the configuration's: the same
-// configuration always gives the same NS- SKU and the same product row, and
-// two concurrent creates of one SKU make one row.
-func TestQE06_SameConfigSameSKU(t *testing.T) {
+// TestQE06_SameConfigSameProduct proves the product row is the
+// configuration's: the same configuration always gives the same NS- SKU and
+// the same product row.
+func TestQE06_SameConfigSameProduct(t *testing.T) {
 	f := newConfiguredFixture(t)
 	species := f.option(t, "species", "SYP", 800, 500, 0, 0)
 	body := `{"product_type":"Lumber","selections":{"` + species + `":"SYP"}}`
@@ -171,15 +184,26 @@ func TestQE06_SameConfigSameSKU(t *testing.T) {
 	if !strings.HasPrefix(sku, "NS-LBR-") {
 		t.Errorf("the SKU = %q, want the NS- form", sku)
 	}
+}
 
-	// Two concurrent creates of one SKU make one row: the SKU is unique and
-	// the loser of the race reads the row the winner wrote.
-	const racers = 6
+// TestQE06_ConcurrentBuildSKUOneRow proves the row is made once: three
+// contenders building one configuration at pool size 4 all read the same
+// product row, and the SKU carries one row in the products table.
+func TestQE06_ConcurrentBuildSKUOneRow(t *testing.T) {
+	f := newConfiguredFixtureAt(t, 4)
+	species := f.option(t, "species", "SYP", 800, 500, 0, 0)
+	body := `{"product_type":"Lumber","selections":{"` + species + `":"SYP"}}`
+
+	const contenders = 3
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
 	var wg sync.WaitGroup
-	ids := make([]string, racers)
-	codes := make([]int, racers)
-	wg.Add(racers)
-	for i := 0; i < racers; i++ {
+	ids := make([]string, contenders)
+	skus := make([]string, contenders)
+	codes := make([]int, contenders)
+	wg.Add(contenders)
+	for i := 0; i < contenders; i++ {
 		go func(i int) {
 			defer wg.Done()
 			code, out := f.post(t, "/api/v1/configurator/build-sku", body)
@@ -187,31 +211,40 @@ func TestQE06_SameConfigSameSKU(t *testing.T) {
 			if id, ok := out["product_id"].(string); ok {
 				ids[i] = id
 			}
+			if sku, ok := out["sku"].(string); ok {
+				skus[i] = sku
+			}
 		}(i)
 	}
 	wg.Wait()
 	for i := range codes {
 		if codes[i] != http.StatusOK {
-			t.Fatalf("racer %d = %d", i, codes[i])
+			t.Fatalf("contender %d = %d", i, codes[i])
 		}
 		if ids[i] != ids[0] {
-			t.Errorf("racer %d read product row %s, want %s", i, ids[i], ids[0])
+			t.Errorf("contender %d read product row %s, want %s", i, ids[i], ids[0])
 		}
+		if skus[i] != skus[0] {
+			t.Errorf("contender %d read SKU %s, want %s", i, skus[i], skus[0])
+		}
+	}
+	if ctx.Err() != nil {
+		t.Fatalf("three contenders at pool size 4 did not finish: a write waited on a second pool connection")
 	}
 	var rows int
 	if err := f.db.Pool.QueryRow(context.Background(),
-		`SELECT COUNT(*) FROM products WHERE sku = $1`, sku).Scan(&rows); err != nil {
+		`SELECT COUNT(*) FROM products WHERE sku = $1`, skus[0]).Scan(&rows); err != nil {
 		t.Fatalf("count the product rows: %v", err)
 	}
 	if rows != 1 {
-		t.Errorf("the SKU %q has %d product rows, want 1", sku, rows)
+		t.Errorf("the SKU %q has %d product rows, want 1", skus[0], rows)
 	}
 }
 
-// TestQE06_NonStockProduct proves the configured row is a product the dealer
-// never holds: it carries the non-stock mark, and the stock reads leave it
-// alone.
-func TestQE06_NonStockProduct(t *testing.T) {
+// TestQE06_NonStockNotInStockCounts proves the configured row is a product
+// the dealer never holds: it carries the non-stock mark, and the stock reads
+// leave it alone.
+func TestQE06_NonStockNotInStockCounts(t *testing.T) {
 	f := newConfiguredFixture(t)
 	species := f.option(t, "species", "SYP", 800, 500, 0, 0)
 

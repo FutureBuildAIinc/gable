@@ -2114,6 +2114,14 @@ func (s *Service) buildFromQuote(ctx context.Context, src *QuoteSource, branchID
 		// A configured item's configuration rides from the quote to the
 		// order as the quote stored it.
 		line.Configuration = ql.Configuration
+		// A configured item is never served from the stock the dealer
+		// holds: it is made to the configuration, so its order line is a
+		// special order line and the convert raises the vendor purchase
+		// order for it. An ordinary stocked line stays served from stock
+		// and is never a special order line.
+		if len(ql.Configuration) > 0 {
+			line.IsSpecialOrder = true
+		}
 		lines = append(lines, OrderLine{Line: line, QuoteLineID: &quoteLineID})
 	}
 
