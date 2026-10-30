@@ -43,8 +43,9 @@ pub mod commands {
     use std::sync::Arc;
 
     use gable_shell_core::offline::{
-        EnrolmentPublic, OfflineCounter, OfflineError, OfflineSnapshot, QueueStatusView,
-        SignSaleRequest, SignedOfflineSale,
+        CartPreview, EnrolmentPublic, HttpOfflineServer, OfflineCounter, OfflineError,
+        OfflineSnapshot, QueueStatusView, SignSaleRequest, SignedOfflineSale, SnapshotRefresh,
+        SyncReport,
     };
     use gable_shell_core::shell::{self, TokenState};
 
@@ -138,6 +139,74 @@ pub mod commands {
             .map_err(|_| OfflineError::keychain_unavailable())?
     }
 
+    /// The enrolled Gable as the core's server: its origin and the keychain's
+    /// token, never anything the page names.
+    fn enrolled_server(
+        counter: &OfflineCounter,
+        tokens: &TokenState,
+    ) -> Result<HttpOfflineServer, OfflineError> {
+        let url = counter
+            .enrolled_gable_url()?
+            .and_then(|u| tauri::Url::parse(&u).ok())
+            .ok_or_else(OfflineError::re_enrol_required)?;
+        Ok(HttpOfflineServer::new(&url, Arc::new(tokens.clone())))
+    }
+
+    /// The core fetches the register's snapshot from the enrolled Gable
+    /// (ADR 0011 5.4), once its queue has drained.
+    #[tauri::command]
+    pub async fn refresh_offline_snapshot(
+        window: tauri::WebviewWindow,
+        counter: tauri::State<'_, Arc<OfflineCounter>>,
+        tokens: tauri::State<'_, TokenState>,
+    ) -> Result<SnapshotRefresh, OfflineError> {
+        let url = window.url().map_err(|_| OfflineError::origin_denied())?;
+        let counter = counter.inner().clone();
+        let tokens = tokens.inner().clone();
+        tauri::async_runtime::spawn_blocking(move || {
+            let server = enrolled_server(&counter, &tokens)?;
+            counter.refresh_snapshot(Some(url.as_str()), &server)
+        })
+        .await
+        .map_err(|_| OfflineError::keychain_unavailable())?
+    }
+
+    /// The core prices the clerk's cart from its own snapshot copy (ADR 0011
+    /// 5.3); nothing is written or signed.
+    #[tauri::command]
+    pub async fn price_offline_cart(
+        window: tauri::WebviewWindow,
+        counter: tauri::State<'_, Arc<OfflineCounter>>,
+        request: SignSaleRequest,
+    ) -> Result<CartPreview, OfflineError> {
+        let url = window.url().map_err(|_| OfflineError::origin_denied())?;
+        let counter = counter.inner().clone();
+        tauri::async_runtime::spawn_blocking(move || {
+            counter.price_cart(Some(url.as_str()), request)
+        })
+        .await
+        .map_err(|_| OfflineError::keychain_unavailable())?
+    }
+
+    /// The core sends its queue to the enrolled Gable's sync and records the
+    /// server's answer (ADR 0011 section 3).
+    #[tauri::command]
+    pub async fn sync_offline_queue(
+        window: tauri::WebviewWindow,
+        counter: tauri::State<'_, Arc<OfflineCounter>>,
+        tokens: tauri::State<'_, TokenState>,
+    ) -> Result<SyncReport, OfflineError> {
+        let url = window.url().map_err(|_| OfflineError::origin_denied())?;
+        let counter = counter.inner().clone();
+        let tokens = tokens.inner().clone();
+        tauri::async_runtime::spawn_blocking(move || {
+            let server = enrolled_server(&counter, &tokens)?;
+            counter.sync_queue(Some(url.as_str()), &server)
+        })
+        .await
+        .map_err(|_| OfflineError::keychain_unavailable())?
+    }
+
     /// Starts a redirect sign in (google, microsoft or oidc): the system
     /// browser opens on the core's start route with a PKCE challenge and a
     /// loopback return target, and this call answers once the person has come
@@ -202,6 +271,9 @@ pub fn run() {
             commands::load_offline_snapshot,
             commands::sign_and_queue_offline_sale,
             commands::offline_queue_status,
+            commands::refresh_offline_snapshot,
+            commands::price_offline_cart,
+            commands::sync_offline_queue,
             commands::begin_sign_in,
             commands::refresh_tokens
         ])
