@@ -547,7 +547,7 @@ func (h *Handler) ListTransactions(w http.ResponseWriter, r *http.Request) {
 		case "open", "held", "completed", "voided", "abandoned":
 			f.Status = uppercase(s)
 		default:
-			httpx.WriteError(w, r, httpx.BadRequest("one or more fields failed validation", httpx.FieldError{Field: "status", Message: "must be one of: open, held, completed, voided"}))
+			httpx.WriteError(w, r, httpx.BadRequest("one or more fields failed validation", httpx.FieldError{Field: "status", Message: "must be one of: open, held, completed, voided, abandoned"}))
 			return
 		}
 	}

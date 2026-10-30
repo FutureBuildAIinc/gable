@@ -289,9 +289,6 @@ func (r *PostgresRepository) SetOfflinePolicy(ctx context.Context, branch uuid.U
 		_, err := r.ex(ctx).Exec(ctx, `DELETE FROM pos_offline_policy WHERE branch_id = $1`, branch)
 		return err
 	}
-	if actor == "" {
-		actor = "anonymous"
-	}
 	tenders := in.Tenders
 	if tenders == nil {
 		tenders = []string{}
@@ -344,9 +341,6 @@ func (s *Service) SetOfflinePolicy(ctx context.Context, in *OfflinePolicyInput, 
 			return err
 		} else if !ok {
 			return httpx.NotFound("branch not found")
-		}
-		if err := s.repo.LockBranchDay(ctx, in.BranchID); err != nil {
-			return err
 		}
 		if err := s.repo.SetOfflinePolicy(ctx, in.BranchID, in, actor); err != nil {
 			return err
@@ -427,7 +421,7 @@ func (h *Handler) PutOfflinePolicy(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, r, err)
 		return
 	}
-	p, err := h.service.SetOfflinePolicy(r.Context(), in, actorFrom(r))
+	p, err := h.service.SetOfflinePolicy(r.Context(), in, h.actorFrom(r))
 	if err != nil {
 		httpx.WriteError(w, r, err)
 		return

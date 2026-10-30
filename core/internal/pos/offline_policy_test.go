@@ -261,8 +261,8 @@ func TestListTransactions_FiltersAbandonedStatus(t *testing.T) {
 	f := newFixture(t, testutil.RequireDB(t))
 	abandonedID := uuid.New()
 	mustExec(t, f.db, `
-		INSERT INTO pos_transactions (id, register_id, cashier_id, branch_id, currency, status, abandoned_reason)
-		VALUES ($1, $2, $3, $4, 'USD', 'ABANDONED', 'abandoned: replaced by offline sale OFF-REG-01-1-000001')`,
+		INSERT INTO pos_transactions (id, register_id, cashier_id, branch_id, currency, status)
+		VALUES ($1, $2, $3, $4, 'USD', 'ABANDONED')`,
 		abandonedID, f.register, uuid.New(), f.branchID)
 	t.Cleanup(func() {
 		mustExec(t, f.db, `DELETE FROM pos_transactions WHERE id = $1`, abandonedID)
