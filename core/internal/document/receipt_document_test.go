@@ -109,3 +109,55 @@ func TestAnInvoiceThatIsNotACounterSaleKeepsItsInvoice(t *testing.T) {
 		t.Fatalf("the document kind = %v, want the invoice", kind)
 	}
 }
+
+// RULE: a rounded cash sale's invoice and its receipt both carry the
+// rounding the branch's rule made, with its direction, and the change that
+// was given back. The stored total does not move.
+func TestARoundedSaleCarriesTheRoundingAndTheChange(t *testing.T) {
+	pay := paidCashSale()
+	pay.RoundingCents = httpx.Cents(2)
+	pay.ChangeCents = httpx.Cents(100)
+	svc := styledService("en-CA").WithInvoicePayments(fakeSalePayment{pay: pay})
+	inv := settledInvoice(4900)
+	for _, kind := range []DocumentKind{DocumentInvoice, DocumentReceipt} {
+		doc, err := svc.GenerateDocumentPDF(context.Background(), inv, &customer.Customer{Name: "Acme"}, kind)
+		if err != nil {
+			t.Fatal(err)
+		}
+		assertPDF(t, doc)
+		mustContain(t, doc, "Cash rounding +$0.02")
+		mustContain(t, doc, "Change: $1.00")
+		// the total is the one the sale stored, not the cash the drawer took
+		mustContain(t, doc, "$49.00")
+	}
+}
+
+// RULE: a sale the branch's rule did not touch carries no rounding line.
+func TestAnUnroundedSaleCarriesNoRoundingLine(t *testing.T) {
+	svc := styledService("en-CA").WithInvoicePayments(fakeSalePayment{pay: SalePayment{
+		Tenders: []ThermalTender{{Method: "CASH", AmountCents: httpx.Cents(4900)}},
+	}})
+	inv := settledInvoice(4900)
+	doc, err := svc.GenerateDocumentPDF(context.Background(), inv, &customer.Customer{Name: "Acme"}, DocumentReceipt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertPDF(t, doc)
+	mustNotContain(t, doc, "Cash rounding")
+	mustContain(t, doc, "CASH: $49.00")
+}
+
+// RULE: a round-down names the direction it went: the drawer kept a cent
+// less than the sale needed.
+func TestARoundDownNamesItsDirection(t *testing.T) {
+	pay := paidCashSale()
+	pay.RoundingCents = httpx.Cents(-1)
+	svc := styledService("en-CA").WithInvoicePayments(fakeSalePayment{pay: pay})
+	inv := settledInvoice(4900)
+	doc, err := svc.GenerateDocumentPDF(context.Background(), inv, &customer.Customer{Name: "Acme"}, DocumentReceipt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertPDF(t, doc)
+	mustContain(t, doc, "Cash rounding -$0.01")
+}

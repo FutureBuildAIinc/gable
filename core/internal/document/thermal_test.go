@@ -268,7 +268,7 @@ func TestThermalReceiptRoundingLine(t *testing.T) {
 		t.Fatal(err)
 	}
 	assertPDF(t, doc)
-	mustContain(t, doc, "Cash rounding: $0.02")
+	mustContain(t, doc, "Cash rounding +$0.02")
 	mustContain(t, doc, "Total: $1,073.50")
 
 	plain := sampleReceipt()

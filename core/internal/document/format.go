@@ -121,6 +121,17 @@ type decimalStringer interface{ DecimalString() string }
 // "$3,929.97", "-$2,487.63".
 func (style) Money(c decimalStringer) string { return groupAmount(c.DecimalString()) }
 
+// SignedMoney writes an amount with its direction in front of the money:
+// "+$0.02", "-$0.02". A zero amount writes "$0.00": there is no direction to
+// name.
+func (style) SignedMoney(c decimalStringer) string {
+	d := c.DecimalString()
+	if d == "" || d == "0" || d == "0.00" || strings.HasPrefix(d, "-") {
+		return groupAmount(d)
+	}
+	return "+" + groupAmount(d)
+}
+
 // UnitPrice writes a unit price (held in ten thousandths) with two places, and
 // a third or fourth only when the price truly has it: "$6.00", "$1.4025",
 // "$0.0525", "$1,234.5678". The figure is the one stored; only trailing zeros

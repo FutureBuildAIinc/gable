@@ -314,7 +314,7 @@ func (s *Service) GenerateThermalReceiptPDF(ctx context.Context, branch uuid.UUI
 	add(thermalRowBody, text.NewCol(thermalGridSize, label+": "+b.style.Money(r.TaxCents), props.Text{Size: 9, Align: align.Right}))
 	add(thermalRowLarge, text.NewCol(thermalGridSize, "Total: "+b.style.Money(r.TotalCents), props.Text{Size: 12, Style: fontstyle.Bold, Align: align.Right}))
 	if r.RoundingCents != 0 {
-		add(thermalRowBody, text.NewCol(thermalGridSize, "Cash rounding: "+b.style.Money(r.RoundingCents), props.Text{Size: 9, Align: align.Right}))
+		add(thermalRowBody, text.NewCol(thermalGridSize, "Cash rounding "+b.style.SignedMoney(r.RoundingCents), props.Text{Size: 9, Align: align.Right}))
 	}
 	add(thermalHairline, text.NewCol(thermalGridSize, strings.Repeat("-", 32), props.Text{Size: 7, Align: align.Center}))
 

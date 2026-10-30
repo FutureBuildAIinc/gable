@@ -549,3 +549,33 @@ func TestAPaidCashSalesDefaultDocumentIsAReceipt(t *testing.T) {
 		t.Errorf("the 80mm document is not headed RECEIPT")
 	}
 }
+
+// RULE: a rounded cash sale's default document carries the rounding the
+// branch's rule made, with its direction; the stored total does not move, so
+// the document is where the penny is explained (CP-18).
+func TestARoundedCashSalesDocumentCarriesTheRounding(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	f := newFixture(t, testutil.RequireDB(t), withRealInvoiceAndThermalReceipts(nil))
+	f.noTax()
+	f.setRounding("NEAREST_5_CENTS")
+
+	sale, _ := f.saleAtPrice(103)
+	if r := f.completeSale(sale, tender("cash", 105)); r.status != http.StatusOK {
+		t.Fatalf("the rounded sale = %d: %s", r.status, r.raw)
+	}
+	// the sale the books stored is untouched by the rule
+	if got := num(t, f.getSale(t, sale), "total_cents"); got != 103 {
+		t.Errorf("the stored total = %d, want 103", got)
+	}
+
+	r := f.printReceipt(sale, "")
+	if r.status != http.StatusOK {
+		t.Fatalf("the default print = %d: %s", r.status, r.raw)
+	}
+	body := string(r.raw)
+	for _, want := range []string{"Cash rounding +$0.02", "TOTAL: $1.03", "CASH: $1.05"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("the default document is missing %q", want)
+		}
+	}
+}

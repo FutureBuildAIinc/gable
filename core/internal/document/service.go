@@ -105,10 +105,13 @@ const (
 )
 
 // SalePayment is the money a counter sale took: its tender legs as the paper
-// shows them and the share of the total that went on account.
+// shows them, the cash rounding the branch's rule made (CP-18), the change
+// given back and the share of the total that went on account.
 type SalePayment struct {
-	Tenders      []ThermalTender
-	AccountCents httpx.Cents
+	Tenders       []ThermalTender
+	RoundingCents httpx.Cents
+	ChangeCents   httpx.Cents
+	AccountCents  httpx.Cents
 }
 
 // InvoicePaymentReader reads the money the counter sale behind an invoice
@@ -581,7 +584,13 @@ func (s *Service) GenerateDocumentPDF(ctx context.Context, inv *invoice.Invoice,
 	m.AddRow(15,
 		text.NewCol(12, totalLabel+b.style.Money(inv.TotalCents), props.Text{Top: 5, Style: fontstyle.Bold, Align: align.Right, Size: 12}),
 	)
-	s.invoiceTenderRows(m, b, s.salePayment(ctx, inv.ID).Tenders)
+	// The money the counter sale took: the cash rounding the branch's rule
+	// made (CP-18), the tenders that paid the sale and the change given.
+	pay := s.salePayment(ctx, inv.ID)
+	if line := roundingLine(b, pay.RoundingCents); line != "" {
+		m.AddRow(8, text.NewCol(12, line, props.Text{Align: align.Right, Size: 10}))
+	}
+	s.invoiceTenderRows(m, b, pay.Tenders)
 	// The remit to is for the money a customer still owes; a receipt of a
 	// settled sale has none to remit.
 	b.foot(m, kind == DocumentInvoice)
@@ -598,6 +607,17 @@ func (s *Service) invoiceTenderRows(m *collector, b *branding, legs []ThermalTen
 			m.AddRow(5, text.NewCol(12, "Change: "+b.style.Money(t.ChangeCents), props.Text{Align: align.Right, Size: 8}))
 		}
 	}
+}
+
+// roundingLine is the cash rounding line of a document (CP-18): the amount
+// the branch's rule moved the cash by, with its direction, so the cash the
+// drawer kept and the total the customer owes account for each other. No
+// rounding is no line.
+func roundingLine(b *branding, cents httpx.Cents) string {
+	if cents == 0 {
+		return ""
+	}
+	return "Cash rounding " + b.style.SignedMoney(cents)
 }
 
 func deref(s *string) string {
