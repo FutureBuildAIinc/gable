@@ -39,9 +39,17 @@ test.describe('the order exposure gate on the desk', () => {
 
     // A sent quote with a commodity line (framing lumber prices on the
     // Random Lengths framing composite), so the send snapshots an escalator.
-    const products = (await (await request.get('/api/v1/products?limit=200')).json()) as { items: { id: string; sku: string; stock_uom: string }[] };
-    const stud = products.items.find((p) => p.sku === 'DL_SPF_2X4_L08_S')!;
+    type Product = { id: string; sku: string; stock_uom: string };
+    let stud: Product | undefined;
+    let cursor = '';
+    for (let page = 0; page < 20 && !stud; page++) {
+      const res = (await (await request.get(`/api/v1/products?limit=200${cursor}`)).json()) as { items: Product[]; next_cursor: string | null };
+      stud = res.items.find((p) => p.sku === 'DL_SPF_2X4_L08_S');
+      if (!res.next_cursor) break;
+      cursor = `&cursor=${res.next_cursor}`;
+    }
     expect(stud, 'the seed frames 2x4x8 SPF as a commodity').toBeDefined();
+    if (!stud) return;
     const quote = await (await request.post('/api/v1/quotes', {
       data: {
         customer_id: customer.id,
