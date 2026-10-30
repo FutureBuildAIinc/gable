@@ -15,10 +15,11 @@ import { OfflineCounterError, offlineCounter, setOfflineInvoke } from './Offline
 const config = {
   auth_mode: 'production',
   methods: [
-    { method: 'email_password', kind: 'form', label: 'Email and password', start_url: '/api/v1/auth/signin' },
     { method: 'google', kind: 'redirect', label: 'Google', start_url: '/api/v1/auth/google/start' },
+    { method: 'email_password', kind: 'form', label: 'Email and password', start_url: '/api/v1/auth/signin' },
   ],
 };
+const passwordFirst = { ...config, methods: [config.methods[1], config.methods[0]] };
 
 describe('offlineCounter.signIn during a drop', () => {
   const invoke = vi.fn(async () => undefined);
@@ -55,9 +56,63 @@ describe('offlineCounter.signIn during a drop', () => {
   });
 
   it('keeps the no method answer for a dealer that answered and allows no redirect method', async () => {
-    fetchFn.mockResolvedValue(new Response(JSON.stringify({ ...config, methods: [config.methods[0]] }), { status: 200 }));
+    fetchFn.mockResolvedValue(new Response(JSON.stringify({ ...config, methods: [{ method: 'magic_link', kind: 'link', label: 'Email link', start_url: '/x' }] }), { status: 200 }));
     const refused = await offlineCounter.signIn().then(() => null, (e: unknown) => e);
     expect((refused as OfflineCounterError).code).toBe('no_sign_in_method');
     expect(invoke).not.toHaveBeenCalled();
+  });
+
+  it('opens the form, and starts nothing, when the dealer lists email and password first', async () => {
+    fetchFn.mockResolvedValue(new Response(JSON.stringify(passwordFirst), { status: 200 }));
+    await expect(offlineCounter.signIn()).resolves.toBe('form');
+    expect(invoke).not.toHaveBeenCalled();
+  });
+
+  it('starts the first redirect method when a redirect method comes first', async () => {
+    fetchFn.mockResolvedValue(new Response(JSON.stringify(config), { status: 200 }));
+    await expect(offlineCounter.signIn()).resolves.toBe('started');
+    expect(invoke).toHaveBeenCalledWith('begin_sign_in', { method: 'google' });
+  });
+});
+
+describe('offlineCounter.signInWithPassword', () => {
+  const invoke = vi.fn(async (_c: string, _a?: Record<string, unknown>) => undefined);
+  beforeEach(() => { invoke.mockReset(); setOfflineInvoke(invoke); });
+  afterEach(() => setOfflineInvoke(undefined));
+
+  it('sends the email and password to the shell command once and answers nothing', async () => {
+    invoke.mockResolvedValue(undefined);
+    await expect(offlineCounter.signInWithPassword('a@b.example', 'hunter2')).resolves.toBeUndefined();
+    expect(invoke).toHaveBeenCalledTimes(1);
+    expect(invoke).toHaveBeenCalledWith('sign_in_with_password', { email: 'a@b.example', password: 'hunter2' });
+  });
+
+  it.each([
+    ['sign_in_refused', 'That email and password did not sign this register in.'],
+    ['sign_in_limited', 'Too many tries. Wait a little, then try again.'],
+    ['sign_in_not_allowed', 'Ask a manager'],
+    ['sign_in_unavailable', 'The server cannot be reached'],
+    ['no_server', 'no server'],
+  ])('maps the shell code %s to its own words', async (code, words) => {
+    invoke.mockRejectedValue(code);
+    const e = await offlineCounter.signInWithPassword('a@b.example', 'hunter2').then(() => null, (x: unknown) => x);
+    expect(e).toBeInstanceOf(OfflineCounterError);
+    expect((e as OfflineCounterError).code).toBe(code);
+    expect((e as OfflineCounterError).message).toContain(words);
+  });
+
+  it('never puts the password in an error, whatever the shell answers', async () => {
+    for (const raw of ['sign_in_refused', 'weird hunter2 text', { code: 'x', message: 'hunter2' }]) {
+      invoke.mockRejectedValue(raw);
+      const e = await offlineCounter.signInWithPassword('a@b.example', 'hunter2').then(() => null, (x: unknown) => x);
+      expect((e as OfflineCounterError).message).not.toContain('hunter2');
+      expect(JSON.stringify(e)).not.toContain('hunter2');
+    }
+  });
+
+  it('says a browser tab has no core', async () => {
+    setOfflineInvoke(null);
+    const e = await offlineCounter.signInWithPassword('a@b.example', 'hunter2').then(() => null, (x: unknown) => x);
+    expect((e as OfflineCounterError).code).toBe('no_core');
   });
 });

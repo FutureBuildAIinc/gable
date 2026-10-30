@@ -188,7 +188,7 @@ describe('the counter when the connection drops', () => {
       methods: list.map((m) => ({ ...m, label: m.method, start_url: '/start', issuer_url: null, client_id: null })),
     });
     beforeEach(() => {
-      auth.authMethodsConfig.mockResolvedValue(methods([{ method: 'email_password', kind: 'form' }, { method: 'google', kind: 'redirect' }]));
+      auth.authMethodsConfig.mockResolvedValue(methods([{ method: 'google', kind: 'redirect' }, { method: 'email_password', kind: 'form' }]));
     });
 
     it('offers Sign in this register on the strip when the sync answers no_session', async () => {
@@ -244,7 +244,7 @@ describe('the counter when the connection drops', () => {
       expect(q(el, 'pos-offline-strip')?.textContent).toContain('The sign in did not finish in time.');
       expect(q(el, 'pos-offline-sign-in')).toBeTruthy();
       delete core.refuse['begin_sign_in'];
-      auth.authMethodsConfig.mockResolvedValue(methods([{ method: 'email_password', kind: 'form' }]));
+      auth.authMethodsConfig.mockResolvedValue(methods([{ method: 'magic_link', kind: 'link' }]));
       core.calls.length = 0;
       (q(el, 'pos-offline-sign-in') as HTMLButtonElement).click();
       await settle(el);
@@ -266,6 +266,150 @@ describe('the counter when the connection drops', () => {
       expect(q(el, 'pos-offline-strip')?.textContent).toContain('The server cannot be reached');
       expect(q(el, 'pos-offline-strip')?.textContent).not.toContain('no sign in method');
       expect(q(el, 'pos-offline-sign-in')).toBeTruthy();
+      el.remove();
+    });
+  });
+
+  // CP-13 PR 3: with email and password first the strip holds its own form.
+  describe('the strip form for email and password', () => {
+    const noSession = { code: 'no_session', message: 'Sign in on this register again.' };
+    const cfg = (list: Array<{ method: string; kind: string }>, degraded = false) => ({
+      authMode: 'production', dealerName: null, dealerMarkUrl: null, degraded, notice: degraded ? 'degraded' : null,
+      methods: list.map((m) => ({ ...m, label: m.method, start_url: '/start', issuer_url: null, client_id: null })),
+    });
+    const passwordFirst = () => cfg([{ method: 'email_password', kind: 'form' }, { method: 'google', kind: 'redirect' }]);
+    const field = (el: Element, id: string) => q(el, id) as HTMLInputElement;
+    async function openForm() {
+      core.refuse['sync_offline_queue'] = noSession;
+      core.refuse['refresh_offline_snapshot'] = noSession;
+      auth.authMethodsConfig.mockResolvedValue(passwordFirst());
+      const el = await mount();
+      await settle(el);
+      core.calls.length = 0;
+      (q(el, 'pos-offline-sign-in') as HTMLButtonElement).click();
+      await settle(el);
+      return el;
+    }
+    async function submit(el: POSTerminal, email = 'clerk@yard.example', password = 'hunter2-secret') {
+      field(el, 'pos-offline-pw-email').value = email;
+      field(el, 'pos-offline-pw-email').dispatchEvent(new Event('input', { bubbles: true }));
+      field(el, 'pos-offline-pw-password').value = password;
+      field(el, 'pos-offline-pw-password').dispatchEvent(new Event('input', { bubbles: true }));
+      (q(el, 'pos-offline-pw-submit') as HTMLButtonElement).click();
+      await settle(el);
+    }
+
+    it('shows the form, with the right autocomplete, and never starts begin_sign_in', async () => {
+      const el = await openForm();
+      expect(field(el, 'pos-offline-pw-email').getAttribute('autocomplete')).toBe('username');
+      expect(field(el, 'pos-offline-pw-password').getAttribute('autocomplete')).toBe('current-password');
+      expect(field(el, 'pos-offline-pw-password').type).toBe('password');
+      expect(q(el, 'pos-offline-pw-submit')?.textContent).toContain(NO_SESSION_ASK);
+      expect(q(el, 'pos-offline-pw-cancel')).toBeTruthy();
+      expect(core.calls.some((c) => c.command === 'begin_sign_in')).toBe(false);
+      el.remove();
+    });
+
+    it('calls sign_in_with_password once with the typed values, then sync and snapshot in that order', async () => {
+      const el = await openForm();
+      delete core.refuse['sync_offline_queue'];
+      delete core.refuse['refresh_offline_snapshot'];
+      core.calls.length = 0;
+      await submit(el);
+      const names = ['sign_in_with_password', 'sync_offline_queue', 'refresh_offline_snapshot'];
+      expect(core.calls.map((c) => c.command).filter((c) => names.includes(c))).toEqual(names);
+      expect(core.calls.find((c) => c.command === 'sign_in_with_password')?.args).toEqual({ email: 'clerk@yard.example', password: 'hunter2-secret' });
+      expect(q(el, 'pos-offline-pw-form')).toBeNull();
+      expect(q(el, 'pos-offline-sign-in')).toBeNull();
+      el.remove();
+    });
+
+    it('does not keep the password after submit: the field is empty and no state or DOM holds it', async () => {
+      const el = await openForm();
+      delete core.refuse['sync_offline_queue'];
+      delete core.refuse['refresh_offline_snapshot'];
+      const secret = 'hunter2-secret';
+      await submit(el, 'clerk@yard.example', secret);
+      const held = Object.entries(el as unknown as Record<string, unknown>).filter(([, v]) => typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean' || v === null);
+      expect(held.length).toBeGreaterThan(10);
+      expect(JSON.stringify(held)).not.toContain(secret);
+      const plain = Object.values(el as unknown as Record<string, unknown>).filter((v): v is object => typeof v === 'object' && v !== null && !(v instanceof Node) && (Array.isArray(v) || Object.getPrototypeOf(v) === Object.prototype));
+      const safe = (v: object) => { try { return JSON.stringify(v); } catch { return ''; } };
+      expect(plain.map(safe).join('')).not.toContain(secret);
+      expect(el.innerHTML).not.toContain(secret);
+      el.remove();
+    });
+
+    it.each([
+      ['sign_in_refused', 'That email and password did not sign this register in.'],
+      ['sign_in_limited', 'Too many tries. Wait a little, then try again.'],
+      ['sign_in_not_allowed', 'Ask a manager'],
+      ['sign_in_unavailable', 'The server cannot be reached'],
+      ['no_server', 'no server'],
+    ])('shows the words for %s, empties the password field, and keeps the form', async (code, words) => {
+      const el = await openForm();
+      core.refuse['sign_in_with_password'] = code;
+      await submit(el, 'clerk@yard.example', 'hunter2-secret');
+      expect(q(el, 'pos-offline-pw-error')?.textContent).toContain(words);
+      expect(field(el, 'pos-offline-pw-password').value).toBe('');
+      expect(field(el, 'pos-offline-pw-email').value).toBe('clerk@yard.example');
+      expect(el.innerHTML).not.toContain('hunter2-secret');
+      el.remove();
+    });
+
+    it('empties the password field even when the call has not yet answered', async () => {
+      const el = await openForm();
+      let release: () => void = () => undefined;
+      const held = new Promise<void>((r) => { release = r; });
+      const inner = core.invoke;
+      setOfflineInvoke(async (c, a) => { if (c === 'sign_in_with_password') { core.calls.push({ command: c, args: a }); await held; return undefined; } return inner(c, a); });
+      field(el, 'pos-offline-pw-password').value = 'hunter2-secret';
+      field(el, 'pos-offline-pw-password').dispatchEvent(new Event('input', { bubbles: true }));
+      (q(el, 'pos-offline-pw-submit') as HTMLButtonElement).click();
+      await settle(el);
+      expect(field(el, 'pos-offline-pw-password').value).toBe('');
+      release();
+      await settle(el);
+      el.remove();
+    });
+
+    it('cancel closes the form and clears both fields', async () => {
+      const el = await openForm();
+      field(el, 'pos-offline-pw-password').value = 'hunter2-secret';
+      field(el, 'pos-offline-pw-password').dispatchEvent(new Event('input', { bubbles: true }));
+      (q(el, 'pos-offline-pw-cancel') as HTMLButtonElement).click();
+      await settle(el);
+      expect(q(el, 'pos-offline-pw-form')).toBeNull();
+      expect(q(el, 'pos-offline-sign-in')).toBeTruthy();
+      expect(core.calls.some((c) => c.command === 'sign_in_with_password')).toBe(false);
+      el.remove();
+    });
+
+    it('a degraded config shows the unreachable words, no form, and the next tap reads the config again', async () => {
+      core.refuse['sync_offline_queue'] = noSession;
+      auth.authMethodsConfig.mockResolvedValue(cfg([{ method: 'email_password', kind: 'form' }], true));
+      const el = await mount();
+      await settle(el);
+      (q(el, 'pos-offline-sign-in') as HTMLButtonElement).click();
+      await settle(el);
+      expect(q(el, 'pos-offline-pw-form')).toBeNull();
+      expect(q(el, 'pos-offline-strip')?.textContent).toContain('The server cannot be reached');
+      auth.authMethodsConfig.mockResolvedValue(passwordFirst());
+      (q(el, 'pos-offline-sign-in') as HTMLButtonElement).click();
+      await settle(el);
+      expect(q(el, 'pos-offline-pw-form')).toBeTruthy();
+      el.remove();
+    });
+
+    it('a dealer with google first still starts begin_sign_in and shows no form', async () => {
+      core.refuse['sync_offline_queue'] = noSession;
+      auth.authMethodsConfig.mockResolvedValue(cfg([{ method: 'google', kind: 'redirect' }, { method: 'email_password', kind: 'form' }]));
+      const el = await mount();
+      await settle(el);
+      (q(el, 'pos-offline-sign-in') as HTMLButtonElement).click();
+      await settle(el);
+      expect(core.calls.find((c) => c.command === 'begin_sign_in')?.args).toEqual({ method: 'google' });
+      expect(q(el, 'pos-offline-pw-form')).toBeNull();
       el.remove();
     });
   });
