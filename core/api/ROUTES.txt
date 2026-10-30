@@ -379,6 +379,9 @@ DELETE	/api/v1/locations/{id}	internal/location	h.DeleteLocation
 GET	/api/v1/locations/{id}	internal/location	read
 PUT	/api/v1/locations/{id}	internal/location	h.UpdateLocation
 GET	/api/v1/market-indices	internal/pricing	h.HandleListMarketIndices
+POST	/api/v1/market-indices/import/apply	internal/pricing	h.HandleImportApply
+POST	/api/v1/market-indices/import/preview	internal/pricing	h.HandleImportPreview
+GET	/api/v1/market-indices/staleness	internal/pricing	h.HandleStaleness
 PUT	/api/v1/market-indices/{id}	internal/pricing	h.HandleUpdateMetadata
 GET	/api/v1/market-indices/{id}/history	internal/pricing	h.HandleGetHistory
 POST	/api/v1/market-indices/{id}/refresh	internal/pricing	h.HandleRefresh

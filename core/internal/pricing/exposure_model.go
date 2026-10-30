@@ -86,6 +86,16 @@ type MarketIndexHistory struct {
 	RecordedAt    time.Time `json:"recorded_at"`
 	RecordedBy    string    `json:"recorded_by,omitempty"`
 	Source        string    `json:"source"`
+
+	// AsOfDate is the day the value is for, as the source states it. It is
+	// null for a value typed by hand, whose only date is when it was
+	// recorded. SourceURL is where the value came from, and FetchedAt when
+	// it was fetched. Together they say which day a value belongs to, so a
+	// value for one index, day and source is stored once and an import of
+	// the same file twice changes nothing.
+	AsOfDate  *time.Time `json:"as_of_date,omitempty"`
+	SourceURL string     `json:"source_url,omitempty"`
+	FetchedAt *time.Time `json:"fetched_at,omitempty"`
 }
 
 // ProductCategoryIndexDefault maps a product category to its default market index.

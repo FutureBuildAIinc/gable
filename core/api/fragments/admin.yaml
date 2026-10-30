@@ -238,11 +238,12 @@ paths:
       description: >-
         Admin or owner, or a key holding admin:settings. The deployment's
         market index source document (migration 159): manual (the default) or
-        the FB Connect feed, the feed URL, the staleness threshold in days,
-        and the last pull's result (null until the pull exists, a later
-        slice). Never returns the feed key: feed_key_hint is four asterisks
-        and the last 4 characters, null when no key is stored. revision rides
-        the ETag.
+        the FB Connect feed, whether a feed URL is stored, the header the
+        feed key rides in, whether a feed key is stored, the staleness
+        threshold in days, and the last pull's result (null until the pull
+        exists, a later slice). Never returns the feed URL or the feed key:
+        both are secrets, and the document says only whether one is stored.
+        revision rides the ETag.
       responses:
         "200":
           description: The settings document.
@@ -264,10 +265,10 @@ paths:
       summary: Choose where market index values come from
       description: >-
         Admin or owner, or a key holding admin:settings. Every field is
-        optional but a save must name something. feed_key is write only:
-        absent leaves it, empty clears it, a value replaces it, and it is
-        sealed at rest the way the AI keys are and never echoed back. The
-        audit row and event record only that the key changed. The save, its
+        optional but a save must name something. feed_url and feed_key are
+        write only: absent leaves one, empty clears it, a value replaces it,
+        and both are sealed at rest the way the AI keys are and never echoed
+        back. The audit row and event record only that they changed. The save, its
         audit row and the admin_settings.saved event are one transaction on
         the row's revision: a write without a precondition is 428, a stale
         one 409, and the answer carries the new revision in body and ETag.
@@ -1082,18 +1083,27 @@ components:
           type: integer
     MarketIndexSourceSettings:
       type: object
-      required: [source, feed_url, feed_key_set, feed_key_hint, staleness_days, last_pull_at, last_pull_ok, last_pull_error, revision]
-      description: Go type techadmin.MarketIndexSourceSettings. The feed key never appears; feed_key_hint is four asterisks and its last 4 characters, null when no key is stored.
+      required: [source, feed_url_set, feed_key_header, feed_key_set, staleness_days, last_pull_at, last_pull_ok, last_pull_error, revision]
+      description: >-
+        Go type techadmin.MarketIndexSourceSettings. Two facts are never
+        answered: the feed URL and the feed key's value. The URL is itself a
+        secret (it carries the feed's identity in its path), so it is written
+        and masked exactly like the key. The document says only whether one is
+        stored. feed_key_header is the header the key rides in; it is
+        configuration, not a credential, and it is empty by default.
       properties:
         source:
           type: string
           enum: [manual, fb_connect_feed]
-        feed_url:
+        feed_url_set:
+          type: boolean
+          description: Whether a feed URL is stored. The URL itself is never answered.
+        feed_key_header:
           type: string
+          description: The header the feed key rides in; empty means no header.
         feed_key_set:
           type: boolean
-        feed_key_hint:
-          type: [string, "null"]
+          description: Whether a feed key is stored. The key itself is never answered.
         staleness_days:
           type: integer
         last_pull_at:
@@ -1109,17 +1119,23 @@ components:
       type: object
       description: >-
         Go type techadmin.SaveMarketIndexSourceRequest. Every field is
-        optional but a save must name something. feed_key is write only:
-        absent leaves the key, empty clears it, a value replaces it. revision
-        is the body form of the If-Match precondition.
+        optional but a save must name something. feed_url and feed_key are
+        write only: absent leaves one, empty clears it, a value replaces it.
+        Neither is ever echoed back. revision is the body form of the If-Match
+        precondition.
       properties:
         source:
           type: string
           enum: [manual, fb_connect_feed]
         feed_url:
           type: string
+          description: The FB Connect feed address. Write only; never answered.
+        feed_key_header:
+          type: string
+          description: The header the feed key rides in; empty means no header.
         feed_key:
           type: string
+          description: The feed key's value. Write only; never answered.
         staleness_days:
           type: integer
         revision:
