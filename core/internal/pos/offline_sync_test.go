@@ -13,6 +13,8 @@ import (
 	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/gablelbm/gable/internal/pos"
 	"github.com/gablelbm/gable/internal/testutil"
+	"github.com/gablelbm/gable/pkg/branchctx"
+	"github.com/google/uuid"
 )
 
 // RULE (ADR 0011 section 4, section 7 "Policy off"): a branch with no
@@ -153,5 +155,32 @@ func TestOfflineSync_ChainRunsOverARefusedItem(t *testing.T) {
 	}
 	if n := countOf(t, f.db, `SELECT count(*) FROM pos_sync_log WHERE register_id = $1 AND refused_count = 1`, b.register); n != 2 {
 		t.Errorf("%d sync log rows with one refused, want 2", n)
+	}
+}
+
+// RULE (ADR 0011 6.3, money checklist 15): the sync is held to the
+// register's branch: a caller held to another branch is refused by name, and
+// nothing of the batch is written.
+func TestOfflineSync_AnotherBranchIsRefused(t *testing.T) {
+	f := newFixture(t, testutil.RequireDB(t))
+	offlinePolicyOn(t, f)
+	b := newOfflineBench(t, f)
+	raw, sale := b.build(t, saleSpec{lines: []offlineLine{line(f.productID, "1")}})
+	elsewhere := uuid.New()
+	ctx := branchctx.With(context.Background(), &branchctx.Context{BranchID: &elsewhere, UserSub: "offline-sync-other"})
+	_, err := f.service.SyncOffline(ctx, &pos.OfflineBatch{BatchID: uuid.NewString(), RegisterID: b.register,
+		DeviceEpoch: 1, Items: []json.RawMessage{raw}}, "offline-sync-other")
+	var hx *httpx.Error
+	if !errors.As(err, &hx) || hx.Status != http.StatusForbidden {
+		t.Fatalf("a sync held to another branch = %v, want 403", err)
+	}
+	if n := countOf(t, f.db, `SELECT count(*) FROM pos_transactions WHERE id = $1`, sale.ClientID); n != 0 {
+		t.Errorf("the refused sync posted the sale")
+	}
+	if n := countOf(t, f.db, `SELECT count(*) FROM pos_offline_exceptions WHERE register_id = $1`, b.register); n != 0 {
+		t.Errorf("the refused sync wrote %d exception rows", n)
+	}
+	if n := countOf(t, f.db, `SELECT count(*) FROM pos_sync_log WHERE register_id = $1`, b.register); n != 0 {
+		t.Errorf("the refused sync wrote %d log rows", n)
 	}
 }
