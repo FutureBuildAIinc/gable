@@ -416,20 +416,28 @@ func receiptTenders(sale *Sale, tenders []Tender) []document.ThermalTender {
 	return out
 }
 
-// InvoiceTenders is the tender legs of the counter sale that owns invoiceID,
-// for the full page layout; an invoice that is not a counter sale has none.
-func (s *Service) InvoiceTenders(ctx context.Context, invoiceID uuid.UUID) ([]document.ThermalTender, error) {
+// InvoicePayment is the money the counter sale that owns invoiceID took: the
+// tender legs as the paper shows them and the share of the total that went on
+// account. An invoice that is not a counter sale has none.
+func (s *Service) InvoicePayment(ctx context.Context, invoiceID uuid.UUID) (document.SalePayment, error) {
 	facts, err := s.repo.ReceiptSaleByInvoice(ctx, invoiceID)
 	if err != nil {
 		var he *httpx.Error
 		if errors.As(err, &he) && he.Status == http.StatusNotFound {
-			return nil, nil
+			return document.SalePayment{}, nil
 		}
-		return nil, err
+		return document.SalePayment{}, err
 	}
 	tenders, err := s.repo.GetTenders(ctx, facts.sale.ID)
 	if err != nil {
-		return nil, err
+		return document.SalePayment{}, err
 	}
-	return receiptTenders(&facts.sale, tenders), nil
+	sale := &facts.sale
+	out := document.SalePayment{Tenders: receiptTenders(sale, tenders)}
+	for i := range tenders {
+		if tenders[i].Method == TenderAccount {
+			out.AccountCents += tenders[i].AmountCents
+		}
+	}
+	return out, nil
 }

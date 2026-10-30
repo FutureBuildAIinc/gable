@@ -208,6 +208,13 @@ func (s *Service) GenerateThermalReceiptPDF(ctx context.Context, branch uuid.UUI
 			add(thermalRowTiny, text.NewCol(thermalGridSize, l, props.Text{Size: 7, Align: align.Center}))
 		}
 	}
+	// The document's own heading (CP-14): the receipt of a sale that took
+	// the money, the invoice of one that went on account and still owes it.
+	if r.BalanceCents > 0 {
+		add(thermalRowLarge, text.NewCol(thermalGridSize, "INVOICE", props.Text{Size: 12, Style: fontstyle.Bold, Align: align.Center}))
+	} else {
+		add(thermalRowLarge, text.NewCol(thermalGridSize, "RECEIPT", props.Text{Size: 12, Style: fontstyle.Bold, Align: align.Center}))
+	}
 	add(thermalHairline, text.NewCol(thermalGridSize, strings.Repeat("-", 32), props.Text{Size: 7, Align: align.Center}))
 
 	// Sale number, date, cashier.

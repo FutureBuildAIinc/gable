@@ -15,6 +15,7 @@ import (
 	"github.com/gablelbm/gable/internal/dealerprofile"
 	"github.com/gablelbm/gable/internal/invoice"
 	"github.com/gablelbm/gable/internal/order"
+	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/gablelbm/gable/internal/product"
 	"github.com/gablelbm/gable/internal/salesdoc"
 	"github.com/gablelbm/gable/pkg/middleware"
@@ -75,7 +76,7 @@ type Service struct {
 	yards       YardReader
 	jobs        JobReader
 	statements  StatementReader
-	tenders     InvoiceTenderReader
+	payments    InvoicePaymentReader
 }
 
 func NewService(productRepo product.Repository) *Service {
@@ -91,15 +92,34 @@ func (s *Service) WithYards(r YardReader) *Service { s.yards = r; return s }
 // WithJobs sets the reader of a job's name.
 func (s *Service) WithJobs(r JobReader) *Service { s.jobs = r; return s }
 
-// InvoiceTenderReader reads the tender legs of the counter sale behind an
-// invoice; an invoice that is not a counter sale has none.
-type InvoiceTenderReader interface {
-	InvoiceTenders(ctx context.Context, invoiceID uuid.UUID) ([]ThermalTender, error)
+// DocumentKind says which document a print makes of an invoice.
+type DocumentKind int
+
+const (
+	// DocumentInvoice is the invoice: a bill to pay, with the total due and
+	// the remit to.
+	DocumentInvoice DocumentKind = iota
+	// DocumentReceipt is the receipt of a sale that took the money: the
+	// tenders that paid it, no total due and no remit to (CP-14).
+	DocumentReceipt
+)
+
+// SalePayment is the money a counter sale took: its tender legs as the paper
+// shows them and the share of the total that went on account.
+type SalePayment struct {
+	Tenders      []ThermalTender
+	AccountCents httpx.Cents
 }
 
-// WithInvoiceTenders sets the reader of a counter sale's tenders for the
-// invoice layout of the receipt.
-func (s *Service) WithInvoiceTenders(r InvoiceTenderReader) *Service { s.tenders = r; return s }
+// InvoicePaymentReader reads the money the counter sale behind an invoice
+// took; an invoice that is not a counter sale has none.
+type InvoicePaymentReader interface {
+	InvoicePayment(ctx context.Context, invoiceID uuid.UUID) (SalePayment, error)
+}
+
+// WithInvoicePayments sets the reader of a counter sale's money for the
+// documents that print it.
+func (s *Service) WithInvoicePayments(r InvoicePaymentReader) *Service { s.payments = r; return s }
 
 // WithStatements sets the AR statement reader.
 func (s *Service) WithStatements(r StatementReader) *Service { s.statements = r; return s }
@@ -413,15 +433,68 @@ func finish(m *collector) ([]byte, error) {
 	return doc.GetBytes(), nil
 }
 
+// GenerateInvoicePDF renders the invoice: the bill, with the total due and
+// the remit to.
 func (s *Service) GenerateInvoicePDF(ctx context.Context, inv *invoice.Invoice, cust *customer.Customer) ([]byte, error) {
+	return s.GenerateDocumentPDF(ctx, inv, cust, DocumentInvoice)
+}
+
+// GenerateReceiptPDF renders the receipt of a sale that took the money: the
+// tenders that paid it, no total due and no remit to (CP-14).
+func (s *Service) GenerateReceiptPDF(ctx context.Context, inv *invoice.Invoice, cust *customer.Customer) ([]byte, error) {
+	return s.GenerateDocumentPDF(ctx, inv, cust, DocumentReceipt)
+}
+
+// SaleDocumentKind says which document the counter sale behind an invoice
+// prints by default: the receipt of a sale that took the money, the invoice
+// of one that did not (a sale that went on account, or one the books have not
+// settled).
+func (s *Service) SaleDocumentKind(ctx context.Context, inv *invoice.Invoice) DocumentKind {
+	pay := s.salePayment(ctx, inv.ID)
+	if len(pay.Tenders) == 0 || pay.AccountCents > 0 {
+		return DocumentInvoice
+	}
+	if inv.Status != invoice.InvoiceStatusPaid {
+		return DocumentInvoice
+	}
+	return DocumentReceipt
+}
+
+// salePayment reads the money the counter sale behind an invoice took. An
+// invoice that is not a counter sale, and a reader that is not wired, have
+// none: the document prints no tenders.
+func (s *Service) salePayment(ctx context.Context, invoiceID uuid.UUID) SalePayment {
+	if s.payments == nil {
+		return SalePayment{}
+	}
+	pay, err := s.payments.InvoicePayment(ctx, invoiceID)
+	if err != nil {
+		return SalePayment{}
+	}
+	return pay
+}
+
+// GenerateDocumentPDF renders the invoice or the receipt of an invoice. The
+// invoice is a bill: the total due and the remit to. The receipt is what a
+// sale that took the money leaves behind: the tenders that paid it, no total
+// due and no remit to (CP-14).
+func (s *Service) GenerateDocumentPDF(ctx context.Context, inv *invoice.Invoice, cust *customer.Customer, kind DocumentKind) ([]byte, error) {
 	b := s.branding(ctx, inv.BranchID)
 	m := newDoc()
 
 	title := "INVOICE"
-	if inv.Status == invoice.InvoiceStatusVoid {
+	switch {
+	case kind == DocumentReceipt:
+		title = "RECEIPT"
+	case inv.Status == invoice.InvoiceStatusVoid:
 		title = "INVOICE - VOID"
 	}
 	b.header(m, title, 18)
+	// The receipt of a settled sale says so, under its heading: the money
+	// was taken, so the document is not a bill.
+	if kind == DocumentReceipt && inv.Status == invoice.InvoiceStatusPaid {
+		m.AddRow(12, text.NewCol(12, "PAID", props.Text{Size: 12, Style: fontstyle.Bold, Align: align.Center, Top: 4}))
+	}
 
 	block(m,
 		joinLines(fmt.Sprintf("Bill To: %s", cust.Name), fmt.Sprintf("Account: %s", cust.AccountNumber), deref(cust.Address)),
@@ -499,25 +572,26 @@ func (s *Service) GenerateInvoicePDF(ctx context.Context, inv *invoice.Invoice, 
 		text.NewCol(12, taxLabel+": "+b.style.Money(inv.TaxCents), props.Text{Align: align.Right, Size: 10}),
 	)
 
+	// The invoice asks for the total due; the receipt states the total that
+	// was taken (CP-14).
+	totalLabel := "TOTAL DUE: "
+	if kind == DocumentReceipt {
+		totalLabel = "TOTAL: "
+	}
 	m.AddRow(15,
-		text.NewCol(12, "TOTAL DUE: "+b.style.Money(inv.TotalCents), props.Text{Top: 5, Style: fontstyle.Bold, Align: align.Right, Size: 12}),
+		text.NewCol(12, totalLabel+b.style.Money(inv.TotalCents), props.Text{Top: 5, Style: fontstyle.Bold, Align: align.Right, Size: 12}),
 	)
-	s.invoiceTenderRows(ctx, m, b, inv.ID)
-	b.foot(m, true)
+	s.invoiceTenderRows(m, b, s.salePayment(ctx, inv.ID).Tenders)
+	// The remit to is for the money a customer still owes; a receipt of a
+	// settled sale has none to remit.
+	b.foot(m, kind == DocumentInvoice)
 	return finish(m)
 }
 
 // invoiceTenderRows adds the tender lines of a counter sale under its total:
 // each leg's method (a card's brand and last four) and amount, and the change
 // given. An invoice with no counter sale behind it prints none.
-func (s *Service) invoiceTenderRows(ctx context.Context, m *collector, b *branding, invoiceID uuid.UUID) {
-	if s.tenders == nil {
-		return
-	}
-	legs, err := s.tenders.InvoiceTenders(ctx, invoiceID)
-	if err != nil || len(legs) == 0 {
-		return
-	}
+func (s *Service) invoiceTenderRows(m *collector, b *branding, legs []ThermalTender) {
 	for _, t := range legs {
 		m.AddRow(6, text.NewCol(12, tenderLabel(t)+": "+b.style.Money(t.AmountCents), props.Text{Align: align.Right, Size: 9}))
 		if t.ChangeCents > 0 {

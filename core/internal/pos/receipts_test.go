@@ -83,7 +83,7 @@ func withRealInvoiceAndThermalReceipts(failInvoice *bool) func(*fixture) {
 	return func(f *fixture) {
 		f.mounts = append(f.mounts, func(f *fixture, mux *http.ServeMux) {
 			store := document.NewStore(f.db)
-			docSvc := document.NewService(nil).WithYards(store).WithJobs(store).WithInvoiceTenders(f.service)
+			docSvc := document.NewService(nil).WithYards(store).WithJobs(store).WithInvoicePayments(f.service)
 			invRepo := &toggleInvoiceRepo{Repository: invoice.NewRepository(f.db), fail: failInvoice}
 			invSvc := invoice.NewService(invRepo, nil, nil, f.db)
 			custSvc := customer.NewService(customer.NewRepository(f.db))
@@ -512,5 +512,40 @@ func TestReceiptPrintPreservesRevisionUnbumpsFailedInvoiceAndRejectsVoidedSale(t
 	}
 	if got := f.printCount(sale2); got != 0 {
 		t.Errorf("print_count on VOIDED sale = %d, want 0", got)
+	}
+}
+
+// RULE: the default document of a paid counter cash sale is a receipt: it is
+// headed RECEIPT, it says PAID, it names the tender that paid it, and it
+// carries no total due and no remit to, because there is nothing left to
+// remit (CP-14). The 80mm document of the same sale carries the same heading.
+func TestAPaidCashSalesDefaultDocumentIsAReceipt(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	f := newFixture(t, testutil.RequireDB(t), withRealInvoiceAndThermalReceipts(nil))
+	sale, _ := completedSale(t, f)
+
+	r := f.printReceipt(sale, "")
+	if r.status != http.StatusOK {
+		t.Fatalf("the default print = %d: %s", r.status, r.raw)
+	}
+	body := string(r.raw)
+	for _, want := range []string{"RECEIPT", "PAID", "CASH:"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("the default document is missing %q", want)
+		}
+	}
+	for _, unwanted := range []string{"TOTAL DUE", "REMIT TO"} {
+		if strings.Contains(body, unwanted) {
+			t.Errorf("the default document carries %q", unwanted)
+		}
+	}
+
+	// the 80mm document of the same sale carries the same heading
+	thermal := f.printReceipt(sale, "layout=thermal80")
+	if thermal.status != http.StatusOK {
+		t.Fatalf("the 80mm print = %d: %s", thermal.status, thermal.raw)
+	}
+	if !strings.Contains(string(thermal.raw), "RECEIPT") {
+		t.Errorf("the 80mm document is not headed RECEIPT")
 	}
 }
