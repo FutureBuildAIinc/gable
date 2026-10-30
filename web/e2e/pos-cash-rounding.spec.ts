@@ -208,6 +208,10 @@ test('the counter: the branch rounds the cash, and the receipt says so', async (
   const complete = page.getByTestId('pos-complete');
   await expect(complete).toContainText('Sale complete', { timeout: 15000 });
   await expect(complete).toContainText('$1.03', { timeout: 15000 });
+  // The panel says the rounding too: the same figure the document carries
+  // (CP-18), so the cashier reads why the drawer kept more than the sale
+  // needed.
+  await expect(complete).toContainText('cash rounding +$0.02', { timeout: 15000 });
   await page.screenshot({ path: path.join(SHOTS_DIR, 'pos-cash-rounding-complete.png'), fullPage: true });
 
   // The receipt says what the rounding was: the 80mm receipt carries the
@@ -220,6 +224,18 @@ test('the counter: the branch rounds the cash, and the receipt says so', async (
   const text = (await receipt.body()).toString('latin1');
   expect(text).toContain('Cash rounding');
   expect(text).toContain('$0.02');
+
+  // The default document of a sale that took the money is the receipt: it is
+  // headed RECEIPT and it asks for neither a total due nor a remit to
+  // (CP-14).
+  const defaultDoc = await request.get(`/api/v1/pos/transactions/${saleId}/receipt`);
+  expect(defaultDoc.status(), await defaultDoc.text()).toBe(200);
+  const defaultText = (await defaultDoc.body()).toString('latin1');
+  expect(defaultText).toContain('RECEIPT');
+  expect(defaultText).toContain('PAID');
+  expect(defaultText).toContain('Cash rounding');
+  expect(defaultText).not.toContain('TOTAL DUE');
+  expect(defaultText).not.toContain('REMIT TO');
 
   // A $1.07 sale paid by card settles to the exact cent: no cash leg, no
   // rounding, and the receipt says nothing about it.

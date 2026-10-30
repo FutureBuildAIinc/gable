@@ -6342,7 +6342,7 @@ export interface paths {
         };
         /**
          * Print the sale's receipt
-         * @description The sale's invoice as the invoice print route answers it (the same renderer: Content-Type application/pdf, inline), under the counter's own roles admin, owner and cashier, so the till prints its own receipt without the documents roles. The sale is read as the sale read reads it: a sale that does not exist, or that the caller's branch context, wall or bound key pin hides, answers 404, the same for both. A sale that is not completed, or has no invoice, answers 409 with the blocker no_receipt. The layout query chooses the document: invoice (the default, as it has always printed) or thermal80, the 80mm till receipt. Each print is counted against the sale (the print_count on the sale, and the X-Receipt-Print header names this print): the second and later prints of the 80mm receipt carry a REPRINT marker with the count, and the receipt prints the sale's sealed signature block when one exists. thermal80 answers 409 with the blocker layout_unavailable, counting nothing, on a server that has no 80mm renderer; any other layout is 400.
+         * @description The sale's default document, printed as the invoice print route answers it (Content-Type application/pdf, inline), under the counter's own roles admin, owner and cashier, so the till prints its own receipt without the documents roles. The document is the receipt of a sale that took the money (CP-14): it is headed RECEIPT, it says PAID, it names the tenders that paid it and the cash rounding the branch's rule made, and it carries no total due and no remit to, because there is nothing left to remit. A sale that went on account, or one the books have not settled, keeps its invoice. The sale is read as the sale read reads it: a sale that does not exist, or that the caller's branch context, wall or bound key pin hides, answers 404, the same for both. A sale that is not completed, or has no invoice, answers 409 with the blocker no_receipt. The layout query chooses the document: invoice (the default) or thermal80, the 80mm till receipt, which carries the same heading and the same rounding line. Each print is counted against the sale (the print_count on the sale, and the X-Receipt-Print header names this print): the second and later prints of the 80mm receipt carry a REPRINT marker with the count, and the receipt prints the sale's sealed signature block when one exists. thermal80 answers 409 with the blocker layout_unavailable, counting nothing, on a server that has no 80mm renderer; any other layout is 400.
          */
         get: operations["posTransactionReceipt"];
         put?: never;
@@ -6364,7 +6364,7 @@ export interface paths {
         put?: never;
         /**
          * Email the sale's receipt
-         * @description Sends the sale's invoice to the account's contact exactly as the invoice email route does (the same service call, the same words, 202 and {"status":"queued"} with the queued delivery row's delivery_id; the send resolves that row to sent, logged or failed in email_deliveries), under the counter's own roles admin, owner and cashier. The sale is read as the sale read reads it (404 for a sale the caller cannot read). A sale that is not completed or has no invoice answers 409 with the blocker no_receipt; a walk in sale (no customer, or the shared walk in customer, whatever address that row holds), or an account with no email address on file, answers 409 with the blocker no_contact and words the card can show. Nothing is sent for any refusal.
+         * @description Sends the sale's default document to the account's contact, exactly as the invoice email route does (the same service call, 202 and {"status":"queued"} with the queued delivery row's delivery_id; the send resolves that row to sent, logged or failed in email_deliveries), under the counter's own roles admin, owner and cashier. The document is the receipt of a sale that took the money (CP-14), and the words are the receipt's: the subject names the receipt, not the invoice. A sale that went on account keeps its invoice. The sale is read as the sale read reads it (404 for a sale the caller cannot read). A sale that is not completed or has no invoice answers 409 with the blocker no_receipt; a walk in sale (no customer, or the shared walk in customer, whatever address that row holds), or an account with no email address on file, answers 409 with the blocker no_contact and words the card can show. Nothing is sent for any refusal.
          */
         post: operations["posTransactionReceiptEmail"];
         delete?: never;
@@ -18485,6 +18485,11 @@ export interface components {
              * @description The change given, never subtracted from the payments a second time.
              */
             change_cents: number;
+            /**
+             * Format: int64
+             * @description The cash the branch's own rounding rule moved the cash leg by (CP-18): positive when the drawer kept more than the sale needed, negative when it kept less. Zero when the rule did not touch the sale. The stored total does not move.
+             */
+            rounding_cents: number;
             /** Format: uuid */
             till_session_id: string | null;
             status: components["schemas"]["PosStatus"];

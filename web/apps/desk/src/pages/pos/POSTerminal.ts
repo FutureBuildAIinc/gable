@@ -69,6 +69,8 @@ const REGISTER_STORAGE_PREFIX = 'gable.pos.register.';
 // The sale each register last opened, so a visit that left it empty reuses it.
 const SALE_STORAGE_PREFIX = 'gable.pos.sale.';
 const fmt = (cents: number) => `$${(cents / 100).toFixed(2)}`;
+/** An amount with its direction in front of the money: "+$0.02", "-$0.02". */
+const fmtSigned = (cents: number) => `${cents < 0 ? '-' : '+'}$${(Math.abs(cents) / 100).toFixed(2)}`;
 const tenderTitle = (m: TenderMethod) => (m === 'account' ? 'Charge to account' : m === 'store_credit' ? 'Store credit' : m);
 /** A line carries a quantity control when it has a quantity the route reprices. */
 const hasQuantityControl = (l: SaleLine) => l.parent_line_id === null && ['product', 'kit', 'charge'].includes(l.line_type);
@@ -3757,6 +3759,9 @@ export class POSTerminal extends LitElement {
       ? 'border-white/10 text-slate-400 hover:bg-white/5 hover:text-white'
       : 'cursor-not-allowed border-white/10 text-slate-400 opacity-40';
     const how = sale.tenders.map((t) => `${methodLabel(t.method)} ${fmt(t.amount_cents)}`).join(', ');
+    // The cash the branch's rounding rule moved the cash leg by (CP-18): the
+    // same figure the receipt carries, so the counter and the paper agree.
+    const rounding = sale.rounding_cents ?? 0;
     const invoice = sale.invoice_id;
     const po = (sale.customer_po ?? '').trim();
     const jobName = this._jobName(sale.job_id || this._jobId);
@@ -3766,7 +3771,7 @@ export class POSTerminal extends LitElement {
           <span class="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-gable-green text-2xl font-bold text-deep-space" aria-hidden="true">✓</span>
           <div class="min-w-0">
             <h2 class="text-xl font-bold text-white">Sale complete</h2>
-            <p class="font-mono text-sm text-slate-300">${sale.number} &middot; ${fmt(sale.total_cents)}${how !== '' ? html` &middot; ${how}` : nothing}${sale.change_cents > 0 ? html`, change ${fmt(sale.change_cents)}` : nothing}</p>
+            <p class="font-mono text-sm text-slate-300">${sale.number} &middot; ${fmt(sale.total_cents)}${rounding !== 0 ? html` &middot; cash rounding ${fmtSigned(rounding)}` : nothing}${how !== '' ? html` &middot; ${how}` : nothing}${sale.change_cents > 0 ? html`, change ${fmt(sale.change_cents)}` : nothing}</p>
             ${po !== '' || jobName !== null ? html`
               <p class="mt-1 font-mono text-xs text-slate-400" data-testid="pos-complete-refs">
                 ${po !== '' ? html`PO ${po}` : nothing}${po !== '' && jobName !== null ? html` &middot; ` : nothing}${jobName !== null ? html`Job ${jobName}` : nothing}
