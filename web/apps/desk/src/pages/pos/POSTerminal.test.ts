@@ -50,7 +50,7 @@ import { openAppDialog, answerAppDialog, chooseOption } from '../../test/dom';
 import type { CounterRegister, SaleSummary } from '../../types/pos';
 
 const reg = (id: string, branch: string, name = 'Front till'): CounterRegister => ({
-  id, name, branch_id: `b-${branch}`, branch_code: branch.toUpperCase(), branch_name: `${branch} yard`,
+  id, name, branch_id: `b-${branch}`, branch_code: branch.toUpperCase(), branch_name: `${branch} yard`, card_terminal: 'run',
 });
 const REG_01 = reg('REG-01', 'main');
 const OPEN_TILL = { id: 't', register_id: 'REG-01', cashier_id: 'c', status: 'open', opening_float_cents: 20000 };

@@ -51,7 +51,10 @@ up)
   fi
   # The large cash payer capture refuses to store a taxpayer id without a
   # vault key, so the stack runs with an obvious test pattern unless the
-  # caller gives one.
+  # caller gives one. The counter's card runs on the simulated terminal
+  # (approve): a server with no card terminal refuses a card tender (CP-05),
+  # so the specs that ring a card need one, and the simulator is a test
+  # configuration only, never a reachable host's.
   if [ -n "${APPWRITE_SEED_JSON:-}" ]; then
     command -v jq >/dev/null || { echo "e2e-stack.sh: jq not found" >&2; exit 69; }
     PROBE_PATH=/
@@ -68,7 +71,7 @@ up)
   else
     PROBE_PATH=/api/v1/apps
     AUTH_MODE=dev PORT="$CORE_PORT" DATABASE_URL="$DATABASE_URL" RATE_LIMIT_PER_MINUTE=5000 \
-      POS_SCALE_SIMULATOR=1 \
+      POS_SCALE_SIMULATOR=1 POS_TERMINAL_SIMULATOR=approve \
       PAYMENT_VAULT_KEY="${PAYMENT_VAULT_KEY:-$(openssl rand -hex 32)}" \
       setsid "$E2E_DIR/core" serve >"$E2E_DIR/core.log" 2>&1 &
   fi

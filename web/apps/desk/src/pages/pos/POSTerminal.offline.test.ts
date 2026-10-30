@@ -395,4 +395,22 @@ describe('the counter when the connection drops', () => {
     expect(svc.completeSale).not.toHaveBeenCalled();
     el.remove();
   });
+  // CP-05 round 3 P1-B (item 361): a counter opened offline names no card
+  // terminal, so Card is refused there in words, as the server refuses a
+  // card offline (tender_not_offline).
+  it('opens offline with no card terminal, and Card refused in words', async () => {
+    online = false;
+    svc.listRegisters.mockRejectedValue(new Error('Failed to fetch'));
+    const el = document.createElement('gable-pos-terminal') as POSTerminal;
+    document.body.appendChild(el);
+    await settle(el);
+    expect(q(el, 'pos-offline-mode')).toBeTruthy();
+    const reg = (el as unknown as { _register: { card_terminal?: string } | null })._register;
+    expect(reg?.card_terminal).toBe('none');
+    const card = q(el, 'pos-offline-method-card') as HTMLButtonElement | null;
+    expect(card, 'the offline tender offers its methods').not.toBeNull();
+    expect(card!.disabled).toBe(true);
+    expect(card!.title).toBe('needs the connection');
+    el.remove();
+  });
 });

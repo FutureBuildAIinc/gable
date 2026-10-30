@@ -115,7 +115,7 @@ func (s *SimulatedTerminal) Dispatch(ctx context.Context, d TerminalDispatch) (T
 	}
 	s.dispatched = append(s.dispatched, d)
 	s.mu.Unlock()
-	ref := "simterm_" + d.IdempotencyKey
+	ref := simulatedRefPrefix + d.IdempotencyKey
 	switch outcome {
 	case SimCrashAfterDispatch:
 		// the device recorded the leg and the connection died: the caller
@@ -201,7 +201,7 @@ func (s *SimulatedTerminal) SettlementBatch(ctx context.Context, deviceID string
 		if outcome != SimApprove && outcome != SimDuplicateAnswer && outcome != SimLateAnswer {
 			continue
 		}
-		out = append(out, TerminalBatchLine{ProviderRef: "simterm_" + d.IdempotencyKey,
+		out = append(out, TerminalBatchLine{ProviderRef: simulatedRefPrefix + d.IdempotencyKey,
 			Verdict: "authorized", AmountCents: d.AmountCents, Brand: "VISA", Last4: "4242"})
 	}
 	return out, nil

@@ -234,6 +234,12 @@ func (s *Service) CompleteSale(ctx context.Context, saleID uuid.UUID, ifMatch st
 	if err := cardOverTender(pre.Currency, sums.card, cashTendered, change); err != nil {
 		return nil, err
 	}
+	// A card with nothing to run it is refused here, before any charge: the
+	// legacy "externally captured" card booked a sale paid by a card that no
+	// terminal ever ran (CP-05 A1).
+	if err := s.refuseCardWithoutTerminal(pre.BranchID, tenders); err != nil {
+		return nil, err
+	}
 	if accountPortion > 0 {
 		if pre.CustomerID == nil {
 			return nil, conflict("walk_in_account",
@@ -334,12 +340,11 @@ func (s *Service) CompleteSale(ctx context.Context, saleID uuid.UUID, ifMatch st
 			chargesMade = append(chargesMade, chargeMade{result: res, amountCents: int64(t.AmountCents)})
 			continue
 		}
-		if t.TokenID == "" {
-			continue
-		}
-		if s.gateway == nil {
-			return nil, conflict("card_terminal",
-				"this register has no card terminal gateway: record the card tender without a token (the terminal settles it)")
+		// With no terminal wired, the pre-check above let through only a
+		// token bearing card with a gateway to charge it; this holds the
+		// same rule where the charge is made.
+		if t.TokenID == "" || s.gateway == nil {
+			return nil, conflict(codeCardTerminalNotWired, cardTerminalNotWiredWords)
 		}
 		res, err := s.gateway.Charge(ctx, chargeRequest(saleID, t, pre.Currency))
 		if err != nil || res.Status != chargeApproved {
