@@ -882,6 +882,10 @@ type fakeGateway struct {
 	refundErrs     []error
 	voidErrs       []error
 	refundStatuses []payment.GatewayStatus
+	// voidStatuses scripts one answer status per void call that answers
+	// with no error (a Run C is a DECLINED with a nil error); past the
+	// script a void answers VOIDED.
+	voidStatuses []payment.GatewayStatus
 	// onRefund runs at the start of every Refund call, outside the fake's
 	// mutex: the tests park a refund in flight or probe the database while
 	// the terminal is on the wire.
@@ -935,7 +939,11 @@ func (g *fakeGateway) Void(ctx context.Context, id string) (*payment.GatewayResu
 	if err != nil {
 		return nil, err
 	}
-	return &payment.GatewayResult{Status: payment.GatewayStatusVoided}, nil
+	status := payment.GatewayStatusVoided
+	if len(g.voidStatuses) > 0 {
+		status, g.voidStatuses = g.voidStatuses[0], g.voidStatuses[1:]
+	}
+	return &payment.GatewayResult{Status: status}, nil
 }
 
 func (g *fakeGateway) Refund(ctx context.Context, id string, cents int64) (*payment.GatewayResult, error) {

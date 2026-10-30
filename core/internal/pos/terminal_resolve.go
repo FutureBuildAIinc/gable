@@ -376,22 +376,22 @@ func (s *Service) resolveSaleAuthorized(ctx context.Context, item *payment.Termi
 
 // reverseTerminalCharge puts the reversed part of the charge back through the
 // gateway under the intent's idempotency key: the whole charge goes void
-// first, then refund when the void is refused; a part goes as a refund of
-// that part.
+// first, then refund when the void is refused or declined; a part goes as a
+// refund of that part. Each answer's verdict is read, not only its error
+// (CP-05 round 3 P1-A): a declined or unknown answer is a failed reversal,
+// so nothing is booked and the item opens again.
 func (s *Service) reverseTerminalCharge(ctx context.Context, ref string, plan salePlan, intent *payment.TerminalIntent) (string, error) {
+	var outcome chargeOutcome
+	var err error
 	if plan.applyC == 0 {
-		if _, voidErr := payment.VoidUnderKey(ctx, s.gateway, ref, intent.IdempotencyKey); voidErr == nil {
-			return string(chargeVoided), nil
-		}
-		if _, refundErr := payment.RefundUnderKey(ctx, s.gateway, ref, plan.reverse, intent.IdempotencyKey); refundErr != nil {
-			return "", refundErr
-		}
-		return string(chargeRefunded), nil
+		outcome, err = voidThenRefund(ctx, s.gateway, ref, plan.reverse, intent.IdempotencyKey)
+	} else {
+		outcome, err = refundUnder(ctx, s.gateway, ref, plan.reverse, intent.IdempotencyKey+"-rest")
 	}
-	if _, err := payment.RefundUnderKey(ctx, s.gateway, ref, plan.reverse, intent.IdempotencyKey+"-rest"); err != nil {
+	if err != nil {
 		return "", err
 	}
-	return string(chargeRefunded), nil
+	return string(outcome), nil
 }
 
 // settleSaleLeg writes everything a sale leg's resolution books, inside the

@@ -1,0 +1,175 @@
+// SPDX-License-Identifier: LicenseRef-OpenLBM-Commons-1.0
+// SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
+
+package pos_test
+
+// CP-05 round 3 P1-A: a reversal reads the gateway's verdict, not only its
+// error. A gateway may answer a definite decline with no error (the Run
+// terminal answers a C so), and a reversal that read only the error booked
+// that declined void as voided while the card stayed charged. VOIDED or
+// REFUNDED is the reversal; a definite DECLINED on the void goes to the
+// refund; any other answer is unknown and books no reversal.
+
+import (
+	"net/http"
+	"testing"
+
+	"github.com/gablelbm/gable/internal/payment"
+	"github.com/google/uuid"
+)
+
+// refusedCardSale rings a card sale the simulated terminal approves and the
+// completion then refuses (no stock), so the counter reverses the leg.
+func refusedCardSale(t *testing.T, gw *fakeGateway) (*fixture, string, resp) {
+	t.Helper()
+	f := terminalFixture(t, payment.SimApprove, gw)
+	saleID := f.openSale(t, nil)
+	mustExec(t, f.db, `UPDATE inventory SET quantity = 0 WHERE product_id = $1`, f.productID)
+	return f, saleID, f.completeSale(saleID, f.cardAll(t, saleID))
+}
+
+// RULE: a compensation void the gateway declines with no error goes to the
+// refund; the leg is spent only once the refund put the money back.
+func TestCP05R3_ADeclinedCompensationVoidGoesToTheRefund(t *testing.T) {
+	gw := &fakeGateway{voidStatuses: []payment.GatewayStatus{payment.GatewayStatusDeclined}}
+	f, saleID, r := refusedCardSale(t, gw)
+	if r.status != http.StatusConflict {
+		t.Fatalf("the refused completion = %d, wanted the refusal's 409: %s", r.status, r.raw)
+	}
+	if len(gw.voids) != 1 || len(gw.refunds) != 1 || gw.refundCents[0] != f.totalOf(t, saleID) {
+		t.Fatalf("voids %v refunds %v cents %v, wanted the declined void then one refund of the whole charge",
+			gw.voids, gw.refunds, gw.refundCents)
+	}
+	saleLegID, _, _ := f.terminalIntentOfKind(t, saleID, "sale")
+	if state, spent, _ := f.intentFacts(t, saleLegID); state != "authorized" || !spent {
+		t.Fatalf("the sale leg is %s spent=%t, wanted authorized and spent (refunded)", state, spent)
+	}
+}
+
+// RULE: a compensation void and refund both declined with no error put
+// nothing back: the completion answers the 502, the sale leg stays unspent
+// and the compensation leg takes no authorized verdict, so the sweep files
+// the manager item.
+func TestCP05R3_ADeclinedCompensationVoidAndRefundBookNoReversal(t *testing.T) {
+	gw := &fakeGateway{voidStatuses: []payment.GatewayStatus{payment.GatewayStatusDeclined},
+		refundStatuses: []payment.GatewayStatus{payment.GatewayStatusDeclined}}
+	f, saleID, r := refusedCardSale(t, gw)
+	if r.status != http.StatusBadGateway {
+		t.Fatalf("the completion = %d, wanted 502 (the charge was not reversed): %s", r.status, r.raw)
+	}
+	saleLegID, _, _ := f.terminalIntentOfKind(t, saleID, "sale")
+	if state, spent, _ := f.intentFacts(t, saleLegID); state != "authorized" || spent {
+		t.Fatalf("the sale leg is %s spent=%t, wanted authorized and unspent (the card still holds it)", state, spent)
+	}
+	compID, _ := f.refundLegOf(t, saleID, "void")
+	if state, _, _ := f.intentFacts(t, compID); state == "authorized" {
+		t.Fatalf("the compensation void took an authorized verdict for a reversal the gateway declined")
+	}
+}
+
+// RULE: a compensation void answering neither the reversal nor a decline is
+// unknown: no refund is sent on top of a void that may have gone through,
+// and the leg stays unspent for the sweep.
+func TestCP05R3_AnUnknownCompensationVoidSendsNoRefund(t *testing.T) {
+	gw := &fakeGateway{voidStatuses: []payment.GatewayStatus{payment.GatewayStatusPending}}
+	f, saleID, r := refusedCardSale(t, gw)
+	if r.status != http.StatusBadGateway {
+		t.Fatalf("the completion = %d, wanted 502 (the reversal is unknown): %s", r.status, r.raw)
+	}
+	if len(gw.refunds) != 0 {
+		t.Fatalf("refunds %v sent after an unknown void", gw.refunds)
+	}
+	saleLegID, _, _ := f.terminalIntentOfKind(t, saleID, "sale")
+	if _, spent, _ := f.intentFacts(t, saleLegID); spent {
+		t.Fatalf("the sale leg is spent after an unknown reversal")
+	}
+}
+
+// resolvePaidInFull rings a lost card leg on a sale then paid in cash, so the
+// manager's authorized resolution reverses the whole charge.
+func resolvePaidInFull(t *testing.T, gw *fakeGateway) (f *fixture, saleID string, intentID, itemID uuid.UUID, r resp) {
+	t.Helper()
+	f = terminalFixture(t, payment.SimNoAnswer, gw)
+	saleID = f.openSale(t, nil)
+	intentID, itemID = f.lostLegOf(t, saleID)
+	if done := f.completeSale(saleID, f.cashAll(t, saleID)); done.status != http.StatusOK {
+		t.Fatalf("the cash completion = %d: %s", done.status, done.raw)
+	}
+	return f, saleID, intentID, itemID, f.resolveItem(itemID, "authorized", f.recordedRefOf(t, intentID, itemID))
+}
+
+// RULE: the manager's whole charge reversal goes to the refund when the void
+// is declined with no error.
+func TestCP05R3_AResolvedWholeChargeGoesToTheRefundOnADeclinedVoid(t *testing.T) {
+	gw := &fakeGateway{voidStatuses: []payment.GatewayStatus{payment.GatewayStatusDeclined}}
+	f, saleID, _, _, r := resolvePaidInFull(t, gw)
+	if r.status != http.StatusOK {
+		t.Fatalf("the resolve = %d: %s", r.status, r.raw)
+	}
+	if len(gw.voids) != 1 || len(gw.refunds) != 1 || gw.refundCents[0] != f.totalOf(t, saleID) {
+		t.Fatalf("voids %v refunds %v cents %v, wanted the declined void then the whole refund", gw.voids, gw.refunds, gw.refundCents)
+	}
+}
+
+// RULE: the manager's whole charge reversal with the void and the refund
+// both declined books nothing: 502, the item is open again, the leg unspent.
+func TestCP05R3_AResolvedWholeChargeBothDeclinedBooksNothing(t *testing.T) {
+	gw := &fakeGateway{voidStatuses: []payment.GatewayStatus{payment.GatewayStatusDeclined},
+		refundStatuses: []payment.GatewayStatus{payment.GatewayStatusDeclined}}
+	f, _, intentID, itemID, r := resolvePaidInFull(t, gw)
+	if r.status != http.StatusBadGateway {
+		t.Fatalf("the resolve = %d, wanted 502: %s", r.status, r.raw)
+	}
+	if got := itemStateOf(t, f, itemID); got != "open" {
+		t.Fatalf("the item is %s, wanted open again", got)
+	}
+	if _, spent, _ := f.intentFacts(t, intentID); spent {
+		t.Fatalf("the leg is spent after a declined reversal")
+	}
+}
+
+// RULE: the manager's whole charge reversal on an unknown void answer sends
+// no refund and books nothing.
+func TestCP05R3_AResolvedWholeChargeUnknownVoidSendsNoRefund(t *testing.T) {
+	gw := &fakeGateway{voidStatuses: []payment.GatewayStatus{payment.GatewayStatusPending}}
+	f, _, intentID, _, r := resolvePaidInFull(t, gw)
+	if r.status != http.StatusBadGateway {
+		t.Fatalf("the resolve = %d, wanted 502: %s", r.status, r.raw)
+	}
+	if len(gw.refunds) != 0 {
+		t.Fatalf("refunds %v sent after an unknown void", gw.refunds)
+	}
+	if _, spent, _ := f.intentFacts(t, intentID); spent {
+		t.Fatalf("the leg is spent after an unknown reversal")
+	}
+}
+
+// RULE: the rest of a partly applied charge refunded with a decline and no
+// error books nothing: 502, no card tender, the leg unspent.
+func TestCP05R3_ADeclinedRestRefundBooksNothing(t *testing.T) {
+	gw := &fakeGateway{refundStatuses: []payment.GatewayStatus{payment.GatewayStatusDeclined}}
+	f := terminalFixture(t, payment.SimNoAnswer, gw)
+	customer := f.customerID
+	saleID := f.openSale(t, &customer)
+	intentID, itemID := f.lostLegOf(t, saleID)
+	total := f.totalOf(t, saleID)
+	if r := f.completeSale(saleID, tender("cash", 100), tender("account", total-100)); r.status != http.StatusOK {
+		t.Fatalf("the cash and account completion = %d: %s", r.status, r.raw)
+	}
+	r := f.resolveItem(itemID, "authorized", f.recordedRefOf(t, intentID, itemID))
+	if r.status != http.StatusBadGateway {
+		t.Fatalf("the resolve = %d, wanted 502 (the rest did not go back): %s", r.status, r.raw)
+	}
+	if len(gw.refunds) != 1 {
+		t.Fatalf("refunds %v, wanted the one declined rest refund", gw.refunds)
+	}
+	if got := f.cardTendersOf(t, saleID); got != 0 {
+		t.Fatalf("%d card tenders booked after a declined rest refund", got)
+	}
+	if _, spent, _ := f.intentFacts(t, intentID); spent {
+		t.Fatalf("the leg is spent after a declined rest refund")
+	}
+	if got := itemStateOf(t, f, itemID); got != "open" {
+		t.Fatalf("the item is %s, wanted open again", got)
+	}
+}
