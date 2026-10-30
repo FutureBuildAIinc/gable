@@ -1,0 +1,41 @@
+# SPDX-License-Identifier: LicenseRef-OpenLBM-Docs-1.0
+# SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
+
+# The short push check for work branches: a build and the contract gates, so a
+# push to a refactor branch is answered fast. The whole suite, Playwright, the
+# stack and the Tauri shell run in ci.yml on the pull request.
+name: CI push (short)
+
+on:
+  push:
+    branches: ["refactor/**"]
+
+permissions:
+  contents: read
+
+# One run per branch: a newer push cancels the older run.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GO_VERSION: "1.26"
+
+jobs:
+  short:
+    name: Build and contract
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: core/go.sum
+
+      - name: Build
+        run: go build ./...
+        working-directory: core
+
+      - name: Contract (Go)
+        run: make contract-go

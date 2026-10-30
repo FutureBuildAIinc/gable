@@ -73,7 +73,7 @@ jobs:
 
       - name: Vet
         working-directory: core
-        run: go vet ./...
+        run: go vet -tags devauth ./...
 
       # Contract gates (R1-7): the assembled document and the pending list
       # are generated files. An edited fragment without a regeneration, or
@@ -86,7 +86,7 @@ jobs:
 
       - name: Build
         working-directory: core
-        run: go build ./...
+        run: go build -tags devauth ./...
 
       - name: Migrate test database
         working-directory: core
@@ -99,7 +99,15 @@ jobs:
       # coverage, so the limit is twenty.
       - name: Test (with coverage)
         working-directory: core
-        run: go test -race -timeout 20m -coverprofile=coverage.out -covermode=atomic ./...
+        run: go test -tags devauth -race -timeout 20m -coverprofile=coverage.out -covermode=atomic ./...
+
+      # The suite above is a dev build (AUTH_MODE=dev is set for the whole
+      # workflow and only a devauth build starts with it). These are the
+      # release build's half of ADR 0012 section 7: with no tag, a start with
+      # AUTH_MODE=dev is refused.
+      - name: Test the release build's dev mode refusal
+        working-directory: core
+        run: go test -count=1 -run 'TestCheck|TestEnabledMatchesBuild|TestStartRefusesDevMode' ./pkg/devauth/... ./internal/app/serve/
 
       # REPORTING ONLY — there is deliberately NO coverage threshold, here or
       # anywhere else in this workflow. Baseline coverage is low; a failing gate
@@ -543,7 +551,18 @@ jobs:
           done
 
       - name: Build backend image
-        run: docker build -f core/Dockerfile .
+        run: docker build -f core/Dockerfile -t gable-core:release-check .
+
+      # ADR 0012 section 7: the image to publish is built without the devauth
+      # tag, so its binary must refuse AUTH_MODE=dev at start. `if` keeps the
+      # step red when the container starts instead of exiting.
+      - name: Prove the image refuses dev mode
+        run: |
+          if out="$(docker run --rm -e AUTH_MODE=dev gable-core:release-check ./core serve 2>&1)"; then
+            echo "the release image started with AUTH_MODE=dev"
+            exit 1
+          fi
+          echo "$out" | grep -q 'built without the devauth tag' || { echo "$out"; echo "refused for another reason"; exit 1; }
 
       - name: Build web image (both bundles, one nginx)
         run: docker build -f web/Dockerfile -t gable-web:routing-check .

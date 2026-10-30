@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: LicenseRef-OpenLBM-Surface-1.0
 // SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
 
+import { readFileSync } from 'node:fs';
 import { test, expect, type Page } from './font-guard';
 
 /**
@@ -15,11 +16,18 @@ import { test, expect, type Page } from './font-guard';
  * <role>@s9proof.example). The dev mode stack of the Playwright job cannot
  * sign in against Appwrite, so they run only when APPWRITE_E2E=1 names such a
  * stack; every other spec of the suite keeps its dev mode persona flow.
- * APPWRITE_E2E_PASSWORD overrides the seed's shared password.
+ * The seed's shared password is generated per run and read from the seed file
+ * APPWRITE_SEED_JSON names; APPWRITE_E2E_PASSWORD overrides it.
  */
 test.skip(process.env.APPWRITE_E2E !== '1', 'needs the Appwrite backed stack (APPWRITE_E2E=1)');
 
-const PASSWORD = process.env.APPWRITE_E2E_PASSWORD ?? 's9proof-not-a-real-password';
+function seedPassword(): string {
+  const seed = process.env.APPWRITE_SEED_JSON;
+  return seed ? (JSON.parse(readFileSync(seed, 'utf8')) as { password?: string }).password ?? '' : '';
+}
+
+const PASSWORD = process.env.APPWRITE_E2E_PASSWORD ?? seedPassword();
+if (process.env.APPWRITE_E2E === '1' && !PASSWORD) throw new Error('no seed password: set APPWRITE_SEED_JSON or APPWRITE_E2E_PASSWORD');
 const SESSION_COOKIE = 'gable_session';
 
 async function signIn(page: Page, role: string, password = PASSWORD) {

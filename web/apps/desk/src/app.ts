@@ -3,7 +3,7 @@
 
 import { LitElement, html, nothing } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
-import { router, type RouteMatch } from './lib/router.ts';
+import { router, routeRefused, refusalWords, type RouteMatch } from './lib/router.ts';
 import { appKeyForPath, appManifests, tagForPath as appTagForPath } from './apps/registry.ts';
 import { appsService } from './services/AppsService.ts';
 import { SESSION_EXPIRED_EVENT } from './services/fetchClient.ts';
@@ -235,9 +235,16 @@ export class GableApp extends LitElement {
         : undefined;
 
     // Create the page element dynamically with params as attributes
+    // Role gate (UX only, the server's role walls decide): a person whose
+    // roles do not reach the page sees a plain refusal in its place.
+    const required = this._match.route.roles;
     const pageHtml = disabledApp
       ? html`<gable-app-disabled app-name=${disabledApp.name}></gable-app-disabled>`
-      : this._renderPageTag(tag);
+      : required && routeRefused(this._match.route)
+        ? html`<div data-testid="role-refusal" class="flex w-full items-center justify-center p-16 text-center">
+            <p class="text-zinc-300 text-lg">${refusalWords(required)}</p>
+          </div>`
+        : this._renderPageTag(tag);
 
     switch (layout) {
       case 'erp':

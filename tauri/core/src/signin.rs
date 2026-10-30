@@ -16,6 +16,11 @@
 //! - Refresh rotates both tokens, serialised by one lock so two callers in
 //!   this process never present the same refresh token (the core revokes the
 //!   whole family when one is presented twice).
+//! - A work shell can also sign a register in by the person's email and
+//!   password (`sign_in_password`): one POST to the core's shell door, the
+//!   pair into the keychain. The password is held only for that one call,
+//!   in a buffer wiped on drop, and is never stored, logged or put in an
+//!   error.
 //! - Nothing here logs or prints, and every failure is a code word, never a
 //!   value.
 
@@ -28,7 +33,9 @@ use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
 use sha2::{Digest, Sha256};
 use url::Url;
-use zeroize::Zeroizing;
+/// The wiping holder the password arrives in; re-exported so a profile
+/// crate wraps it without a dependency of its own.
+pub use zeroize::Zeroizing;
 
 use crate::custody::CustodyError;
 use crate::tokens::{TokenSet, TokenStore};
@@ -47,8 +54,13 @@ pub enum SignInError {
     NoServer,
     /// The person did not come back in time.
     TimedOut,
-    /// The core refused (a person Gable does not admit, a used or wrong code).
+    /// The core refused (a person Gable does not admit, a used or wrong
+    /// code, a wrong email or password).
     Refused,
+    /// The dealer does not allow email and password sign in.
+    NotAllowed,
+    /// Too many sign in tries; the core asks the person to wait.
+    Limited,
     /// The core or the network could not be reached, or answered a fault.
     Unavailable,
     /// There is no session to refresh.
@@ -64,6 +76,8 @@ impl SignInError {
             SignInError::NoServer => "no_server",
             SignInError::TimedOut => "timed_out",
             SignInError::Refused => "sign_in_refused",
+            SignInError::NotAllowed => "sign_in_not_allowed",
+            SignInError::Limited => "sign_in_limited",
             SignInError::Unavailable => "sign_in_unavailable",
             SignInError::NoSession => "no_session",
             SignInError::Custody => "keychain_unavailable",
@@ -358,6 +372,14 @@ impl Transport for UreqTransport {
     }
 }
 
+/// The password door's body, serialised from borrowed fields so the only
+/// copy of the password it makes is the one in the zeroizing buffer.
+#[derive(serde::Serialize)]
+struct PasswordBody<'a> {
+    email: &'a str,
+    password: &'a str,
+}
+
 /// The shell's client of the core's token routes.
 pub struct SignInClient {
     transport: Arc<dyn Transport>,
@@ -421,6 +443,45 @@ impl SignInClient {
                 store.clear(profile)?;
                 Err(SignInError::NoSession)
             }
+            _ => Err(SignInError::Unavailable),
+        }
+    }
+
+    /// Signs this profile in by email and password at the core's shell door
+    /// and keeps the pair in the keychain. The password lives only for this
+    /// call: the caller's `Zeroizing` holder and the request body, sized up
+    /// front so it never grows and leaves a freed copy, are both wiped when
+    /// they drop. A refusal or fault stores nothing, leaves a held session
+    /// as it was, and answers a fixed code. Takes the rotation lock, so a
+    /// sign in and a refresh never interleave on one store.
+    pub fn sign_in_password(
+        &self,
+        store: &TokenStore,
+        profile: &str,
+        email: &str,
+        password: Zeroizing<String>,
+    ) -> Result<(), SignInError> {
+        let _one_at_a_time = self.rotation.lock().map_err(|_| SignInError::Unavailable)?;
+        let body = PasswordBody {
+            email,
+            password: &password,
+        };
+        // A JSON string escape is at most six bytes per input byte.
+        let mut buf = Zeroizing::new(Vec::with_capacity(32 + 6 * (email.len() + password.len())));
+        serde_json::to_writer(&mut *buf, &body).map_err(|_| SignInError::Unavailable)?;
+        let json = std::str::from_utf8(&buf).map_err(|_| SignInError::Unavailable)?;
+        let answer =
+            self.transport
+                .post_json(&self.route("/api/v1/auth/shell/signin"), None, json)?;
+        match answer.status {
+            200 => {
+                let pair = tokens_from(&answer.body)?;
+                store.store(profile, &pair)?;
+                Ok(())
+            }
+            400 | 401 => Err(SignInError::Refused),
+            403 => Err(SignInError::NotAllowed),
+            429 => Err(SignInError::Limited),
             _ => Err(SignInError::Unavailable),
         }
     }
@@ -1036,6 +1097,263 @@ mod tests {
         assert!(!open_in_browser("not a url"));
     }
 
+    const PASSWORD: &str = "pw-sentinel-Kx9";
+    const EMAIL: &str = "clerk@yard.example";
+
+    fn password() -> Zeroizing<String> {
+        Zeroizing::new(PASSWORD.to_string())
+    }
+
+    #[test]
+    fn password_sign_in_posts_once_and_keeps_the_pair_in_the_keychain() {
+        let fake = Fake::new(vec![ok("gst_pw", "fam.pw")]);
+        let client = SignInClient::new(fake.clone(), &base());
+        let (store, custody) = store();
+        client
+            .sign_in_password(&store, WORK, EMAIL, password())
+            .unwrap();
+        let seen = fake.seen();
+        assert_eq!(seen.len(), 1, "one POST, no retry");
+        assert_eq!(seen[0].0, "https://gable.example/api/v1/auth/shell/signin");
+        assert_eq!(seen[0].1, None, "no bearer on the sign in");
+        let body: serde_json::Value = serde_json::from_str(&seen[0].2).unwrap();
+        let keys: Vec<&str> = body
+            .as_object()
+            .unwrap()
+            .keys()
+            .map(String::as_str)
+            .collect();
+        assert_eq!(
+            keys,
+            ["email", "password"],
+            "the body holds exactly the two fields"
+        );
+        assert_eq!(body["email"], EMAIL);
+        assert_eq!(body["password"], PASSWORD);
+        let read = store.read(WORK).unwrap().unwrap();
+        assert_eq!((read.access(), read.refresh()), ("gst_pw", "fam.pw"));
+        assert_eq!(custody.snapshot_len(), 2, "only the pair is kept");
+    }
+
+    #[test]
+    fn a_password_refusal_or_fault_stores_nothing_and_answers_a_fixed_code() {
+        let cases = || {
+            vec![
+                (status(401), SignInError::Refused),
+                (status(400), SignInError::Refused),
+                (status(403), SignInError::NotAllowed),
+                (status(429), SignInError::Limited),
+                (status(500), SignInError::Unavailable),
+                (status(503), SignInError::Unavailable),
+                (Err(SignInError::Unavailable), SignInError::Unavailable),
+                (
+                    Ok(HttpAnswer {
+                        status: 200,
+                        body: "{}".into(),
+                    }),
+                    SignInError::Unavailable,
+                ),
+            ]
+        };
+        // An empty keychain stays empty.
+        let (empty, custody) = store();
+        for (answer, want) in cases() {
+            let client = SignInClient::new(Fake::new(vec![answer]), &base());
+            assert_eq!(
+                client.sign_in_password(&empty, WORK, EMAIL, password()),
+                Err(want)
+            );
+        }
+        assert_eq!(custody.snapshot_len(), 0);
+        // A held session is left exactly as it was: a refusal is not a sign out.
+        let (store, custody) = store();
+        store
+            .store(
+                WORK,
+                &TokenSet::new("gst_held".into(), "fam.held".into()).unwrap(),
+            )
+            .unwrap();
+        let before = custody.snapshot_pairs();
+        for (answer, want) in cases() {
+            let client = SignInClient::new(Fake::new(vec![answer]), &base());
+            assert_eq!(
+                client.sign_in_password(&store, WORK, EMAIL, password()),
+                Err(want)
+            );
+            assert_eq!(custody.snapshot_pairs(), before, "{}", want.code());
+        }
+        assert_eq!(SignInError::NotAllowed.code(), "sign_in_not_allowed");
+        assert_eq!(SignInError::Limited.code(), "sign_in_limited");
+        assert_eq!(SignInError::Refused.code(), "sign_in_refused");
+        assert_eq!(SignInError::Unavailable.code(), "sign_in_unavailable");
+    }
+
+    /// A sign in writes the pair a refresh reads and replaces, so the two
+    /// take the one rotation lock and never interleave on one store.
+    #[test]
+    fn a_password_sign_in_and_a_refresh_never_interleave() {
+        struct Slow {
+            events: Mutex<Vec<String>>,
+        }
+        impl Transport for Slow {
+            fn post_json(
+                &self,
+                url: &str,
+                _: Option<&str>,
+                _: &str,
+            ) -> Result<HttpAnswer, SignInError> {
+                let path = url.rsplit('/').next().unwrap().to_string();
+                self.events.lock().unwrap().push(format!("start {path}"));
+                std::thread::sleep(Duration::from_millis(150));
+                self.events.lock().unwrap().push(format!("end {path}"));
+                Ok(HttpAnswer {
+                    status: 200,
+                    body: serde_json::json!({"access_token": format!("gst_{path}"), "refresh_token": format!("fam.{path}")}).to_string(),
+                })
+            }
+        }
+        let slow = Arc::new(Slow {
+            events: Mutex::new(vec![]),
+        });
+        let client = Arc::new(SignInClient::new(slow.clone(), &base()));
+        let (store, _) = store();
+        store
+            .store(
+                WORK,
+                &TokenSet::new("gst_0".into(), "fam.0".into()).unwrap(),
+            )
+            .unwrap();
+        let gate = Arc::new(std::sync::Barrier::new(2));
+        let (c1, s1, g1) = (client.clone(), store.clone(), gate.clone());
+        let a = std::thread::spawn(move || {
+            g1.wait();
+            c1.sign_in_password(&s1, WORK, EMAIL, password())
+        });
+        let (c2, s2, g2) = (client.clone(), store.clone(), gate.clone());
+        let b = std::thread::spawn(move || {
+            g2.wait();
+            c2.refresh(&s2, WORK).map(|_| ())
+        });
+        a.join().unwrap().unwrap();
+        b.join().unwrap().unwrap();
+        let events = slow.events.lock().unwrap().clone();
+        assert_eq!(events.len(), 4);
+        for pair in events.chunks(2) {
+            let (start, end) = (&pair[0], &pair[1]);
+            assert!(
+                start.starts_with("start ") && end == &start.replacen("start", "end", 1),
+                "interleaved: {events:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_password_never_reaches_custody_or_an_error() {
+        // Success: custody holds the pair and no part of the password.
+        let (store, custody) = store();
+        SignInClient::new(Fake::new(vec![ok("gst_a", "fam.a")]), &base())
+            .sign_in_password(&store, WORK, EMAIL, password())
+            .unwrap();
+        // Every refusal and fault: the error is a Copy code with no room for a
+        // value, and its words hold no part of the password.
+        for answer in [
+            status(401),
+            status(403),
+            status(429),
+            status(500),
+            Ok(HttpAnswer {
+                status: 401,
+                body: format!("{{\"error\":\"{PASSWORD}\"}}"),
+            }),
+            Err(SignInError::Unavailable),
+        ] {
+            let err = SignInClient::new(Fake::new(vec![answer]), &base())
+                .sign_in_password(&store, WORK, EMAIL, password())
+                .unwrap_err();
+            let words = format!("{} {:?}", err.code(), err);
+            for part in [PASSWORD, "pw-sentinel", "Kx9"] {
+                assert!(!words.contains(part), "{words}");
+            }
+        }
+        for (service, account) in custody.snapshot_pairs() {
+            for part in [PASSWORD, "pw-sentinel", "Kx9"] {
+                assert!(!service.contains(part) && !account.contains(part));
+            }
+        }
+        let mut values = custody.snapshot_values();
+        values.sort();
+        assert_eq!(
+            values,
+            ["fam.a", "gst_a"],
+            "custody holds the pair and nothing else"
+        );
+    }
+
+    /// The core refuses any Origin header on this route, and every browser
+    /// POST sends one, so the shell's own post must send none.
+    #[test]
+    fn the_password_post_sends_no_origin_header() {
+        let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let server = std::thread::spawn(move || {
+            let (mut s, _) = listener.accept().unwrap();
+            s.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+            let mut raw = Vec::new();
+            let mut buf = [0u8; 4096];
+            loop {
+                let n = s.read(&mut buf).unwrap();
+                raw.extend_from_slice(&buf[..n]);
+                let text = String::from_utf8_lossy(&raw).to_string();
+                if let Some(head_end) = text.find("\r\n\r\n") {
+                    let len = text[..head_end]
+                        .lines()
+                        .find_map(|l| {
+                            l.to_ascii_lowercase()
+                                .strip_prefix("content-length:")
+                                .map(|v| v.trim().parse::<usize>().unwrap())
+                        })
+                        .unwrap_or(0);
+                    if raw.len() >= head_end + 4 + len || n == 0 {
+                        break;
+                    }
+                }
+            }
+            let body =
+                serde_json::json!({"access_token": "gst_l", "refresh_token": "fam.l"}).to_string();
+            write!(
+                s,
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            )
+            .unwrap();
+            String::from_utf8(raw).unwrap()
+        });
+        let base = Url::parse(&format!("http://127.0.0.1:{port}/")).unwrap();
+        let client = SignInClient::new(Arc::new(UreqTransport::new()), &base);
+        let (store, _) = store();
+        client
+            .sign_in_password(&store, WORK, EMAIL, password())
+            .unwrap();
+        let request = server.join().unwrap();
+        let head = request
+            .split("\r\n\r\n")
+            .next()
+            .unwrap()
+            .to_ascii_lowercase();
+        assert!(
+            head.starts_with("post /api/v1/auth/shell/signin "),
+            "{head}"
+        );
+        for line in head.lines().skip(1) {
+            let name = line.split(':').next().unwrap().trim();
+            assert!(
+                !matches!(name, "origin" | "referer" | "cookie" | "authorization"),
+                "the shell sent {name}"
+            );
+        }
+        assert_eq!(store.read(WORK).unwrap().unwrap().access(), "gst_l");
+    }
+
     #[test]
     fn the_sign_in_path_holds_no_logging_or_printing() {
         let src = include_str!("signin.rs");
@@ -1056,5 +1374,21 @@ mod tests {
         ] {
             assert!(!production.contains(banned), "signin.rs contains {banned}");
         }
+        // The password path is in the scanned text, and it formats nothing:
+        // the body is serialised from borrowed fields into a zeroizing buffer
+        // sized up front, so no grown and freed copy is left behind.
+        let start = production
+            .find("pub fn sign_in_password")
+            .expect("the password path is in the scan");
+        let path = &production[start..];
+        let path = &path[..path.find("\n    }\n").expect("the fn ends")];
+        for banned in ["format!", "to_string()", ".clone()", "json!", "{:?}"] {
+            assert!(!path.contains(banned), "sign_in_password contains {banned}");
+        }
+        assert!(path.contains("Zeroizing"), "the body is a zeroizing buffer");
+        assert!(
+            !production.to_ascii_lowercase().contains(".set(\"origin\""),
+            "the shell never sets an Origin header"
+        );
     }
 }
