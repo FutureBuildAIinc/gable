@@ -106,6 +106,10 @@ type offlineVerdict struct {
 	businessDate time.Time
 	item         *offlineItem
 	warnings     []uuid.UUID
+	// latePost is a manager's late post (ADR 0011 3.4, slice O4): the sale
+	// attaches to no till session, so the body skips the session check and
+	// the drawer attach, and books on businessDate, the earliest open date
+	latePost bool
 }
 
 // offlineRefusal is a coded reason an item goes to the exception queue.

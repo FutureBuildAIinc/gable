@@ -351,6 +351,23 @@ type Repository interface {
 	BranchDayClosedOn(ctx context.Context, branch uuid.UUID, date time.Time) (bool, error)
 	OfflineAccountUsedSince(ctx context.Context, register string, customer uuid.UUID, since time.Time) (int64, error)
 
+	// The offline exception queue (ADR 0011 3.4, slice O4)
+	OfflineExceptionHead(ctx context.Context, id uuid.UUID) (*offlineExceptionHead, error)
+	LockOfflineException(ctx context.Context, id uuid.UUID) (*OfflineException, error)
+	GetOfflineException(ctx context.Context, id uuid.UUID) (*OfflineException, error)
+	ListOfflineExceptions(ctx context.Context, branch uuid.UUID, statuses []string, after *time.Time, afterID *uuid.UUID,
+		limit int) ([]OfflineException, bool, error)
+	ResolveOfflineExceptionRow(ctx context.Context, id uuid.UUID, status, action, reason, actor string, posted *uuid.UUID) error
+	SetOfflineExceptionPosted(ctx context.Context, id, sale uuid.UUID) error
+	InsertOfflineGap(ctx context.Context, held *OfflineException, from, to int64, action, reason, actor string) (uuid.UUID, error)
+	OfflineHeldBelow(ctx context.Context, register string, epoch, seq int64) (bool, error)
+	MarkResolvedOfflineSale(ctx context.Context, id uuid.UUID, it *offlineItem, snapshot uuid.UUID, seq *int64,
+		offlineSession *uuid.UUID) error
+	EarliestOpenBusinessDate(ctx context.Context, branch uuid.UUID, from time.Time) (time.Time, bool, error)
+	OpenOfflineExceptionsOfSession(ctx context.Context, session uuid.UUID) ([]string, error)
+	OpenOfflineExceptionsOfDay(ctx context.Context, branch uuid.UUID, date string) ([]string, error)
+	OfflineUndrained(ctx context.Context, register string) (epoch, reported, high int64, found bool, err error)
+
 	// The manager step up (CP-04 slice 3)
 	FindStepUpManager(ctx context.Context, manager string) (*StepUpManager, bool, error)
 	FindStepUpManagerForUpdate(ctx context.Context, manager string) (*StepUpManager, bool, error)

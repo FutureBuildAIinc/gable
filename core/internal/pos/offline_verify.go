@@ -212,7 +212,7 @@ func (s *Service) verifyOfflineSale(ctx context.Context, branch uuid.UUID, dev *
 	}
 	if closed, err := s.repo.BranchDayClosedOn(ctx, branch, session.BusinessDate); err != nil {
 		return nil, err
-	} else if closed {
+	} else if closed && !offlineLatePostFrom(ctx) {
 		return nil, refuse("day_closed", "the branch day the sale was made in is closed")
 	}
 	if !snap.Policy.Enabled {
