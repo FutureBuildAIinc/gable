@@ -14,6 +14,7 @@ import (
 	"github.com/gablelbm/gable/internal/order"
 	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/gablelbm/gable/internal/product"
+	"github.com/gablelbm/gable/internal/salesdoc"
 	"github.com/gablelbm/gable/internal/units"
 	"github.com/gablelbm/gable/pkg/outbox"
 	"github.com/google/uuid"
@@ -27,9 +28,12 @@ import (
 type fakeRepo struct {
 	quotes   map[uuid.UUID]*Quote
 	products map[uuid.UUID]ProductRef
-	seq      int
-	log      *[]string // shared call log with the recorder, to assert ordering
-	insErr   error
+	// kits maps a kit product to its components; a kit product absent from it
+	// has no components, the definition the explosion refuses.
+	kits map[uuid.UUID][]salesdoc.KitComponent
+	seq  int
+	log  *[]string // shared call log with the recorder, to assert ordering
+	insErr error
 	// jobOwner maps a job to the customer that owns it; a job absent from the
 	// map is owned by no customer the drafts name.
 	jobOwner map[uuid.UUID]uuid.UUID
@@ -37,7 +41,8 @@ type fakeRepo struct {
 
 func newFakeRepo() *fakeRepo {
 	log := []string{}
-	return &fakeRepo{quotes: map[uuid.UUID]*Quote{}, products: map[uuid.UUID]ProductRef{}, log: &log}
+	return &fakeRepo{quotes: map[uuid.UUID]*Quote{}, products: map[uuid.UUID]ProductRef{},
+		kits: map[uuid.UUID][]salesdoc.KitComponent{}, log: &log}
 }
 
 func (f *fakeRepo) note(s string) { *f.log = append(*f.log, s) }
@@ -56,6 +61,17 @@ func (f *fakeRepo) LookupProducts(_ context.Context, ids []uuid.UUID) (map[uuid.
 	for _, id := range ids {
 		if p, ok := f.products[id]; ok {
 			out[id] = p
+		}
+	}
+	return out, nil
+}
+
+// LookupKitComponents answers the kit definitions the fake holds.
+func (f *fakeRepo) LookupKitComponents(_ context.Context, kitIDs []uuid.UUID) (map[uuid.UUID][]salesdoc.KitComponent, error) {
+	out := map[uuid.UUID][]salesdoc.KitComponent{}
+	for _, id := range kitIDs {
+		if comps, ok := f.kits[id]; ok {
+			out[id] = comps
 		}
 	}
 	return out, nil

@@ -9,6 +9,7 @@ import (
 
 	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/gablelbm/gable/internal/product"
+	"github.com/gablelbm/gable/internal/salesdoc"
 	"github.com/google/uuid"
 )
 
@@ -130,13 +131,24 @@ type Quote struct {
 // extension in cents rounded once. From C3-2A-units a line that names a
 // product also carries its stocking unit and quantity (ADR 0006 sections 3.4
 // and 6) and, on a random length product, its tally (section 4): both null
-// on a line without a product, so a client reads one line shape.
+// on a line without a product, so a client reads one line shape. A line that
+// names a kit product is one kit line followed by one component line per
+// component of the kit's definition (QE-05-a, ADR 0005 section 2.6): the kit
+// line carries the price, its components the quantity and the cost, and the
+// pair of fields that says which is which is below.
 type QuoteLine struct {
 	ID          uuid.UUID  `json:"id"`
 	QuoteID     uuid.UUID  `json:"quote_id"`
 	ProductID   *uuid.UUID `json:"product_id"` // null for a special order line the dealer does not stock
 	SKU         string     `json:"sku"`
 	Description string     `json:"description"`
+
+	// LineType is the line's kind (ADR 0005 section 2.1): product, kit or
+	// component, lowercase on the wire. It is written by the server at the
+	// line's create or edit, never sent by a client.
+	LineType salesdoc.LineType `json:"line_type"`
+	// ParentLineID is set on a component line only, naming its kit line.
+	ParentLineID *uuid.UUID `json:"parent_line_id"`
 
 	// CustomerNote is what a portal user wrote when they asked for this line
 	// to be priced (migration 084). Read mostly on the ERP side: an edit that
@@ -163,7 +175,10 @@ type QuoteLine struct {
 	Tally *Tally `json:"tally"`
 
 	// UnitCost is the product's average cost, read only: the margin basis and
-	// the special order indicator for the auto purchase order.
+	// the special order indicator for the auto purchase order. A kit line's
+	// own cost is the kit row's, which says nothing about what the kit is made
+	// of: a kit's cost is its component lines' (the margin reads the
+	// components and never the kit row).
 	UnitCost httpx.Price `json:"unit_cost_ten_thousandths"`
 
 	CreatedAt httpx.Timestamp `json:"created_at"`

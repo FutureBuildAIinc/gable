@@ -10,17 +10,25 @@ package quote_test
 // order path makes, so the quote's margin and the order's agree to the cent.
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"net/http"
+	"net/http/httptest"
 	"sync"
 	"testing"
 
+	"github.com/gablelbm/gable/internal/order"
 	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/gablelbm/gable/internal/product"
 	"github.com/gablelbm/gable/internal/quote"
 	"github.com/gablelbm/gable/internal/salesdoc"
 	"github.com/gablelbm/gable/internal/testutil"
+	"github.com/gablelbm/gable/pkg/middleware"
+	"github.com/gablelbm/gable/pkg/outbox"
 	"github.com/google/uuid"
 )
 
@@ -102,8 +110,8 @@ func TestQE05_QuoteExplodesKit(t *testing.T) {
 	if p := num(t, kitLine, "unit_price_ten_thousandths"); p != 250000 {
 		t.Errorf("kit price = %d, want 250000 kept (the kit prices as a whole)", p)
 	}
-	if tot := num(t, kitLine, "line_total_cents"); tot != 50000 {
-		t.Errorf("kit extension = %d, want 50000 (2 kits at 25.00)", tot)
+	if tot := num(t, kitLine, "line_total_cents"); tot != 5000 {
+		t.Errorf("kit extension = %d, want 5000 (2 kits at 25.00)", tot)
 	}
 	kitID := str(t, kitLine, "id")
 	wantQty := map[string]string{k.compA.String(): "8", k.compB.String(): "2"}
@@ -130,8 +138,8 @@ func TestQE05_QuoteExplodesKit(t *testing.T) {
 		}
 	}
 	// The components ride at zero, so the quote's total is the kit alone.
-	if tot := num(t, created.body, "total_cents"); tot != 50000 {
-		t.Errorf("total = %d, want 50000 (the components are free on the face)", tot)
+	if tot := num(t, created.body, "total_cents"); tot != 5000 {
+		t.Errorf("total = %d, want 5000 (the components are free on the face)", tot)
 	}
 }
 
@@ -200,16 +208,41 @@ func TestQE05_ConvertedKitMarginMatchesQuote(t *testing.T) {
 			t.Errorf("order component line_type = %q, want component", got)
 		}
 	}
-	order := k.do("GET", "/api/v1/orders/"+orderID, nil)
-	if order.status != http.StatusOK {
-		t.Fatalf("order read = %d: %s", order.status, order.raw)
-	}
-	if m := num(t, order.body, "total_margin_cents"); m != want {
+	order := k.getOrder(t, orderID)
+	if m := num(t, order, "total_margin_cents"); m != want {
 		t.Errorf("order margin = %d, want the quote's %d", m, want)
 	}
-	if m := num(t, order.body, "total_margin_cents"); m != -2400 {
+	if m := num(t, order, "total_margin_cents"); m != -2400 {
 		t.Errorf("order margin = %d, want -2400 (20.00 revenue against 44.00 of components)", m)
 	}
+}
+
+// getOrder reads the converted order's margin rollup through the order
+// module's own read route, on a mux the test mounts for it.
+func (k *kitFixture) getOrder(t *testing.T, orderID string) map[string]any {
+	t.Helper()
+	svc := order.NewService(order.NewRepository(k.db)).
+		WithOutbox(outbox.NewWriter(k.db, "")).WithTxRunner(k.db)
+	mux := http.NewServeMux()
+	order.NewHandler(svc).RegisterRoutes(mux)
+	srv := httptest.NewServer(middleware.Idempotency(k.db)(mux))
+	t.Cleanup(srv.Close)
+	res, err := http.Get(srv.URL + "/api/v1/orders/" + orderID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	raw, _ := io.ReadAll(res.Body)
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("order read = %d: %s", res.StatusCode, raw)
+	}
+	body := map[string]any{}
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.UseNumber()
+	if err := dec.Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	return body
 }
 
 // RULE (ADR 0005 section 2.6): the explosion is done at the line's create or
@@ -252,8 +285,8 @@ func TestQE05_QuoteKitRevisionUpdateReexplodes(t *testing.T) {
 			t.Errorf("component %s quantity = %q, want %q (3 kits x per kit)", product, q, wantQty[product])
 		}
 	}
-	if tot := num(t, updated.body, "total_cents"); tot != 75000 {
-		t.Errorf("total after edit = %d, want 75000 (3 kits at 25.00)", tot)
+	if tot := num(t, updated.body, "total_cents"); tot != 7500 {
+		t.Errorf("total after edit = %d, want 7500 (3 kits at 25.00)", tot)
 	}
 	// The stored rows were replaced, not appended: one kit, two components.
 	var n int
@@ -308,16 +341,25 @@ func TestQE05_KitQuoteConcurrency_Pool4ThreeContenders(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			for j := 0; j < each; j++ {
-				d := draftFor(f.customerID, f.productID)
-				d.Lines = append(d.Lines, quote.DraftLine{
-					ProductID: &kit, SKU: kitSKU, Description: "A fence section kit",
-					Quantity: httpx.Quantity(40000), UOM: product.UOM_EA,
-					PriceUOM: "EA", UOMQty: httpx.Quantity(10000), PriceUOMQty: httpx.Quantity(10000),
-					UnitPrice: 1000000,
-				})
+				// The kit line alone: the kit product's own stocking row (EA,
+				// from the migration's constraint trigger) resolves its units.
+				d := &quote.Draft{
+					CustomerID: f.customerID, DeliveryType: quote.DeliveryPickup, Source: "manual",
+					Lines: []quote.DraftLine{{
+						ProductID: &kit, SKU: kitSKU, Description: "A fence section kit",
+						Quantity: httpx.Quantity(40000), UOM: product.UOM_EA,
+						PriceUOM: "EA", UOMQty: httpx.Quantity(10000), PriceUOMQty: httpx.Quantity(10000),
+						UnitPrice: 1000000,
+					}},
+				}
 				q, err := svc.Create(ctx, d)
 				if err != nil {
-					errs <- err
+					var he *httpx.Error
+					if errors.As(err, &he) {
+						errs <- fmt.Errorf("create: %s: %v", he.Message, he.Details)
+					} else {
+						errs <- err
+					}
 					return
 				}
 				kitLines, comps := 0, 0
@@ -347,13 +389,15 @@ func TestQE05_KitQuoteConcurrency_Pool4ThreeContenders(t *testing.T) {
 	if len(numbers) != contenders*each {
 		t.Fatalf("%d quotes created, want %d distinct numbers", len(numbers), contenders*each)
 	}
-	// Every stored kit quote still holds exactly its two lines.
+	// Every stored kit quote still holds exactly its two lines: the kit and
+	// its component.
 	var bad int
 	if err := db.Pool.QueryRow(ctx, `
 		SELECT count(*) FROM (
 			SELECT ql.quote_id FROM quote_lines ql
 			JOIN quotes q ON q.id = ql.quote_id
-			WHERE q.customer_id = $1 AND ql.product_id = $2
+			WHERE q.customer_id = $1
+			  AND ql.quote_id IN (SELECT quote_id FROM quote_lines WHERE product_id = $2)
 			GROUP BY ql.quote_id HAVING count(*) <> 2
 		) s`, f.customerID, kitID).Scan(&bad); err != nil {
 		t.Fatal(err)
