@@ -18,9 +18,9 @@
 --      device_seq) that exclude sequence_reused, bad_signature and
 --      replay_mismatch rows so duplicate or tampered replay attempts can be
 --      recorded without displacing the original sale or exception. The
---      warning_alert_id column holds the customer warning a sale was sold
---      past offline (the CP-13 OW exception rides this table; no second
---      review table is added later).
+--      warning_alert_id column holds the first customer warning a sale was sold
+--      past offline and warning_alert_ids every one of them (the CP-13 OW
+--      exception rides this table; no second review table is added later).
 --   5. pos_transactions: the offline provenance columns of ADR 0011 section 8
 --      row O1 (epoch, sequence, offline reference, snapshot id, signature
 --      digest, offline_session_id, replaces_sale_id with its replaced cart
@@ -112,6 +112,8 @@ CREATE TABLE IF NOT EXISTS pos_offline_exceptions (
     snapshot_id       UUID REFERENCES pos_offline_snapshots(id),
     customer_id       UUID REFERENCES customers(id),
     warning_alert_id  UUID REFERENCES customer_alerts(id),
+    warning_alert_ids JSONB NOT NULL DEFAULT '[]'::jsonb
+        CHECK (jsonb_typeof(warning_alert_ids) = 'array'),
     signed_sale       JSONB NOT NULL DEFAULT '{}'::jsonb,
     signature         TEXT NOT NULL DEFAULT '',
     signature_digest  TEXT NOT NULL DEFAULT '',

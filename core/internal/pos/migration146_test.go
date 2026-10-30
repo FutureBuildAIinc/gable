@@ -229,6 +229,21 @@ func TestMigration146_OfflineCounterSchemaAndConstraints(t *testing.T) {
 		"00000000-0000-0000-0000-00000000e103", branchID, custID, alertID); err != nil {
 		t.Fatalf("insert sold_past_warning exception with warning_alert_id failed: %v", err)
 	}
+	// A sale can be sold past several open warnings: every id is kept on the row.
+	if _, err := c.Exec(ctx, `
+		UPDATE pos_offline_exceptions SET warning_alert_ids = jsonb_build_array($2::text, $3::text)
+		WHERE sale_id = $1::uuid`,
+		"00000000-0000-0000-0000-00000000e103", alertID, "00000000-0000-0000-0000-00000000a247"); err != nil {
+		t.Fatalf("warning_alert_ids column missing or not JSONB: %v", err)
+	}
+	if n := mig105Scalar[int](t, c, `SELECT jsonb_array_length(warning_alert_ids) FROM pos_offline_exceptions WHERE sale_id = '00000000-0000-0000-0000-00000000e103'`); n != 2 {
+		t.Errorf("warning_alert_ids holds %d ids, want 2", n)
+	}
+	if _, err := c.Exec(ctx, `
+		UPDATE pos_offline_exceptions SET warning_alert_ids = '{"a":1}'::jsonb WHERE sale_id = $1::uuid`,
+		"00000000-0000-0000-0000-00000000e103"); err == nil {
+		t.Errorf("warning_alert_ids accepted a JSON object, want an array only")
+	}
 	if _, err := c.Exec(ctx, `
 		INSERT INTO pos_offline_exceptions (
 			sale_id, register_id, branch_id, device_epoch, device_seq, business_date, reason_code, warning_alert_id
