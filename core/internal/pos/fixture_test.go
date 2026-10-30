@@ -683,13 +683,12 @@ func (f *fixture) saleOf(qty string, tenders ...map[string]any) (saleID string, 
 	return saleID, r
 }
 
-// cashTender is a cash tender of exactly the total of qty at 5.50 plus the
-// branch tax on it.
-func (f *fixture) cashFor(qty string) map[string]any {
+// cashFor answers a cash tender of exactly the sale's current total.
+func (f *fixture) cashFor(saleID string) map[string]any {
 	f.t.Helper()
 	var total int64
 	if err := f.db.Pool.QueryRow(context.Background(),
-		`SELECT ROUND(total * 100)::bigint FROM pos_transactions ORDER BY created_at DESC LIMIT 1`).Scan(&total); err != nil {
+		`SELECT ROUND(total * 100)::bigint FROM pos_transactions WHERE id = $1`, saleID).Scan(&total); err != nil {
 		f.t.Fatal(err)
 	}
 	return tender("cash", total)

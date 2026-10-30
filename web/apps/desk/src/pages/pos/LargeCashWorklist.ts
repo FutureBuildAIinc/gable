@@ -146,7 +146,7 @@ export class LargeCashWorklist extends LitElement {
             <div class="lc-statement-actions mt-3 flex flex-wrap gap-2">
               <button data-testid="large-cash-statement-print" @click=${() => this._print()}
                 class="min-h-11 rounded px-4 py-2 text-sm font-bold"
-                style="background:rgb(var(--gb-till-accent));color:rgb(var(--gb-plate))">Print the statement</button>
+                style="background:rgb(var(--gb-till-accent));color:rgb(var(--gb-deep-space))">Print the statement</button>
               <button data-testid="large-cash-statement-close" @click=${() => { this._sheet = null; }}
                 class="min-h-11 rounded border px-4 py-2 text-sm font-semibold"
                 style="border-color:rgb(var(--gb-till-edge));${MUTED}">Close</button>
@@ -231,13 +231,13 @@ export class LargeCashWorklist extends LitElement {
             <div class="mt-3 flex flex-wrap gap-2">
               <button data-testid="large-cash-file" @click=${() => this._recordFiling(row)} ?disabled=${this._busy}
                 class="min-h-11 rounded px-4 py-2 text-sm font-bold"
-                style="background:rgb(var(--gb-till-accent));color:rgb(var(--gb-plate));${this._busy ? 'opacity:0.4' : ''}">${words.button}</button>
+                style="background:rgb(var(--gb-till-accent));color:rgb(var(--gb-deep-space));${this._busy ? 'opacity:0.4' : ''}">${words.button}</button>
             </div>` : nothing}
           ${words.canStatement ? html`
             <div class="mt-3 flex flex-wrap gap-2">
               <button data-testid="large-cash-statement" @click=${() => this._issueStatement(row)} ?disabled=${this._busy}
                 class="min-h-11 rounded px-4 py-2 text-sm font-bold"
-                style="background:rgb(var(--gb-till-accent));color:rgb(var(--gb-plate));${this._busy ? 'opacity:0.4' : ''}">Issue the customer statement</button>
+                style="background:rgb(var(--gb-till-accent));color:rgb(var(--gb-deep-space));${this._busy ? 'opacity:0.4' : ''}">Issue the customer statement</button>
             </div>` : nothing}
           ${row.rule_family === 'CA_DEALER' ? nothing : html`<div class="mt-3 flex flex-wrap gap-2">
             <button data-testid="large-cash-form" @click=${() => this._showForm(row)} ?disabled=${this._busy}

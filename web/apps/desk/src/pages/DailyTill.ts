@@ -53,7 +53,7 @@ export class GableDailyTill extends LitElement {
         const collectionRate = summary.total_invoiced ? (summary.total_collected / summary.total_invoiced) * 100 : 0;
 
         return html`
-            <div class="space-y-8 max-w-6xl mx-auto p-8 pb-20">
+            <div class="space-y-8 max-w-6xl mx-auto p-4 sm:p-8 pb-20">
                 <div>
                     <h1 class="text-3xl font-bold font-mono text-white mb-2">Financial Dashboard</h1>
                     <p class="text-zinc-400">Daily Till & Sales Summary</p>
@@ -63,11 +63,11 @@ export class GableDailyTill extends LitElement {
                 <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
                     <!-- Till Card -->
                     <div class="bg-zinc-900 border border-zinc-800 rounded-lg p-6">
-                        <div class="flex items-center justify-between mb-6">
+                        <div class="flex flex-wrap items-center justify-between gap-2 mb-6">
                             <h2 class="text-xl font-bold text-emerald-400 flex items-center gap-2">
                                 ${icon(DollarSign, 24)} Collected (${formatDay(till.date)})
                             </h2>
-                            <span class="text-3xl font-mono font-bold text-white">
+                            <span class="min-w-0 text-2xl sm:text-3xl font-mono font-bold text-white" data-testid="till-collected">
                                 ${formatDollars(till.net_collected)}
                             </span>
                         </div>
@@ -80,14 +80,14 @@ export class GableDailyTill extends LitElement {
 
                         <div class="space-y-4">
                             ${Object.entries(till.by_method).map(([method, amount]) => html`
-                                <div class="flex items-center justify-between p-4 bg-black/20 rounded border border-white/5">
-                                    <div class="flex items-center gap-3">
+                                <div class="flex items-center justify-between gap-3 p-4 bg-black/20 rounded border border-white/5">
+                                    <div class="flex min-w-0 items-center gap-3">
                                         <div class="p-2 bg-zinc-800 rounded text-zinc-400">
                                             ${icon(CreditCard, 18)}
                                         </div>
                                         <span class="font-bold text-zinc-200">${method}</span>
                                     </div>
-                                    <span class="font-mono text-xl text-white">$${(amount as number).toFixed(2)}</span>
+                                    <span class="min-w-0 shrink-0 font-mono text-lg sm:text-xl text-white" data-testid="till-method">${formatDollars(amount as number)}</span>
                                 </div>
                             `)}
                         </div>
@@ -105,19 +105,19 @@ export class GableDailyTill extends LitElement {
                             </h2>
                         </div>
 
-                        <div class="grid grid-cols-2 gap-4">
-                            <div class="p-4 bg-black/20 rounded border border-white/5">
+                        <div class="grid grid-cols-1 min-[480px]:grid-cols-2 gap-4">
+                            <div class="min-w-0 p-4 bg-black/20 rounded border border-white/5">
                                 <span class="block text-zinc-400 text-sm uppercase font-bold mb-1">Total Invoiced</span>
-                                <span class="block text-2xl font-mono text-white">$${summary.total_invoiced.toFixed(2)}</span>
+                                <span class="block text-xl sm:text-2xl font-mono text-white break-words" data-testid="summary-invoiced">${formatDollars(summary.total_invoiced)}</span>
                             </div>
-                            <div class="p-4 bg-black/20 rounded border border-white/5">
+                            <div class="min-w-0 p-4 bg-black/20 rounded border border-white/5">
                                 <span class="block text-zinc-400 text-sm uppercase font-bold mb-1">Total Collected</span>
-                                <span class="block text-2xl font-mono text-emerald-400">${formatDollars(summary.total_collected)}</span>
+                                <span class="block text-xl sm:text-2xl font-mono text-emerald-400 break-words" data-testid="summary-collected">${formatDollars(summary.total_collected)}</span>
                             </div>
-                            <div class="p-4 bg-black/20 rounded border border-white/5 col-span-2">
-                                <div class="flex justify-between items-center">
+                            <div class="p-4 bg-black/20 rounded border border-white/5 min-[480px]:col-span-2">
+                                <div class="flex flex-wrap justify-between items-center gap-x-4 gap-y-1">
                                     <span class="block text-zinc-400 text-sm uppercase font-bold">Outstanding AR (Period)</span>
-                                    <span class="block text-2xl font-mono text-amber-500">$${summary.outstanding_ar.toFixed(2)}</span>
+                                    <span class="block text-xl sm:text-2xl font-mono text-amber-500" data-testid="summary-ar">${formatDollars(summary.outstanding_ar)}</span>
                                 </div>
                                 <div class="w-full bg-zinc-800 h-2 mt-3 rounded-full overflow-hidden">
                                     <div

@@ -64,7 +64,7 @@ func TestCP06_ReturnPastSaleFromSearch(t *testing.T) {
 	if r := f.addLine(saleID, f.productLine("2")); r.status != http.StatusOK {
 		t.Fatalf("add line = %d: %s", r.status, r.raw)
 	}
-	body := f.completeSale(saleID, f.cashFor("2"))
+	body := f.completeSale(saleID, f.cashFor(saleID))
 	if body.status != http.StatusOK {
 		t.Fatalf("complete = %d: %s", body.status, body.raw)
 	}
@@ -156,7 +156,7 @@ func TestCP06_DamagedLineNotRestocked(t *testing.T) {
 	if r := f.addLine(saleID, map[string]any{"product_id": f.kitID.String(), "quantity": "1"}); r.status != http.StatusOK {
 		t.Fatalf("add kit line = %d: %s", r.status, r.raw)
 	}
-	done := f.completeSale(saleID, f.cashFor("2"))
+	done := f.completeSale(saleID, f.cashFor(saleID))
 	if done.status != http.StatusOK {
 		t.Fatalf("complete = %d: %s", done.status, done.raw)
 	}
@@ -209,7 +209,7 @@ func TestCP06_SearchDateBoundByBranchZone(t *testing.T) {
 	if r := f.addLine(saleID, f.productLine("1")); r.status != http.StatusOK {
 		t.Fatalf("add line = %d: %s", r.status, r.raw)
 	}
-	body := f.completeSale(saleID, f.cashFor("1"))
+	body := f.completeSale(saleID, f.cashFor(saleID))
 	if body.status != http.StatusOK {
 		t.Fatalf("complete = %d: %s", body.status, body.raw)
 	}
@@ -248,7 +248,7 @@ func TestCP06_PlainListUsesTheBranchDay(t *testing.T) {
 	if r := f.addLine(saleID, f.productLine("1")); r.status != http.StatusOK {
 		t.Fatalf("add line = %d: %s", r.status, r.raw)
 	}
-	body := f.completeSale(saleID, f.cashFor("1"))
+	body := f.completeSale(saleID, f.cashFor(saleID))
 	if body.status != http.StatusOK {
 		t.Fatalf("complete = %d: %s", body.status, body.raw)
 	}
