@@ -24,7 +24,7 @@ const ownOrigin = "https://gable.example"
 func stack(t *testing.T, dir *fakeDir) (http.Handler, *Service, *Handler) {
 	t.Helper()
 	svc, _, _ := newSvc(t, dir)
-	h := NewHandler(svc, HandlerConfig{Origin: ownOrigin})
+	h := NewHandler(svc, HandlerConfig{SignInFloor: -1, Origin: ownOrigin})
 	mux := http.NewServeMux()
 	h.RegisterRoutes(mux)
 	mux.HandleFunc("POST /api/v1/orders", func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusOK) })
@@ -178,7 +178,7 @@ func TestSignOutAndRefreshNeedTheHeader(t *testing.T) {
 
 func TestSignInLimitsPerEmailAndPerAddress(t *testing.T) {
 	svc, _, _ := newSvc(t, okDir())
-	h := NewHandler(svc, HandlerConfig{Origin: ownOrigin, PerEmail: 3, PerAddress: 5, Window: time.Hour})
+	h := NewHandler(svc, HandlerConfig{SignInFloor: -1, Origin: ownOrigin, PerEmail: 3, PerAddress: 5, Window: time.Hour})
 	mux := http.NewServeMux()
 	h.RegisterRoutes(mux)
 	attempt := func(email, addr string) *httptest.ResponseRecorder {

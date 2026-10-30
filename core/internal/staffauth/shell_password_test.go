@@ -33,7 +33,7 @@ func newPwRig(t *testing.T, dir *fakeDir) *pwRig {
 	t.Helper()
 	svc, rec, _ := newSvc(t, dir)
 	g := &pwRig{dir: dir, svc: svc, rec: rec, allowed: true}
-	g.h = NewHandler(svc, HandlerConfig{Origin: ownOrigin}).
+	g.h = NewHandler(svc, HandlerConfig{SignInFloor: -1, Origin: ownOrigin}).
 		WithEmailPasswordGuard(func(context.Context) bool { return g.allowed })
 	g.mux = http.NewServeMux()
 	g.h.RegisterRoutes(g.mux)
