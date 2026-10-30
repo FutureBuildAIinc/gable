@@ -22,7 +22,8 @@ vi.mock('../../services/LargeCashService', async (orig) => {
 
 import './LargeCashWorklist';
 import type { LargeCashWorklist } from './LargeCashWorklist';
-import type { LargeCashWorklistRow } from '../../types/largecash';
+import type { LargeCashStatement, LargeCashWorklistRow } from '../../types/largecash';
+import { moneyWords, statementLines } from './largeCashWords';
 
 const row = (over: Partial<LargeCashWorklistRow> = {}): LargeCashWorklistRow => ({
     event_id: 'ev1',
@@ -55,11 +56,35 @@ const row = (over: Partial<LargeCashWorklistRow> = {}): LargeCashWorklistRow => 
     ...over,
 });
 
+const statement = (over: Partial<LargeCashStatement> = {}): LargeCashStatement => ({
+    payer_key: 'cus:c1',
+    year: 2026,
+    payer_name: 'Riverbend Builders',
+    payer_address: '12 Mill Road',
+    business_name: 'Gable Lumber',
+    business_address: '1 Main Street, Kelowna, BC, V1Y 1A1',
+    contact_name: 'Kelowna Main',
+    telephone: '555-0100',
+    aggregate_cents: 1_200_000,
+    currency: 'USD',
+    crossing_count: 1,
+    first_date: '2026-03-02T10:00:00Z',
+    last_date: '2026-03-02T10:00:00Z',
+    state: 'issued',
+    issued_date: '2026-03-20T00:00:00Z',
+    issued_by: 'manager',
+    due_date: '2027-01-31T00:00:00Z',
+    note: 'The information above was furnished to the Internal Revenue Service.',
+    adviser_note: 'The dealer confirms each filing with its own adviser.',
+    ...over,
+});
+
 const q = (el: Element, id: string) => el.querySelector(`[data-testid="${id}"]`) as HTMLElement;
 const all = (el: Element, id: string) => [...el.querySelectorAll(`[data-testid="${id}"]`)] as HTMLElement[];
 
-async function mount(rows: LargeCashWorklistRow[]): Promise<LargeCashWorklist> {
+async function mount(rows: LargeCashWorklistRow[], statements: LargeCashStatement[] = []): Promise<LargeCashWorklist> {
     svc.listWorklist.mockResolvedValue({ items: rows, count: rows.length, generated_at: '2026-03-02T10:00:00Z' });
+    svc.listStatements.mockResolvedValue({ year: 2026, items: statements, count: statements.length });
     const el = document.createElement('gable-large-cash-worklist') as LargeCashWorklist;
     document.body.appendChild(el);
     await new Promise((r) => setTimeout(r, 0));
@@ -155,14 +180,52 @@ describe("the manager's large cash worklist", () => {
 
     it('issues the customer statement on a filed row', async () => {
         const el = await mount([row({ filing_state: 'filed', recommended_action: 'issue_statement' })]);
-        svc.issueStatement.mockResolvedValue({ payer_key: 'cus:c1', year: 2026 });
+        svc.issueStatement.mockResolvedValue(statement());
+        svc.listStatements.mockResolvedValue({ year: 2026, items: [statement()], count: 1 });
         svc.listWorklist.mockResolvedValue({ items: [], count: 0, generated_at: '2026-03-02T10:00:00Z' });
         q(el, 'large-cash-statement').click();
         await new Promise((r) => setTimeout(r, 0));
         await el.updateComplete;
         expect(svc.issueStatement).toHaveBeenCalledWith('ev1');
         expect(q(el, 'large-cash-status').textContent).toContain('the customer statement for Riverbend Builders is out');
+        // the issued statement is on the sheet to print and keep
+        const sheet = q(el, 'large-cash-statement-view');
+        expect(sheet.textContent).toContain('Statement of cash received, 2026');
+        expect(sheet.textContent).toContain('Gable Lumber');
+        expect(sheet.textContent).toContain('555-0100');
+        expect(sheet.textContent).toContain('$12,000.00');
+        expect(q(sheet, 'large-cash-statement-note').textContent).toContain('furnished to the Internal Revenue Service');
         el.remove();
+    });
+
+    it("lists the year's statements and opens an issued one to print", async () => {
+        const print = vi.spyOn(window, 'print').mockImplementation(() => {});
+        const el = await mount([], [statement(), statement({ payer_key: 'cus:c2', payer_name: 'North Shore Mill', state: 'not_issued', issued_date: null })]);
+        const rows = all(el, 'large-cash-statement-row');
+        expect(rows.length).toBe(2);
+        expect(rows[1].textContent).toContain('Due 2027-01-31');
+        expect(q(rows[1], 'large-cash-statement-open')).toBeNull();
+        q(rows[0], 'large-cash-statement-open').click();
+        await el.updateComplete;
+        expect(q(el, 'large-cash-statement-view').textContent).toContain('Riverbend Builders');
+        q(el, 'large-cash-statement-print').click();
+        expect(print).toHaveBeenCalledTimes(1);
+        q(el, 'large-cash-statement-close').click();
+        await el.updateComplete;
+        expect(q(el, 'large-cash-statement-view')).toBeNull();
+        print.mockRestore();
+        el.remove();
+    });
+
+    it('prints the dealer as the sender and the payer as the addressee, in the currency, and never a suspicion', () => {
+        const lines = statementLines(statement({ currency: 'CAD' }));
+        const text = lines.map((l) => `${l.label}: ${l.value}`).join('\n');
+        expect(text).toContain('From: Gable Lumber');
+        expect(text).toContain('To: Riverbend Builders');
+        expect(text).toContain('Payer address: 12 Mill Road');
+        expect(text).toContain('Cash received in 2026: CA$12,000.00');
+        expect(text.toLowerCase()).not.toContain('suspic');
+        expect(moneyWords(450_000, 'USD')).toBe('$4,500.00');
     });
 
     it('reads the Form 8300 data set on request, and never before', async () => {

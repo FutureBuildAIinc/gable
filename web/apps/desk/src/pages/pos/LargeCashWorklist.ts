@@ -16,8 +16,8 @@
 import { LitElement, html, nothing } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
 import { LargeCashService } from '../../services/LargeCashService';
-import type { LargeCashForm8300, LargeCashWorklistRow } from '../../types/largecash';
-import { deadlineWords, actionWords } from './largeCashWords';
+import type { LargeCashForm8300, LargeCashStatement, LargeCashWorklistRow } from '../../types/largecash';
+import { deadlineWords, actionWords, moneyWords, statementLines } from './largeCashWords';
 
 const SURFACE = 'background:rgb(var(--gb-till-surface));border:1px solid rgb(var(--gb-till-edge))';
 const INK = 'color:rgb(var(--gb-till-text))';
@@ -36,6 +36,10 @@ export class LargeCashWorklist extends LitElement {
     @state() private _acks: Record<string, string> = {};
     /** The Form 8300 data set, once the filer asked for it. */
     @state() private _forms: Record<string, LargeCashForm8300 | null> = {};
+    /** The year's statements, one per payer. */
+    @state() private _statements: LargeCashStatement[] = [];
+    /** The statement on the sheet, for the manager to print and keep. */
+    @state() private _sheet: LargeCashStatement | null = null;
 
     connectedCallback() {
         super.connectedCallback();
@@ -48,6 +52,8 @@ export class LargeCashWorklist extends LitElement {
             this._error = null;
             const list = await LargeCashService.listWorklist();
             this._rows = list.items ?? [];
+            const statements = await LargeCashService.listStatements();
+            this._statements = statements.items ?? [];
         } catch (err: unknown) {
             this._error = err instanceof Error ? err.message : 'Failed to read the large cash worklist';
         } finally {
@@ -80,7 +86,7 @@ export class LargeCashWorklist extends LitElement {
         try {
             this._busy = true;
             this._error = null;
-            await LargeCashService.issueStatement(row.event_id);
+            this._sheet = await LargeCashService.issueStatement(row.event_id);
             this._note = `Issued: the customer statement for ${row.payer_name} is out.`;
             await this._load();
         } catch (err: unknown) {
@@ -88,6 +94,64 @@ export class LargeCashWorklist extends LitElement {
         } finally {
             this._busy = false;
         }
+    }
+
+    private _print() {
+        window.print();
+    }
+
+    /** The year's statements, with the issued ones a manager can open and print. */
+    private _statementList() {
+        if (this._statements.length === 0) return nothing;
+        return html`
+          <section class="mt-8" data-testid="large-cash-statements">
+            <h2 class="text-lg font-bold" style=${INK}>Customer statements for the year</h2>
+            <ul class="mt-3 space-y-2">
+              ${this._statements.map((st) => html`
+                <li class="flex flex-wrap items-center justify-between gap-2 rounded-xl p-3 text-sm" style=${SURFACE}
+                  data-testid="large-cash-statement-row" data-payer-key=${st.payer_key}>
+                  <span style=${INK}>${st.payer_name} &middot; ${moneyWords(st.aggregate_cents, st.currency)}
+                    &middot; ${st.state === 'issued' ? 'Issued' : `Due ${st.due_date.slice(0, 10)}`}</span>
+                  ${st.state === 'issued' ? html`
+                    <button data-testid="large-cash-statement-open" @click=${() => { this._sheet = st; }}
+                      class="min-h-11 rounded border px-4 py-2 text-sm font-semibold"
+                      style="border-color:rgb(var(--gb-till-edge));${MUTED}">Open the statement</button>` : nothing}
+                </li>`)}
+            </ul>
+          </section>`;
+    }
+
+    /** The statement as a printable sheet: the copy the customer gets and the dealer keeps. */
+    private _sheetView(st: LargeCashStatement) {
+        return html`
+          <style>
+            @media print {
+              body { background: #fff !important; }
+              body * { visibility: hidden; }
+              .lc-statement-sheet, .lc-statement-sheet * { visibility: visible; }
+              .lc-statement-sheet { position: absolute; left: 0; top: 0; width: 100%; padding: 12px; background: #fff !important; }
+              .lc-statement-sheet, .lc-statement-sheet * { color: #000 !important; border-color: #666 !important; }
+              .lc-statement-actions { display: none !important; }
+            }
+          </style>
+          <section class="mt-8" data-testid="large-cash-statement-view">
+            <div class="lc-statement-sheet rounded-xl p-5" style=${SURFACE}>
+              <h2 class="text-lg font-bold" style=${INK} data-testid="large-cash-statement-title">Statement of cash received, ${st.year}</h2>
+              <dl class="mt-3 space-y-1 text-sm">
+                ${statementLines(st).map((line) => html`
+                  <div class="flex flex-wrap gap-2"><dt style=${MUTED}>${line.label}</dt><dd style=${INK}>${line.value}</dd></div>`)}
+              </dl>
+              <p class="mt-4 text-sm font-semibold" style=${INK} data-testid="large-cash-statement-note">${st.note}</p>
+            </div>
+            <div class="lc-statement-actions mt-3 flex flex-wrap gap-2">
+              <button data-testid="large-cash-statement-print" @click=${() => this._print()}
+                class="min-h-11 rounded px-4 py-2 text-sm font-bold"
+                style="background:rgb(var(--gb-till-accent));color:rgb(var(--gb-plate))">Print the statement</button>
+              <button data-testid="large-cash-statement-close" @click=${() => { this._sheet = null; }}
+                class="min-h-11 rounded border px-4 py-2 text-sm font-semibold"
+                style="border-color:rgb(var(--gb-till-edge));${MUTED}">Close</button>
+            </div>
+          </section>`;
     }
 
     /** The data set the filer types into BSA E-Filing. */
@@ -127,6 +191,8 @@ export class LargeCashWorklist extends LitElement {
           <ul class="mt-6 space-y-3" data-testid="large-cash-list">
             ${rows.map((row) => this._row(row))}
           </ul>`}
+        ${this._sheet ? this._sheetView(this._sheet) : nothing}
+        ${this._statementList()}
       </div>`;
     }
 

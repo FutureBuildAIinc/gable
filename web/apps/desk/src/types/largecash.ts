@@ -104,6 +104,8 @@ export interface LargeCashStatement {
     payer_key: string;
     year: number;
     payer_name: string;
+    payer_address: string;
+    business_name: string;
     business_address: string;
     contact_name: string;
     telephone: string;

@@ -4107,7 +4107,7 @@ export interface paths {
         put?: never;
         /**
          * Record the filing of a Form 8300 for a crossing
-         * @description The manager's record of the Form 8300 they filed for this crossing: the day they filed it, the BSA E-Filing acknowledgement number they typed and who recorded it. A voluntary filing (a Form 8300 the dealer filed of its own accord) carries no acknowledgement number, because a voluntary filing below the threshold is filed on paper. The crossing's filing row is taken in place: two managers recording a filing on one crossing at the same time cannot both land, and the one that loses is answered 409 (the crossing is already filed). A Canadian crossing and an identity declined crossing are not filings at all and are answered 409. The act is a manager's, so a machine key is refused 403.
+         * @description The manager's record of the Form 8300 they filed for this crossing: the day they filed it, the BSA E-Filing acknowledgement number they typed and who recorded it. Every reportable crossing is over the threshold, so its filing is required: a request for a voluntary filing (a below threshold report) is answered 409. The crossing's filing row is taken in place: two managers recording a filing on one crossing at the same time cannot both land, and the one that loses is answered 409 (the crossing is already filed). A Canadian crossing and an identity declined crossing are not filings at all and are answered 409. The act is a manager's, so a machine key is refused 403.
          */
         post: operations["largeCashRecordFiling"];
         delete?: never;
@@ -4167,7 +4167,7 @@ export interface paths {
         put?: never;
         /**
          * Issue the customer statement for a crossing's payer
-         * @description The customer statement for the crossing's payer and the year the cash was received, issued once. The generator refuses two things, and they are rules in the code rather than a training note: it refuses to carry the dealer's suspicion of the transaction on the customer's statement, and it refuses to produce a statement for a voluntarily filed Form 8300, because the statement says the information was furnished to the IRS and a voluntary filing was not. The act is a manager's, so a machine key is refused 403.
+         * @description The customer statement for the crossing's payer and the year the cash was received, issued once. A statement says the information was furnished to the IRS, so it is issued only for a reportable crossing whose Form 8300 is recorded as filed (409 otherwise). The generator also refuses to carry the dealer's suspicion of the transaction on the customer's statement and refuses a voluntary filing; these are rules in the code rather than a training note. Of several managers issuing one statement exactly one is answered 200 and the rest 409. The act is a manager's, so a machine key is refused 403.
          */
         post: operations["largeCashIssueStatement"];
         delete?: never;
@@ -14838,9 +14838,9 @@ export interface components {
              * @description The day the Form 8300 was filed. The server's day when it is absent.
              */
             filed_date?: string;
-            /** @description The BSA E-Filing acknowledgement number the manager typed. Required for a filing, and never carried by a voluntary one. */
+            /** @description The BSA E-Filing acknowledgement number the manager typed. Required for a filing. */
             acknowledgement_no?: string;
-            /** @description True when the dealer filed the Form 8300 of its own accord. A voluntary filing is never stated to the customer. */
+            /** @description Always refused with 409 on a reportable crossing: every reportable crossing is over the threshold, so its filing is required. */
             voluntary?: boolean;
         };
         LargeCashFiling: {
@@ -14908,13 +14908,21 @@ export interface components {
         LargeCashStatement: {
             payer_key: string;
             year: number;
+            /** @description The addressee. */
             payer_name: string;
+            /** @description The addressee's address. */
+            payer_address: string;
+            /** @description The dealer's name */
+            business_name: string;
+            /** @description The dealer's information contact address */
             business_address: string;
+            /** @description The dealer's information contact */
             contact_name: string;
+            /** @description The dealer's information contact telephone. */
             telephone: string;
             /**
              * Format: int64
-             * @description The reportable cash received from this payer in the year.
+             * @description The payer's counted cash received in the calendar year in the receiving branch's own zone, summed from the counted tenders.
              */
             aggregate_cents: number;
             currency: string;
