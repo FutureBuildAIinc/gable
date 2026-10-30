@@ -254,6 +254,28 @@ func demoHistoryRequested() bool {
 	}
 }
 
+// demoPortalCustomer is the account the demo portal user (demo@tarnwick.example)
+// is linked to: the portal's front door lists its invoices.
+const demoPortalCustomer = "Tarnwick Construction"
+
+// seedOrderStatus is the status of a customer's i-th seeded order, drawn from
+// r in [0, 1): 15 percent DRAFT, 10 CONFIRMED, 5 CANCELLED, the rest
+// FULFILLED. The demo portal customer's first order is always FULFILLED, so
+// its invoice exists and the portal never opens on "No invoices yet".
+func seedOrderStatus(custName string, i int, r float32) string {
+	switch {
+	case custName == demoPortalCustomer && i == 0:
+		return "FULFILLED"
+	case r < 0.15:
+		return "DRAFT"
+	case r < 0.25:
+		return "CONFIRMED"
+	case r < 0.30:
+		return "CANCELLED"
+	}
+	return "FULFILLED"
+}
+
 // Run seeds the demo data and returns. Behaviour is unchanged from the old
 // entry point: without DEMO_SEED set it logs and returns without touching
 // any database.
@@ -901,15 +923,7 @@ func Run() {
 			log.Fatalf("Seed: %v", err)
 		}
 		for i := 0; i < numOrders; i++ {
-			status := "FULFILLED"
-			r := rand.Float32()
-			if r < 0.15 {
-				status = "DRAFT"
-			} else if r < 0.25 {
-				status = "CONFIRMED"
-			} else if r < 0.30 {
-				status = "CANCELLED"
-			}
+			status := seedOrderStatus(custName, i, rand.Float32())
 			orderDate := recentDate(180)
 			orderID := uuid.New()
 			spID := custSalesperson[custID]

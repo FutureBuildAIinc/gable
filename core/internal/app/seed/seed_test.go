@@ -655,3 +655,30 @@ func priceOfSeed(f float64) httpx.Price {
 	}
 	return p
 }
+
+// The demo portal customer's first order is always fulfilled, so its invoice
+// exists whatever the dice say (Round 3, the portal flake).
+func TestSeedOrderStatusGuaranteesThePortalCustomerAnInvoice(t *testing.T) {
+	for _, r := range []float32{0, 0.1, 0.2, 0.27, 0.5, 0.99} {
+		if got := seedOrderStatus(demoPortalCustomer, 0, r); got != "FULFILLED" {
+			t.Errorf("the portal customer's first order drawn at %v is %s, want FULFILLED", r, got)
+		}
+	}
+	// Everyone else, and the portal customer's later orders, keep the draw.
+	for _, c := range []struct {
+		name string
+		i    int
+		r    float32
+		want string
+	}{
+		{demoPortalCustomer, 1, 0.1, "DRAFT"},
+		{"Thornmere Homes", 0, 0.1, "DRAFT"},
+		{"Thornmere Homes", 0, 0.2, "CONFIRMED"},
+		{"Thornmere Homes", 0, 0.27, "CANCELLED"},
+		{"Thornmere Homes", 0, 0.5, "FULFILLED"},
+	} {
+		if got := seedOrderStatus(c.name, c.i, c.r); got != c.want {
+			t.Errorf("%s order %d drawn at %v is %s, want %s", c.name, c.i, c.r, got, c.want)
+		}
+	}
+}

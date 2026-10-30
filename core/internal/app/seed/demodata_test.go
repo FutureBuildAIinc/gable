@@ -161,6 +161,16 @@ func TestDemoImport(t *testing.T) {
 			t.Errorf("demo alerts: %d acknowledge-required warnings and %d notes, want 1 and 1", warnings, notes)
 		}
 	})
+	t.Run("the demo portal customer holds an invoice", func(t *testing.T) {
+		var invoices int
+		if err := db.QueryRow(`SELECT COUNT(*) FROM invoices i JOIN customers c ON c.id = i.customer_id
+			WHERE c.name = $1`, demoPortalCustomer).Scan(&invoices); err != nil {
+			t.Fatal(err)
+		}
+		if invoices == 0 {
+			t.Errorf("%s holds no invoice: the portal opens on \"No invoices yet\"", demoPortalCustomer)
+		}
+	})
 	t.Run("every demo yard has one active bank account on cash, and a reseed adds none", func(t *testing.T) {
 		count := func() (yards, accounts, onCash int) {
 			if err := db.QueryRow(`SELECT (SELECT COUNT(*) FROM locations WHERE type = 'BRANCH' AND active),
