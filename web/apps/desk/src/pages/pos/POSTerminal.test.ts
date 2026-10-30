@@ -3406,3 +3406,61 @@ describe('the summary when the attached customer is tax exempt', () => {
     el.remove();
   });
 });
+
+describe('the card fee at the counter (CP-15)', () => {
+  beforeEach(() => { vi.clearAllMocks(); localStorage.clear(); });
+
+  const feeRule = (enabled: boolean) => ({
+    revision: 2,
+    rules: { check_limit_cents: null, check_id_required: { mode: 'never', over_cents: null },
+      card_surcharge: { branch_id: 'b', enabled, rate_bps: 300 } },
+  });
+
+  it('tells the clerk the expected fee and the cash price before the card is presented', async () => {
+    svc.settings.mockResolvedValue(feeRule(true));
+    const el = await mount(sale());
+    await new Promise((r) => setTimeout(r, 0));
+    await el.updateComplete;
+    expect(el.querySelector('[data-testid="pos-card-fee"]')).toBeNull();
+    q(el, 'tender-card').click();
+    await el.updateComplete;
+    expect(q(el, 'pos-card-fee-notice').textContent).toContain('Card fee 3%');
+    expect(q(el, 'pos-card-fee-notice').textContent).toContain('$2.60');
+    expect(q(el, 'pos-card-fee-notice').textContent).toContain('final figure');
+    expect(q(el, 'pos-card-fee-cash').textContent).toContain('Cash price $86.50, no fee.');
+    el.remove();
+  });
+
+  it('shows no notice on cash, or when the branch does not charge a fee', async () => {
+    svc.settings.mockResolvedValue(feeRule(true));
+    const el = await mount(sale());
+    await new Promise((r) => setTimeout(r, 0));
+    await el.updateComplete;
+    await chooseCash(el);
+    expect(el.querySelector('[data-testid="pos-card-fee"]')).toBeNull();
+    el.remove();
+
+    svc.settings.mockResolvedValue(feeRule(false));
+    const off = await mount(sale());
+    await new Promise((r) => setTimeout(r, 0));
+    await off.updateComplete;
+    q(off, 'tender-card').click();
+    await off.updateComplete;
+    expect(off.querySelector('[data-testid="pos-card-fee"]')).toBeNull();
+    off.remove();
+  });
+
+  it('shows the stored fee on the completed sale, apart from the total', async () => {
+    svc.settings.mockResolvedValue(feeRule(true));
+    const done = sale({
+      status: 'completed',
+      tenders: [{ id: 'td1', sale_id: 's1', method: 'card', amount_cents: 8650, surcharge_cents: 260 }] as unknown as Sale['tenders'],
+    });
+    const el = await mount(done);
+    await new Promise((r) => setTimeout(r, 0));
+    await el.updateComplete;
+    expect(q(el, 'summary-card-fee').textContent).toContain('$2.60');
+    expect(q(el, 'summary-total').textContent).toContain('$86.50');
+    el.remove();
+  });
+});

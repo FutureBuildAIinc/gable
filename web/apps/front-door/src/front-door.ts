@@ -123,6 +123,8 @@ export class GableFrontDoor extends LitElement {
   @state() private _authCfg: AuthMethodsRuntimeConfig | null = null;
   @state() private _email = '';
   @state() private _password = '';
+  @state() private _linkEmail = '';
+  @state() private _linkReply: string | null = null;
 
   private _isConsoleMode(): boolean {
     return typeof window !== 'undefined' && isConsoleLauncher(window.location.search);
@@ -147,6 +149,12 @@ export class GableFrontDoor extends LitElement {
     // boot; a dev build keeps its persona cards and never asks.
     if (!authConfig.devMode) {
       void this._loadAuthConfig();
+      // Every refused callback lands on /?sign_in=failed: one fixed line,
+      // whatever the reason.
+      if (new URLSearchParams(window.location.search).get('sign_in') === 'failed') {
+        this._errorSource = 'session';
+        this._signInError = 'That sign in did not work. Try again, or use another method.';
+      }
     }
   }
 
@@ -170,18 +178,55 @@ export class GableFrontDoor extends LitElement {
       this._signInError = 'This method cannot start here.';
       return;
     }
+    if (method.kind === 'redirect') {
+      // A provider start is a GET navigation: the browser carries the state
+      // cookie and follows the provider round trip.
+      this.navigateTo(method.start_url);
+      return;
+    }
+    if (method.kind === 'link') {
+      await this._sendMagicLink(method.start_url, source);
+      return;
+    }
     try {
       const resp = await fetch(method.start_url, {
         method: 'POST',
         headers: { Accept: 'application/json' },
       });
       if (resp.ok) {
-        // No method answers a redirect yet; when one does, this is where
-        // the navigation happens.
         return;
       }
       this._signInError = await serverMessage(resp) ?? 'Sign in did not start.';
     } catch {
+      this._signInError = 'The server could not be reached.';
+    }
+  }
+
+  /** Magic link start: POST {email} with the CSRF header; the reply is one fixed line. */
+  private async _sendMagicLink(startUrl: string, source: SignInMethodCode | 'continue-as') {
+    this._linkReply = null;
+    if (this._linkEmail.trim() === '') {
+      this._errorSource = source === 'continue-as' ? 'magic_link' : source;
+      this._signInError = 'Enter your email address.';
+      return;
+    }
+    try {
+      const resp = await fetch(startUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json', 'X-Gable-CSRF': '1' },
+        credentials: 'include',
+        body: JSON.stringify({ email: this._linkEmail.trim() }),
+      });
+      if (resp.ok) {
+        this._signInError = null;
+        this._errorSource = null;
+        this._linkReply = 'If that address belongs to a member, a sign in link is on its way.';
+        return;
+      }
+      this._errorSource = 'magic_link';
+      this._signInError = await serverMessage(resp) ?? 'Sign in did not start.';
+    } catch {
+      this._errorSource = 'magic_link';
       this._signInError = 'The server could not be reached.';
     }
   }
@@ -857,6 +902,18 @@ export class GableFrontDoor extends LitElement {
     }
     return html`
       <div class="space-y-1.5">
+        ${m.kind === 'link' ? html`
+          <input
+            type="email"
+            .value=${this._linkEmail}
+            @input=${(e: Event) => { this._linkEmail = (e.target as HTMLInputElement).value; }}
+            @keydown=${(e: KeyboardEvent) => { if (e.key === 'Enter') void this._startMethod(m); }}
+            aria-label="Email for sign in link"
+            placeholder="Your work email"
+            autocomplete="username"
+            class="w-full min-h-[44px] sm:min-h-0 bg-surface-2 border border-zinc-500 rounded-lg px-3 py-2.5 sm:py-2 text-base sm:text-sm text-white focus:outline-none focus:ring-1 focus:ring-gable-green focus:border-gable-green transition-all"
+          />
+        ` : nothing}
         <button
           type="button"
           @click=${() => void this._startMethod(m)}
@@ -868,6 +925,9 @@ export class GableFrontDoor extends LitElement {
             <span class="min-w-0 text-center leading-snug">${m.label}</span>
           </span>
         </button>
+        ${m.kind === 'link' && this._linkReply !== null ? html`
+          <p role="status" class="text-sm text-gable-green">${this._linkReply}</p>
+        ` : nothing}
         ${this._signInError && this._errorSource === m.method ? html`
           <p role="alert" class="text-sm text-safety-red">${this._signInError}</p>
         ` : nothing}

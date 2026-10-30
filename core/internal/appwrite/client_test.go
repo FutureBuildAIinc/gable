@@ -258,8 +258,14 @@ func TestClientFindUserByEmail(t *testing.T) {
 	answer := `{"users":[{"$id":"u1","email":"a@example.com","status":true,"emailVerification":true}]}`
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /v1/users", func(w http.ResponseWriter, r *http.Request) {
-		if !strings.Contains(r.URL.RawQuery, "equal") {
-			t.Errorf("query = %s, want an equal filter on email", r.URL.RawQuery)
+		var byEmail struct {
+			Method    string   `json:"method"`
+			Attribute string   `json:"attribute"`
+			Values    []string `json:"values"`
+		}
+		qs := r.URL.Query()["queries[]"]
+		if len(qs) != 2 || json.Unmarshal([]byte(qs[0]), &byEmail) != nil || byEmail.Method != "equal" || byEmail.Attribute != "email" || len(byEmail.Values) != 1 {
+			t.Errorf("queries = %q, want a JSON equal filter on email and a limit", qs)
 		}
 		_, _ = w.Write([]byte(answer))
 	})

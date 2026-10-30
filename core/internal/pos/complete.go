@@ -50,6 +50,17 @@ type chargeResult struct {
 	// IntentID names the terminal intent behind a charge the terminal took
 	// (the nil uuid for a gateway token charge).
 	IntentID uuid.UUID
+	// FeeCents is the card surcharge the device's answer carried (CP-15):
+	// booked on the tender, never part of the sale.
+	FeeCents int64
+}
+
+// surchargeOf is the card fee a charge carries, zero for no charge.
+func surchargeOf(c *chargeResult) int64 {
+	if c == nil {
+		return 0
+	}
+	return c.FeeCents
 }
 
 // providerTax is the provider's answer, priced before the transaction with
@@ -413,7 +424,10 @@ func (s *Service) completeSaleTx(ctx context.Context, saleID uuid.UUID, ifMatch 
 		// The session the sale lives in, FOR SHARE against the close's FOR
 		// UPDATE: a sale never completes into a drawer being counted; after
 		// the close the money has been counted and the way back is a return.
-		if sale.TillSessionID == nil {
+		if verdict != nil && verdict.latePost {
+			// a late post attaches to no session (ADR 0011 3.4): the drawer
+			// it was taken into is counted, so no open drawer's figures move
+		} else if sale.TillSessionID == nil {
 			// A cart that never got a drawer (made before the open till rule)
 			// completes only into the register's open one, which it joins.
 			session, err := s.openDrawer(ctx, sale.RegisterID)
@@ -425,16 +439,18 @@ func (s *Service) completeSaleTx(ctx context.Context, saleID uuid.UUID, ifMatch 
 			}
 			sale.TillSessionID = &session.ID
 		}
-		if err := s.repo.LockTillSession(ctx, *sale.TillSessionID, false); err != nil {
-			return err
-		}
-		session, err := s.repo.GetTillSession(ctx, *sale.TillSessionID)
-		if err != nil {
-			return err
-		}
-		if session.Status != TillOpen {
-			return conflict("session_closed",
-				"the till session this sale was made in is closed: the money has been counted and the sale cannot complete into it")
+		if verdict == nil || !verdict.latePost {
+			if err := s.repo.LockTillSession(ctx, *sale.TillSessionID, false); err != nil {
+				return err
+			}
+			session, err := s.repo.GetTillSession(ctx, *sale.TillSessionID)
+			if err != nil {
+				return err
+			}
+			if session.Status != TillOpen {
+				return conflict("session_closed",
+					"the till session this sale was made in is closed: the money has been counted and the sale cannot complete into it")
+			}
 		}
 		lines, err := s.repo.GetLines(ctx, saleID)
 		if err != nil {
@@ -932,7 +948,8 @@ func (s *Service) completeSaleTx(ctx context.Context, saleID uuid.UUID, ifMatch 
 				CustomerID: customerID, BranchID: sale.BranchID, Currency: sale.Currency,
 				Method: string(t.Method), AmountCents: amount, Reference: t.Reference, ReceivedOn: date,
 				Actor: actor, Card: card, RoundingCents: roundingOnPayment,
-				Applications: applications,
+				SurchargeCents: surchargeOf(charges[i]),
+				Applications:   applications,
 			})
 			if err != nil {
 				return err
@@ -949,6 +966,10 @@ func (s *Service) completeSaleTx(ctx context.Context, saleID uuid.UUID, ifMatch 
 				g, a, l, b := charges[i].GatewayTxID, charges[i].AuthCode, charges[i].Last4, charges[i].Brand
 				tender.GatewayTxID, tender.AuthCode = &g, &a
 				tender.CardLast4, tender.CardBrand = &l, &b
+				tender.SurchargeCents = httpx.Cents(charges[i].FeeCents)
+				if err := s.flagUnexpectedSurcharge(ctx, sale.BranchID, saleID, charges[i].FeeCents, actor); err != nil {
+					return err
+				}
 				// the terminal leg's money is booked in this transaction: the
 				// leg is spent with it, so it can back no second sale
 				if charges[i].IntentID != uuid.Nil {

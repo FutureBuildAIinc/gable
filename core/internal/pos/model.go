@@ -187,12 +187,16 @@ type Tender struct {
 	SaleID      uuid.UUID    `json:"sale_id"`
 	Method      TenderMethod `json:"method"`
 	AmountCents httpx.Cents  `json:"amount_cents"`
-	PaymentID   *uuid.UUID   `json:"payment_id"`
-	Reference   *string      `json:"reference"`
-	CardLast4   *string      `json:"card_last4"`
-	CardBrand   *string      `json:"card_brand"`
-	GatewayTxID *string      `json:"gateway_tx_id"`
-	AuthCode    *string      `json:"auth_code"`
+	// SurchargeCents is the card fee the processor added on top of the
+	// tender (CP-15): the device's figure, stored, never recomputed. The
+	// tender's amount and the sale's total do not include it.
+	SurchargeCents httpx.Cents `json:"surcharge_cents"`
+	PaymentID      *uuid.UUID  `json:"payment_id"`
+	Reference      *string     `json:"reference"`
+	CardLast4      *string     `json:"card_last4"`
+	CardBrand      *string     `json:"card_brand"`
+	GatewayTxID    *string     `json:"gateway_tx_id"`
+	AuthCode       *string     `json:"auth_code"`
 	// IDChecked and IDType record that the cashier looked at the payer's ID
 	// (a check or an account charge) and what kind it was; the number is
 	// never taken.

@@ -586,3 +586,37 @@ func TestOfflineSnapshot_TheSharedFixtureIsWhatTheRouteIssues(t *testing.T) {
 		t.Fatalf("the fixture as the sync reads it: %+v %v", snap, err)
 	}
 }
+
+// A revocation commits while the snapshot waits for lock 0a on the device
+// row: the snapshot reads the locked row and refuses, never issuing one for
+// an epoch that is now revoked.
+func TestOfflineSnapshot_ARevocationAheadOfTheLockRefuses(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	f := newFixture(t, testutil.RequireDBMaxConns(t, 4))
+	offlinePolicyOn(t, f)
+	b := newOfflineBench(t, f)
+	ctx := context.Background()
+	tx, err := f.db.Pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if _, err := tx.Exec(ctx, `UPDATE pos_register_devices SET revoked_at = NOW(), revoked_by = 'test', revoke_reason = 'lost'
+		WHERE register_id = $1 AND revoked_at IS NULL`, b.register); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan resp, 1)
+	go func() { done <- takeSnapshot(f, b.register, 0) }()
+	select {
+	case r := <-done:
+		t.Fatalf("the snapshot did not wait for the revocation's lock: %d %s", r.status, r.raw)
+	case <-time.After(500 * time.Millisecond):
+	}
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if r := <-done; r.status != http.StatusConflict || errCode(r) != "device_not_enrolled" {
+		t.Errorf("snapshot behind a revocation = %d %s, want 409 device_not_enrolled", r.status, r.raw)
+	}
+	deviceCleanup(t, f, b.register)
+}

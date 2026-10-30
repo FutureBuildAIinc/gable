@@ -22,6 +22,7 @@ type registerDevice struct {
 	HighSeq      int64
 	ChainHead    string
 	ConfirmedSeq int64
+	ReportedSeq  int64
 	RevokedAt    *time.Time
 }
 
@@ -116,9 +117,9 @@ const offlineSessionDate = `(t.opened_at AT TIME ZONE COALESCE((SELECT l.timezon
 // (lock 0a, ADR 0011 3.2). Nil when no enrolment holds that epoch.
 func (r *PostgresRepository) LockRegisterDevice(ctx context.Context, register string, epoch int64) (*registerDevice, error) {
 	d := &registerDevice{}
-	err := r.ex(ctx).QueryRow(ctx, `SELECT id, public_key, high_seq, chain_head, confirmed_seq, revoked_at
+	err := r.ex(ctx).QueryRow(ctx, `SELECT id, public_key, high_seq, chain_head, confirmed_seq, reported_seq, revoked_at
 		FROM pos_register_devices WHERE register_id = $1 AND epoch = $2 FOR UPDATE`, register, epoch).
-		Scan(&d.ID, &d.PublicKey, &d.HighSeq, &d.ChainHead, &d.ConfirmedSeq, &d.RevokedAt)
+		Scan(&d.ID, &d.PublicKey, &d.HighSeq, &d.ChainHead, &d.ConfirmedSeq, &d.ReportedSeq, &d.RevokedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}

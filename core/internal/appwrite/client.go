@@ -15,7 +15,6 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"strconv"
 	"strings"
 )
 
@@ -262,9 +261,18 @@ func (c *Client) CreateSessionFromToken(ctx context.Context, userID, secret stri
 // false when Appwrite holds none. More than one match is an error, never a
 // pick.
 func (c *Client) FindUserByEmail(ctx context.Context, email string) (u User, found bool, err error) {
+	// Appwrite 1.5 and later take each query as a JSON object.
+	byEmail, err := json.Marshal(map[string]any{"method": "equal", "attribute": "email", "values": []string{email}})
+	if err != nil {
+		return User{}, false, err
+	}
+	pageSize, err := json.Marshal(map[string]any{"method": "limit", "values": []int{2}})
+	if err != nil {
+		return User{}, false, err
+	}
 	q := url.Values{}
-	q.Add("queries[]", `equal("email", [`+strconv.Quote(email)+`])`)
-	q.Add("queries[]", "limit(2)")
+	q.Add("queries[]", string(byEmail))
+	q.Add("queries[]", string(pageSize))
 	raw, err := c.do(ctx, http.MethodGet, "/v1/users?"+q.Encode(), nil, true, "")
 	if err != nil {
 		return User{}, false, err

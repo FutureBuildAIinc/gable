@@ -133,8 +133,11 @@ func (s *Service) IssueSnapshot(ctx context.Context, register string, deviceHigh
 		if active == nil {
 			return conflict("device_not_enrolled", "this register is not enrolled to sell offline: a manager enrols it first")
 		}
-		if _, err := s.repo.LockRegisterDevice(ctx, register, active.DeviceEpoch); err != nil {
+		// a revocation that committed before the lock was taken refuses here
+		if locked, err := s.repo.LockRegisterDevice(ctx, register, active.DeviceEpoch); err != nil {
 			return err
+		} else if locked == nil || locked.RevokedAt != nil {
+			return conflict("device_not_enrolled", "this register is not enrolled to sell offline: a manager enrols it first")
 		}
 		policy, err := s.repo.GetOfflinePolicy(ctx, branch)
 		if err != nil {

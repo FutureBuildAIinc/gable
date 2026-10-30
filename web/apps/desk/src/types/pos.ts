@@ -106,6 +106,8 @@ export interface Tender {
     sale_id: string;
     method: TenderMethod;
     amount_cents: number;
+    /** The card fee the processor added on top of the tender (CP-15); 0 when none. Not part of the sale's total. */
+    surcharge_cents: number;
     payment_id: string | null;
     reference: string | null;
     card_last4: string | null;
@@ -271,6 +273,15 @@ export interface PosRules {
     tint_charge?: TintChargeRule;
     /** The dealer's tinted no return policy: a tinted can is not taken back. */
     tinted_no_return?: boolean;
+    /** The active branch's card fee rule (CP-15): null with no branch known; a write that omits it leaves it. */
+    card_surcharge?: CardSurcharge | null;
+}
+
+/** One branch's card fee rule: the switch (off by default) and the rate shown, in basis points (0 to 300). */
+export interface CardSurcharge {
+    branch_id: string;
+    enabled: boolean;
+    rate_bps: number;
 }
 
 /** The figures of a return before it is taken (POST /api/v1/pos/returns/preview). */

@@ -295,6 +295,13 @@ func (s *Service) CloseTill(ctx context.Context, sessionID uuid.UUID, countedByM
 		if report.Session.Status != TillOpen {
 			return httpx.InvalidStateTransition("the till session is not open")
 		}
+		// An offline sale of the session still with a manager, or a device
+		// whose own mark is past what the server recorded, refuses the close
+		// (ADR 0011 3.4 and section 2): the look takes no row lock, after the
+		// session lock, so the close never waits for a resolution.
+		if err := s.offlineHoldsClose(ctx, sessionID, report.Session.RegisterID); err != nil {
+			return err
+		}
 		// A card refund claim of one of the session's sales still standing
 		// refuses the close (eighth review P2-2): its terminal call may still
 		// move money after the drawer was counted, and the void or return

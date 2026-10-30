@@ -9,6 +9,34 @@
 
 name: s9proof
 
+x-appwrite-env: &appwrite-env
+    _APP_ENV: development
+    _APP_DOMAIN: localhost
+    _APP_OPTIONS_FORCE_HTTPS: disabled
+    # Obvious placeholder, 64 hex chars, dev stack only.
+    _APP_OPENSSL_KEY_V1: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+    _APP_USAGE_STATS: disabled
+    _APP_CONSOLE_WHITELIST_ROOT: disabled
+    _APP_REDIS_HOST: redis
+    _APP_REDIS_PORT: "6379"
+    _APP_DB_ADAPTER: postgresql
+    _APP_DB_HOST: postgres
+    _APP_DB_PORT: "5432"
+    _APP_DB_SCHEMA: appwrite
+    _APP_DB_USER: appwrite
+    _APP_DB_PASS: appwrite-proof-password
+    _APP_DB_ADAPTER_VECTORSDB: postgresql
+    _APP_DB_HOST_VECTORSDB: postgres
+    _APP_DB_PORT_VECTORSDB: "5432"
+    _APP_DB_SCHEMA_VECTORSDB: appwrite
+    _APP_DB_USER_VECTORSDB: appwrite
+    _APP_DB_PASS_VECTORSDB: appwrite-proof-password
+    # DocumentsDB runs on MongoDB only and stays disabled in this proof.
+    _APP_DOCUMENTSDB: disabled
+    # The mail worker below sends through the maildev sink; nothing leaves the stack.
+    _APP_SMTP_HOST: maildev
+    _APP_SMTP_PORT: "1025"
+
 services:
   appwrite:
     image: appwrite/appwrite:2.1.0
@@ -20,34 +48,11 @@ services:
         condition: service_healthy
     ports:
       - "127.0.0.1:8580:80"
-    environment:
-      _APP_ENV: development
-      _APP_DOMAIN: localhost
-      _APP_OPTIONS_FORCE_HTTPS: disabled
-      # Obvious placeholder, 64 hex chars, dev stack only.
-      _APP_OPENSSL_KEY_V1: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
-      _APP_USAGE_STATS: disabled
-      _APP_CONSOLE_WHITELIST_ROOT: disabled
-      _APP_REDIS_HOST: redis
-      _APP_REDIS_PORT: "6379"
-      _APP_DB_ADAPTER: postgresql
-      _APP_DB_HOST: postgres
-      _APP_DB_PORT: "5432"
-      _APP_DB_SCHEMA: appwrite
-      _APP_DB_USER: appwrite
-      _APP_DB_PASS: appwrite-proof-password
-      _APP_DB_ADAPTER_VECTORSDB: postgresql
-      _APP_DB_HOST_VECTORSDB: postgres
-      _APP_DB_PORT_VECTORSDB: "5432"
-      _APP_DB_SCHEMA_VECTORSDB: appwrite
-      _APP_DB_USER_VECTORSDB: appwrite
-      _APP_DB_PASS_VECTORSDB: appwrite-proof-password
-      # DocumentsDB runs on MongoDB only and stays disabled in this proof.
-      _APP_DOCUMENTSDB: disabled
-      # Placeholder so URL-validating endpoints (magic URL) accept requests;
-      # no mail worker runs, nothing is ever sent.
-      _APP_SMTP_HOST: maildev
-      _APP_SMTP_PORT: "1025"
+    # Lets the proof's test only OIDC issuer, which runs in the test process on
+    # the host, answer Appwrite's token and userinfo calls.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment: *appwrite-env
     volumes:
       - appwrite_storage:/storage
     healthcheck:
@@ -56,6 +61,29 @@ services:
       timeout: 5s
       retries: 24
       start_period: 120s
+
+  # ADR 0012 slice 4: the queue worker that turns a magic URL token into mail.
+  appwrite-worker-mails:
+    image: appwrite/appwrite:2.1.0
+    container_name: s9proof-worker-mails
+    entrypoint: worker-mails
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      appwrite:
+        condition: service_healthy
+      maildev:
+        condition: service_started
+    environment: *appwrite-env
+
+  # The mail sink: the proof reads the magic link out of its REST API.
+  maildev:
+    image: appwrite/mailcatcher:1.1.1
+    container_name: s9proof-maildev
+    ports:
+      - "127.0.0.1:8581:1080"
 
   # Appwrite's PostgreSQL adapter requires the postgis (and vector) extensions,
   # which the stock postgres image does not carry; this is the image the

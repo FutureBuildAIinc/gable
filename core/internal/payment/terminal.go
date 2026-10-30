@@ -115,22 +115,24 @@ const (
 
 // TerminalIntent is one card leg the counter sends to a terminal.
 type TerminalIntent struct {
-	ID                uuid.UUID
-	TransactionID     uuid.UUID
-	LegKey            string
-	RegisterID        string
-	BranchID          uuid.UUID
-	AmountCents       int64
-	Kind              string
-	State             TerminalIntentState
-	DeviceID          string
-	ProviderRef       string
-	IdempotencyKey    string
-	LeaseUntil        time.Time
-	ClaimedAt         time.Time
-	DispatchedAt      *time.Time
-	AnsweredAt        *time.Time
-	AnswerBrand       string
+	ID             uuid.UUID
+	TransactionID  uuid.UUID
+	LegKey         string
+	RegisterID     string
+	BranchID       uuid.UUID
+	AmountCents    int64
+	Kind           string
+	State          TerminalIntentState
+	DeviceID       string
+	ProviderRef    string
+	IdempotencyKey string
+	LeaseUntil     time.Time
+	ClaimedAt      time.Time
+	DispatchedAt   *time.Time
+	AnsweredAt     *time.Time
+	AnswerBrand    string
+	// AnswerFeeCents is the card surcharge the device's answer carried (CP-15).
+	AnswerFeeCents    int64
 	AnswerLast4       string
 	AnswerAuthCode    string
 	AnswerProviderRef string
@@ -170,6 +172,9 @@ type TerminalAnswer struct {
 	Brand       string
 	Last4       string
 	AuthCode    string
+	// FeeCents is the card surcharge the processor added on top of the leg's
+	// amount (CP-15); zero when none. The ledger stores it on the intent.
+	FeeCents int64
 }
 
 // TerminalBatchLine is one leg of a device's settlement batch.
