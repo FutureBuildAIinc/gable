@@ -26,6 +26,7 @@ import (
 	"github.com/gablelbm/gable/internal/dashboard"
 	"github.com/gablelbm/gable/internal/staff"
 	"github.com/gablelbm/gable/internal/testutil"
+	"github.com/google/uuid"
 )
 
 // Tests for the demo data import (DEMO_SEED_IMPORT).
@@ -1531,5 +1532,44 @@ func TestDemoCounterPINIsFixedOnlyInDevMode(t *testing.T) {
 	}
 	if _, ok, err := demoCounterPIN("1234", "dev", true); ok || err == nil {
 		t.Errorf("a plain run PIN from the environment must be refused, got ok=%v err=%v", ok, err)
+	}
+}
+
+// The demo manager without a PIN (an untagged or non dev seed, with
+// DEMO_MANAGER_PIN unset) still gets its home yard grant and is no approver
+// (Round 3, P3-1 of the walk B small read).
+func TestDemoManagerWithoutAPINKeepsItsYardGrant(t *testing.T) {
+	if testing.Short() {
+		t.Skip("seeds a scratch database of its own; skipped under -short")
+	}
+	db, dbURL := demoImportDB(t)
+	runCommand(t, dbURL, "./cmd/migrate")
+	ctx := context.Background()
+	var yardID string
+	if err := db.QueryRow(`INSERT INTO locations (id, code, type, description, path, name, active)
+		VALUES (gen_random_uuid(), 'KEL-MAIN', 'BRANCH', 'Kelowna Main', 'KEL-MAIN', 'Kelowna Main', TRUE)
+		RETURNING id`).Scan(&yardID); err != nil {
+		t.Fatalf("insert the yard: %v", err)
+	}
+	t.Setenv(demoManagerPINEnv, "")
+	t.Setenv("AUTH_MODE", "production")
+	if err := importStaff(ctx, db, map[string]uuid.UUID{"KEL-MAIN": uuid.MustParse(yardID)}); err != nil {
+		t.Fatalf("importStaff: %v", err)
+	}
+	const manager = "counter.manager.kel@brand.example"
+	var pinHash sql.NullString
+	if err := db.QueryRow(`SELECT counter_pin_hash FROM staff WHERE email = $1`, manager).Scan(&pinHash); err != nil {
+		t.Fatalf("read the manager: %v", err)
+	}
+	if pinHash.Valid {
+		t.Errorf("the manager holds a PIN hash with no PIN configured")
+	}
+	var grants int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM user_locations WHERE user_sub = $1 AND branch_id = $2 AND is_home`,
+		manager, yardID).Scan(&grants); err != nil {
+		t.Fatal(err)
+	}
+	if grants != 1 {
+		t.Errorf("the manager without a PIN holds %d home yard grants, want 1", grants)
 	}
 }

@@ -810,15 +810,15 @@ func importStaff(ctx context.Context, db *sql.DB, yards map[string]uuid.UUID) er
 			}
 			if !ok {
 				log.Printf("Seed: %s is unset and this is not a devauth build in AUTH_MODE=dev: the demo manager %s gets no counter PIN", demoManagerPINEnv, row.Email)
-				continue
-			}
-			hash, herr := staff.HashCounterPIN(pin)
-			if herr != nil {
-				return fmt.Errorf("hash the demo counter PIN: %w", herr)
-			}
-			if _, err := db.ExecContext(ctx, `UPDATE staff SET counter_pin_hash = $2, counter_pin_set_at = NOW(),
-				counter_pin_failures = 0, counter_pin_locked = FALSE WHERE id = $1`, sid, hash); err != nil {
-				return fmt.Errorf("set the demo counter PIN on %s: %w", row.Email, err)
+			} else {
+				hash, herr := staff.HashCounterPIN(pin)
+				if herr != nil {
+					return fmt.Errorf("hash the demo counter PIN: %w", herr)
+				}
+				if _, err := db.ExecContext(ctx, `UPDATE staff SET counter_pin_hash = $2, counter_pin_set_at = NOW(),
+					counter_pin_failures = 0, counter_pin_locked = FALSE WHERE id = $1`, sid, hash); err != nil {
+					return fmt.Errorf("set the demo counter PIN on %s: %w", row.Email, err)
+				}
 			}
 		}
 		// Yard grant: the home_yard row flagged is_home. The grant is created
