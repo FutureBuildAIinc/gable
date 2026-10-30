@@ -297,6 +297,12 @@ func (s *Service) priceDraft(ctx context.Context, d *Draft) (*Quote, error) {
 			if line.Description == "" {
 				line.Description = p.Description
 			}
+			// The line's cost is the product's average cost, read only: the
+			// margin basis and the figure the kit's parts carry. The stored
+			// line keeps no cost column; every read joins the catalogue for
+			// it, and the draft carries it so the priced lines and the ones
+			// the kit explosion mints are alike.
+			line.UnitCost = p.AverageCost
 			set = productUnits[*dl.ProductID]
 		}
 		if line.UOM == "" || line.PriceUOM == "" {
