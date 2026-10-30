@@ -2331,6 +2331,27 @@ describe('the blind count at close', () => {
 describe('Close Till and an empty count', () => {
   beforeEach(() => { vi.clearAllMocks(); localStorage.clear(); });
 
+  it('an empty cash count is refused inside the dialog before any post', async () => {
+    svc.tillReport.mockResolvedValue({
+      sale_count: 0, sales_total_cents: 0, tax_total_cents: 0, change_cents: 0, tendered_by_method: {},
+      expected_by_method: { cash: 25000, check: 0 },
+    });
+    const el = await mount(sale({ lines: [] }));
+    const close = [...el.querySelectorAll('button')].find((b) => b.textContent?.trim() === 'Close Till') as HTMLElement;
+    close.click();
+    await new Promise((r) => setTimeout(r, 0));
+    await el.updateComplete;
+    ([...el.querySelectorAll('button')].find((b) => b.textContent?.includes('Post Count')) as HTMLElement).click();
+    await new Promise((r) => setTimeout(r, 0));
+    await el.updateComplete;
+    expect(svc.closeTill).not.toHaveBeenCalled();
+    const note = q(el, 'till-close-error');
+    expect(note.getAttribute('role')).toBe('alert');
+    expect(note.textContent).toContain('Count the cash, zero if none.');
+    expect((el as unknown as { _error: string | null })._error ?? null).toBeNull();
+    el.remove();
+  });
+
   it('says which tenders were left uncounted once the count is posted', async () => {
     svc.tillReport.mockResolvedValue({
       sale_count: 0, sales_total_cents: 0, tax_total_cents: 0, change_cents: 0, tendered_by_method: {},

@@ -233,6 +233,8 @@ export class POSTerminal extends LitElement {
   @state() private _closeResult: TillReport | null = null;
   // Tenders left without a count when the blind count was posted, named in the result.
   @state() private _closeUncounted: string[] = [];
+  // A refusal shown inside the Close Till dialog; the page band sits under its overlay.
+  @state() private _closeCountError = '';
   @state() private _tillBusy = false;
   // The drawer's cash movements dialog (CP-08).
   @state() private _showMovement = false;
@@ -505,6 +507,7 @@ export class POSTerminal extends LitElement {
       this._counts = seed;
       this._closeResult = null;
       this._closeUncounted = [];
+      this._closeCountError = '';
       this._showTillClose = true;
     } catch (err: unknown) {
       this._error = err instanceof Error ? err.message : 'Failed to load till report';
@@ -520,6 +523,11 @@ export class POSTerminal extends LitElement {
       const cents = dollarsToCents(val);
       if (!isNaN(cents)) counted[method] = cents;
     }
+    if ('cash' in this._counts && !('cash' in counted)) {
+      this._closeCountError = 'Count the cash, zero if none.';
+      return;
+    }
+    this._closeCountError = '';
     const uncounted = Object.keys(this._counts).filter((m) => !(m in counted));
     try {
       this._tillBusy = true;
@@ -2585,11 +2593,12 @@ export class POSTerminal extends LitElement {
         <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
           <label style="width:90px;font-size:13px;color:rgb(var(--gb-till-soft))">${methodLabel(m as TenderMethod)}</label>
           <input type="number" step="0.01" .value=${this._counts[m]} data-testid="till-count-${m}"
-            @input=${(e: Event) => { this._counts = { ...this._counts, [m]: (e.target as HTMLInputElement).value }; }}
+            @input=${(e: Event) => { this._counts = { ...this._counts, [m]: (e.target as HTMLInputElement).value }; this._closeCountError = ''; }}
             class="placeholder:font-normal placeholder:text-[rgb(var(--gb-till-muted))]"
             style="flex:1;box-sizing:border-box;padding:10px;background:rgb(var(--gb-till-field));border:1px solid rgb(var(--gb-till-edge));border-radius:8px;color:rgb(var(--gb-till-text));font-size:16px;text-align:right;outline:none" placeholder="Enter the count" />
         </div>
       `)}
+      ${this._closeCountError ? html`<p role="alert" data-testid="till-close-error" style="margin:8px 0 0;font-size:13px;color:rgb(var(--gb-till-bad))">${this._closeCountError}</p>` : nothing}
       <div style="display:flex;gap:8px;margin-top:20px">
         <button @click=${close} style="flex:1;padding:12px;background:transparent;border:1px solid rgb(var(--gb-till-edge));border-radius:8px;color:rgb(var(--gb-till-muted));font-size:14px;cursor:pointer">Cancel</button>
         <button @click=${() => this._confirmCloseTill()} ?disabled=${this._tillBusy} style="flex:2;padding:12px;background:rgb(var(--gb-till-accent));border:none;border-radius:8px;color:rgb(var(--gb-plate));font-size:15px;font-weight:700;cursor:pointer">${this._tillBusy ? 'Posting\u2026' : 'Post Count & Close'}</button>
