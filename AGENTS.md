@@ -117,7 +117,7 @@ A frontend or runtime whose directory has not landed yet may be listed in `manif
 
 ### Backend (`cd core`)
 ```bash
-AUTH_MODE=dev go run ./cmd/server  # run API (port 8080, needs DB on :5434)
+AUTH_MODE=dev go run -tags devauth ./cmd/server  # run API (port 8080, needs DB on :5434)
 go run ./cmd/migrate               # apply SQL migrations in order
 go build ./...                     # full build check
 go test ./...                      # run all Go tests (DB-backed tests skip if
@@ -130,9 +130,11 @@ go vet ./...                       # static analysis
 `AUTH_MODE=dev` is required to boot locally — it is not a default. Without it
 and without a `JWKS_URL`, the server fail-closes and exits (`core/internal/app/serve/serve.go`).
 
+`AUTH_MODE=dev` also needs a binary built with the `devauth` tag (`go run -tags devauth`, which `make build`, `make vet`, `make test` and the compose stack pass). A binary built without the tag, such as the published image, exits at start when `AUTH_MODE=dev` is set, and a dev build exits when `AUTH_MODE=dev` and `APPWRITE_ENDPOINT` are both set (ADR 0012 section 7, `core/pkg/devauth`).
+
 Override DB connection when Postgres is on the standard port:
 ```bash
-DATABASE_URL="postgres://gable_user:gable_password@localhost:5432/gable_db?sslmode=disable" AUTH_MODE=dev go run ./cmd/server
+DATABASE_URL="postgres://gable_user:gable_password@localhost:5432/gable_db?sslmode=disable" AUTH_MODE=dev go run -tags devauth ./cmd/server
 ```
 
 ### Frontend (`cd web/apps/desk`)

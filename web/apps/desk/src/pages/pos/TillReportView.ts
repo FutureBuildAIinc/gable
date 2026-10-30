@@ -7,8 +7,9 @@ import type { TillReport } from '../../types/pos';
 import { formatDateTime } from '../../lib/dates.ts';
 import { kindLabel } from './movements.ts';
 import { cashierLabel, expectedDrawerCash, isBlind, reportMethodLabel, reportMethods, signedInPerson, type SignedInPerson, type TillReportKind } from './tillReport.ts';
+import { formatCents } from '../../lib/utils.ts';
 
-const fmt = (cents: number) => (cents < 0 ? `-$${(-cents / 100).toFixed(2)}` : `$${(cents / 100).toFixed(2)}`);
+const fmt = formatCents;
 
 const MUTED = 'color:rgb(var(--gb-till-muted))';
 const RULE = 'border-top:1px solid rgb(var(--gb-till-rule))';
@@ -171,7 +172,7 @@ export class TillReportView extends LitElement {
                 <button type="button" data-testid="till-report-close" @click=${() => this.close()}
                     style="flex:1;padding:12px;background:transparent;border:1px solid rgb(var(--gb-till-edge));border-radius:8px;color:rgb(var(--gb-till-muted));font-size:14px;cursor:pointer">Close</button>
                 <button type="button" data-testid="till-report-print" @click=${() => this.print()}
-                    style="flex:2;padding:12px;background:rgb(var(--gb-till-accent));border:none;border-radius:8px;color:rgb(var(--gb-plate));font-size:15px;font-weight:700;cursor:pointer">Print</button>
+                    style="flex:2;padding:12px;background:rgb(var(--gb-till-accent));border:none;border-radius:8px;color:rgb(var(--gb-deep-space));font-size:15px;font-weight:700;cursor:pointer">Print</button>
             </div>
         `;
     }

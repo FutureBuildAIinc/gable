@@ -245,7 +245,7 @@ func TestAZeroLimitRefusesEveryAccountTenderEvenWithUnappliedCash(t *testing.T) 
 		t.Errorf("the refused charge posted %d invoices", got-before)
 	}
 	// a cash tender on the same account is not held
-	if r := f.completeSale(saleID, f.cashFor("1")); r.status != http.StatusOK {
+	if r := f.completeSale(saleID, f.cashFor(saleID)); r.status != http.StatusOK {
 		t.Errorf("cash on a held account = %d, want 200: %s", r.status, r.raw)
 	}
 }

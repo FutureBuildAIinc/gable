@@ -26,7 +26,7 @@ import './SignaturePad';
 import type { SignaturePad } from './SignaturePad';
 import './ScalePanel';
 import { weightBadgeText } from './scale';
-import { formatPrice4, formatCents } from '../../lib/utils';
+import { formatPrice2, formatCents } from '../../lib/utils';
 import { isCountedUnit, normalizeQuantity } from '../../lib/money';
 import { payPlan, panelProgress, type PanelState, type PanelKey } from './panels';
 import { roundCashFor, type CashRoundingMode } from '../../lib/cashRounding';
@@ -68,7 +68,7 @@ import { POS_SW_WARNING_ATTR } from '../../lib/pos-sw';
 const REGISTER_STORAGE_PREFIX = 'gable.pos.register.';
 // The sale each register last opened, so a visit that left it empty reuses it.
 const SALE_STORAGE_PREFIX = 'gable.pos.sale.';
-const fmt = (cents: number) => `$${(cents / 100).toFixed(2)}`;
+const fmt = formatCents;
 const tenderTitle = (m: TenderMethod) => (m === 'account' ? 'Charge to account' : m === 'store_credit' ? 'Store credit' : m);
 /** A line carries a quantity control when it has a quantity the route reprices. */
 const hasQuantityControl = (l: SaleLine) => l.parent_line_id === null && ['product', 'kit', 'charge'].includes(l.line_type);
@@ -241,6 +241,10 @@ export class POSTerminal extends LitElement {
   @state() private _tillReport: TillReport | null = null;
   @state() private _counts: Record<string, string> = {};
   @state() private _closeResult: TillReport | null = null;
+  // Tenders left without a count when the blind count was posted, named in the result.
+  @state() private _closeUncounted: string[] = [];
+  // A refusal shown inside the Close Till dialog; the page band sits under its overlay.
+  @state() private _closeCountError = '';
   @state() private _tillBusy = false;
   // The drawer's cash movements dialog (CP-08).
   @state() private _showMovement = false;
@@ -723,7 +727,8 @@ export class POSTerminal extends LitElement {
     }
     const cents = dollarsToCents(this._openingFloat);
     if (isNaN(cents) || cents < 0) {
-      this._error = 'Enter a valid opening float';
+      // inside the dialog: the page's error band sits under this overlay
+      this._tillFloatError = 'Enter a valid opening float, zero or more.';
       return;
     }
     try {
@@ -782,6 +787,8 @@ export class POSTerminal extends LitElement {
       methods.forEach((m) => { seed[m] = ''; });
       this._counts = seed;
       this._closeResult = null;
+      this._closeUncounted = [];
+      this._closeCountError = '';
       this._showTillClose = true;
     } catch (err: unknown) {
       this._error = err instanceof Error ? err.message : 'Failed to load till report';
@@ -797,9 +804,16 @@ export class POSTerminal extends LitElement {
       const cents = dollarsToCents(val);
       if (!isNaN(cents)) counted[method] = cents;
     }
+    if ('cash' in this._counts && !('cash' in counted)) {
+      this._closeCountError = 'Count the cash, zero if none.';
+      return;
+    }
+    this._closeCountError = '';
+    const uncounted = Object.keys(this._counts).filter((m) => !(m in counted));
     try {
       this._tillBusy = true;
       this._closeResult = await posService.closeTill(this._till.id, counted, '');
+      this._closeUncounted = uncounted;
       this._till = null; // session closed
       this._sale = null;
       this._completed = null;
@@ -2770,12 +2784,12 @@ export class POSTerminal extends LitElement {
       <label style="display:block;font-size:12px;color:rgb(var(--gb-till-muted));margin-bottom:6px">Opening float ($)</label>
       <input type="number" step="0.01" .value=${this._openingFloat} data-testid="till-float-amount"
         @input=${(e: Event) => { this._openingFloat = (e.target as HTMLInputElement).value; this._tillFloatError = ''; }}
-        class="placeholder:font-normal placeholder:text-[rgb(var(--gb-till-muted))]"
+        class="placeholder:font-normal placeholder:text-sm placeholder:opacity-70 placeholder:text-[rgb(var(--gb-till-muted))]"
         style="width:100%;box-sizing:border-box;padding:14px;background:rgb(var(--gb-till-field));border:2px solid rgb(var(--gb-till-accent));border-radius:8px;color:rgb(var(--gb-till-text));font-size:22px;font-weight:700;text-align:center;outline:none" placeholder="Type the counted amount" />
       ${this._tillFloatError ? html`<p role="alert" data-testid="till-float-error" style="margin:8px 0 0;font-size:13px;color:rgb(var(--gb-till-bad))">${this._tillFloatError}</p>` : nothing}
       <div style="display:flex;gap:8px;margin-top:20px">
         <button @click=${() => { this._showTillOpen = false; this._tillFloatError = ''; }} style="flex:1;padding:12px;background:transparent;border:1px solid rgb(var(--gb-till-edge));border-radius:8px;color:rgb(var(--gb-till-muted));font-size:14px;cursor:pointer">Cancel</button>
-        <button @click=${() => this._openTill()} ?disabled=${this._tillBusy} style="flex:2;padding:12px;background:rgb(var(--gb-till-accent));border:none;border-radius:8px;color:rgb(var(--gb-plate));font-size:15px;font-weight:700;cursor:pointer">${this._tillBusy ? 'Opening\u2026' : 'Open Till'}</button>
+        <button @click=${() => this._openTill()} ?disabled=${this._tillBusy} style="flex:2;padding:12px;background:rgb(var(--gb-till-accent));border:none;border-radius:8px;color:rgb(var(--gb-deep-space));font-size:15px;font-weight:700;cursor:pointer">${this._tillBusy ? 'Opening\u2026' : 'Open Till'}</button>
       </div>
     `);
   }
@@ -2881,6 +2895,7 @@ export class POSTerminal extends LitElement {
             })}
           </tbody>
         </table>
+        ${this._closeUncounted.length ? html`<p data-testid="till-close-uncounted" style="margin:12px 0 0;font-size:13px;color:rgb(var(--gb-till-warn))">Not counted, posted as nothing: ${this._closeUncounted.map((m) => methodLabel(m as TenderMethod)).join(', ')}.</p>` : nothing}
         <div style="font-size:12px;color:rgb(var(--gb-till-muted));margin-top:14px">${r.sale_count} sales \u00b7 ${fmt(r.sales_total_cents)} rung \u00b7 ${fmt(r.tax_total_cents)} tax \u00b7 ${fmt(r.change_cents)} change given</div>
         <button @click=${close} style="width:100%;margin-top:18px;padding:12px;background:rgb(var(--gb-till-go));border:none;border-radius:8px;color:rgb(var(--gb-plate));font-size:15px;font-weight:700;cursor:pointer">Done</button>
       `);
@@ -2899,14 +2914,15 @@ export class POSTerminal extends LitElement {
         <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
           <label style="width:90px;font-size:13px;color:rgb(var(--gb-till-soft))">${methodLabel(m as TenderMethod)}</label>
           <input type="number" step="0.01" .value=${this._counts[m]} data-testid="till-count-${m}"
-            @input=${(e: Event) => { this._counts = { ...this._counts, [m]: (e.target as HTMLInputElement).value }; }}
+            @input=${(e: Event) => { this._counts = { ...this._counts, [m]: (e.target as HTMLInputElement).value }; this._closeCountError = ''; }}
             class="placeholder:font-normal placeholder:text-[rgb(var(--gb-till-muted))]"
             style="flex:1;box-sizing:border-box;padding:10px;background:rgb(var(--gb-till-field));border:1px solid rgb(var(--gb-till-edge));border-radius:8px;color:rgb(var(--gb-till-text));font-size:16px;text-align:right;outline:none" placeholder="Enter the count" />
         </div>
       `)}
+      ${this._closeCountError ? html`<p role="alert" data-testid="till-close-error" style="margin:8px 0 0;font-size:13px;color:rgb(var(--gb-till-bad))">${this._closeCountError}</p>` : nothing}
       <div style="display:flex;gap:8px;margin-top:20px">
         <button @click=${close} style="flex:1;padding:12px;background:transparent;border:1px solid rgb(var(--gb-till-edge));border-radius:8px;color:rgb(var(--gb-till-muted));font-size:14px;cursor:pointer">Cancel</button>
-        <button @click=${() => this._confirmCloseTill()} ?disabled=${this._tillBusy} style="flex:2;padding:12px;background:rgb(var(--gb-till-accent));border:none;border-radius:8px;color:rgb(var(--gb-plate));font-size:15px;font-weight:700;cursor:pointer">${this._tillBusy ? 'Posting\u2026' : 'Post Count & Close'}</button>
+        <button @click=${() => this._confirmCloseTill()} ?disabled=${this._tillBusy} style="flex:2;padding:12px;background:rgb(var(--gb-till-accent));border:none;border-radius:8px;color:rgb(var(--gb-deep-space));font-size:15px;font-weight:700;cursor:pointer">${this._tillBusy ? 'Posting\u2026' : 'Post Count & Close'}</button>
       </div>
     `);
   }
@@ -2929,7 +2945,7 @@ export class POSTerminal extends LitElement {
         style="margin-bottom:12px"></gable-date-field>
       ${this._returnSearchError ? html`<p role="alert" style="margin:0 0 12px;font-size:13px;color:rgb(var(--gb-till-bad))" data-testid="return-search-error">${this._returnSearchError}</p>` : nothing}
       <button @click=${() => void this._searchReturns()} ?disabled=${this._returnSearchBusy}
-        style="width:100%;padding:12px;background:rgb(var(--gb-till-accent));border:none;border-radius:8px;color:rgb(var(--gb-plate));font-size:15px;font-weight:700;cursor:pointer;margin-bottom:16px"
+        style="width:100%;padding:12px;background:rgb(var(--gb-till-accent));border:none;border-radius:8px;color:rgb(var(--gb-deep-space));font-size:15px;font-weight:700;cursor:pointer;margin-bottom:16px"
         data-testid="return-search-submit">${this._returnSearchBusy ? 'Searching\u2026' : 'Search'}</button>
       ${this._returnSearchResults.length > 0 ? html`
         <div style="max-height:340px;overflow-y:auto" data-testid="return-search-results">
@@ -3160,7 +3176,7 @@ export class POSTerminal extends LitElement {
                 <span class="font-mono" data-testid="pos-register">${this._registerId}</span>
                 ${this._registers.length > 1 ? html`
                   <label class="sr-only" for="pos-register-picker">Register</label>
-                  <gable-select id="pos-register-picker" data-testid="pos-register-picker"
+                  <gable-select id="pos-register-picker" data-testid="pos-register-picker" class="min-w-[9rem]"
                     .value=${this._registerId}
                     .options=${this._registers.map((r) => ({ value: r.id, label: `${r.branch_code} ${r.name}` }))}
                     @change=${(e: Event) => {
@@ -3219,10 +3235,11 @@ export class POSTerminal extends LitElement {
         <button type="button" data-testid="pos-till-menu-button" aria-label="Till" aria-haspopup="menu"
           title=${off ? 'Offline: drawer cash and X report need the connection; Close Till says what holds it' : 'Till'}
           aria-expanded=${this._tillMenu ? 'true' : 'false'} @click=${() => { this._tillMenu = !this._tillMenu; }}
-          class="flex h-11 w-11 items-center justify-center rounded border border-white/20 text-slate-200 hover:bg-white/5 min-[900px]:hidden">
+          class="flex h-11 items-center justify-center gap-1.5 rounded border border-white/20 px-3 text-slate-200 hover:bg-white/5 min-[900px]:hidden">
           <svg viewBox="0 0 24 24" class="h-5 w-5" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
             <rect x="3" y="6" width="18" height="13" rx="2"></rect><path d="M3 10h18"></path><path d="M7 15h4"></path>
           </svg>
+          <span class="text-xs font-semibold" data-testid="pos-till-menu-label">Till</span>
         </button>
         ${this._tillMenu ? html`
           <div role="menu" aria-label="Till" data-testid="pos-till-menu-items"
@@ -3416,11 +3433,11 @@ export class POSTerminal extends LitElement {
             ${this._tenderMethod === null ? 'Amount' : isCash ? 'Cash tendered' : html`<span class="capitalize">${this._tenderMethod}</span> amount`}
           </label>
           <input id="pos-tender-amount" type="text" inputmode="decimal" autocomplete="off"
-            placeholder=${owed > 0 ? (owed / 100).toFixed(2) : ''} .value=${this._tenderAmount}
+            placeholder=${owed > 0 ? `Owed ${formatCents(owed)}` : ''} .value=${this._tenderAmount}
             ?disabled=${!hasLines || !open || this._tenderMethod === null}
             @input=${(e: Event) => { this._tenderAmount = (e.target as HTMLInputElement).value; this._scheduleLargeCashLook(); }}
             @blur=${() => this._formatTenderAmount()}
-            class="mt-1 w-full rounded border border-white/10 bg-deep-space px-3 py-2 text-right font-mono text-xl font-bold text-white outline-none focus:border-gable-green"
+            class="mt-1 w-full rounded border border-white/10 bg-deep-space px-3 py-2 text-right font-mono text-xl font-bold text-white placeholder:text-sm placeholder:font-normal placeholder:text-slate-500 outline-none focus:border-gable-green"
             aria-label="Tender amount" />
           ${cardFee !== null ? html`
             <div class="mt-2 rounded-lg border border-white/10 bg-deep-space/60 p-3 text-sm text-slate-300" role="status" data-testid="pos-card-fee">
@@ -3586,12 +3603,12 @@ export class POSTerminal extends LitElement {
           <p class="mt-3 text-sm text-slate-400" data-testid="pos-no-lines">No items yet</p>` : html`
           <ul class="mt-3 space-y-3" aria-label="Ticket lines" data-testid="pos-lines">
             ${productLines.map((item) => html`
-              <li class="flex items-center gap-3">
+              <li class="flex flex-wrap items-center gap-x-3 gap-y-2" data-testid="pos-line">
                 ${this._renderThumb(item)}
-                <div class="min-w-0 flex-1">
+                <div class="min-w-0 flex-1 basis-40">
                   <div class="truncate text-sm font-semibold text-white">${item.description}</div>
                   ${weightBadgeText(item) ? html`<div class="font-mono text-xs text-gable-green" data-testid="pos-line-weight-badge">${weightBadgeText(item)}</div>` : nothing}
-                  <div class="font-mono text-xs text-slate-400">${item.quantity} ${item.uom} at ${item.unit_price_ten_thousandths !== null ? formatPrice4(item.unit_price_ten_thousandths) : '-'}</div>
+                  <div class="break-words font-mono text-xs text-slate-400">${item.quantity} ${item.uom} at ${item.unit_price_ten_thousandths !== null ? formatPrice2(item.unit_price_ten_thousandths) : '-'}</div>
                   ${item.tint ? html`
                     <div class="font-mono text-xs text-slate-400" data-testid="pos-line-tint">
                       ${item.tint.color_name}${item.tint.color_code ? ` (${item.tint.color_code})` : ''} on ${item.tint.base_code} ${item.tint.container_size_code}

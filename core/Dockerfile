@@ -10,11 +10,16 @@ RUN go mod download
 # Copy the source code
 COPY core/ .
 
+# Go build tags, empty by default. The local compose stack passes `devauth`,
+# the only build that will start with AUTH_MODE=dev (ADR 0012 section 7);
+# nothing that builds an image to publish sets it.
+ARG GO_BUILD_TAGS=""
+
 # Build the one binary. Every role is a subcommand of it: `core serve` is
 # the image's default command, and `core migrate` / `core seed` are what
 # DO App Platform post-deploy jobs invoke against the production image
 # without needing a separate build step.
-RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -trimpath -o core ./cmd/core
+RUN CGO_ENABLED=0 GOOS=linux go build -tags "${GO_BUILD_TAGS}" -ldflags="-s -w" -trimpath -o core ./cmd/core
 
 # Run stage
 FROM alpine:3.20

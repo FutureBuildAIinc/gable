@@ -18,6 +18,7 @@ import { customElement, state } from 'lit/decorators.js';
 import { LargeCashService } from '../../services/LargeCashService';
 import type { LargeCashForm8300, LargeCashStatement, LargeCashWorklistRow } from '../../types/largecash';
 import { deadlineWords, actionWords, moneyWords, statementLines } from './largeCashWords';
+import { formatCents } from '../../lib/utils.ts';
 
 const SURFACE = 'background:rgb(var(--gb-till-surface));border:1px solid rgb(var(--gb-till-edge))';
 const INK = 'color:rgb(var(--gb-till-text))';
@@ -146,7 +147,7 @@ export class LargeCashWorklist extends LitElement {
             <div class="lc-statement-actions mt-3 flex flex-wrap gap-2">
               <button data-testid="large-cash-statement-print" @click=${() => this._print()}
                 class="min-h-11 rounded px-4 py-2 text-sm font-bold"
-                style="background:rgb(var(--gb-till-accent));color:rgb(var(--gb-plate))">Print the statement</button>
+                style="background:rgb(var(--gb-till-accent));color:rgb(var(--gb-deep-space))">Print the statement</button>
               <button data-testid="large-cash-statement-close" @click=${() => { this._sheet = null; }}
                 class="min-h-11 rounded border px-4 py-2 text-sm font-semibold"
                 style="border-color:rgb(var(--gb-till-edge));${MUTED}">Close</button>
@@ -203,7 +204,7 @@ export class LargeCashWorklist extends LitElement {
         <li class="rounded-xl p-4" style=${SURFACE} data-testid="large-cash-row" data-event-id=${row.event_id}>
           <div class="flex flex-wrap items-baseline justify-between gap-2">
             <div class="text-sm font-semibold" style=${INK}>
-              ${row.payer_name} &middot; $${(row.total_cents / 100).toFixed(2)}
+              ${row.payer_name} &middot; ${formatCents(row.total_cents)}
             </div>
             <div class="font-mono text-xs" style=${MUTED}>
               ${row.branch_name}${row.contributed_branch_ids.length > 1
@@ -232,13 +233,13 @@ export class LargeCashWorklist extends LitElement {
             <div class="mt-3 flex flex-wrap gap-2">
               <button data-testid="large-cash-file" @click=${() => this._recordFiling(row)} ?disabled=${this._busy}
                 class="min-h-11 rounded px-4 py-2 text-sm font-bold"
-                style="background:rgb(var(--gb-till-accent));color:rgb(var(--gb-plate));${this._busy ? 'opacity:0.4' : ''}">${words.button}</button>
+                style="background:rgb(var(--gb-till-accent));color:rgb(var(--gb-deep-space));${this._busy ? 'opacity:0.4' : ''}">${words.button}</button>
             </div>` : nothing}
           ${words.canStatement ? html`
             <div class="mt-3 flex flex-wrap gap-2">
               <button data-testid="large-cash-statement" @click=${() => this._issueStatement(row)} ?disabled=${this._busy}
                 class="min-h-11 rounded px-4 py-2 text-sm font-bold"
-                style="background:rgb(var(--gb-till-accent));color:rgb(var(--gb-plate));${this._busy ? 'opacity:0.4' : ''}">Issue the customer statement</button>
+                style="background:rgb(var(--gb-till-accent));color:rgb(var(--gb-deep-space));${this._busy ? 'opacity:0.4' : ''}">Issue the customer statement</button>
             </div>` : nothing}
           <div class="mt-3 flex flex-wrap gap-2">
             <button data-testid="large-cash-form" @click=${() => this._showForm(row)} ?disabled=${this._busy}

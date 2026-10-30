@@ -1,0 +1,89 @@
+[
+  {
+    "id": "demo-owner",
+    "name": "Morgan Hale",
+    "role": "owner",
+    "homeYard": "KEL-MAIN",
+    "yards": [
+      "KEL-MAIN",
+      "WK",
+      "LK"
+    ]
+  },
+  {
+    "id": "demo-finance",
+    "name": "Robin Diaz",
+    "role": "finance",
+    "homeYard": "KEL-MAIN",
+    "yards": [
+      "KEL-MAIN",
+      "WK",
+      "LK"
+    ]
+  },
+  {
+    "id": "demo-sales-kel",
+    "name": "Avery Brooks",
+    "role": "sales",
+    "homeYard": "KEL-MAIN",
+    "yards": [
+      "KEL-MAIN"
+    ]
+  },
+  {
+    "id": "demo-cashier-kel",
+    "name": "Jordan Pike",
+    "role": "cashier",
+    "homeYard": "KEL-MAIN",
+    "yards": [
+      "KEL-MAIN"
+    ]
+  },
+  {
+    "id": "demo-warehouse-kel",
+    "name": "Sam Ortiz",
+    "role": "warehouse",
+    "homeYard": "KEL-MAIN",
+    "yards": [
+      "KEL-MAIN"
+    ]
+  },
+  {
+    "id": "demo-purchasing",
+    "name": "Casey Lin",
+    "role": "purchasing",
+    "homeYard": "KEL-MAIN",
+    "yards": [
+      "KEL-MAIN",
+      "WK",
+      "LK"
+    ]
+  },
+  {
+    "id": "demo-sales-wk",
+    "name": "Taylor Reed",
+    "role": "sales",
+    "homeYard": "WK",
+    "yards": [
+      "WK"
+    ]
+  },
+  {
+    "id": "demo-cashier-lk",
+    "name": "Drew Patel",
+    "role": "cashier",
+    "homeYard": "LK",
+    "yards": [
+      "LK"
+    ]
+  },
+  {
+    "id": "demo-driver-kel",
+    "name": "Alex Moreno",
+    "role": "driver",
+    "homeYard": "KEL-MAIN",
+    "yards": [
+      "KEL-MAIN"
+    ]
+  }
+]

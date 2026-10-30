@@ -600,7 +600,7 @@ local stack (Postgres, migrate and seed, `core serve`, `core worker`,
 the web front door) on http://127.0.0.1:8080 with `AUTH_MODE=dev`;
 `make down` removes it. To run the core from source instead:
 `make db`, `make migrate`, `DEMO_SEED=1 make seed`, then
-`cd core && AUTH_MODE=dev go run ./cmd/server`. The `make up` and
+`cd core && AUTH_MODE=dev go run -tags devauth ./cmd/server`. The `make up` and
 `make db` workflows use different compose projects and volumes, so
 the `make db` data is never truncated or removed by `make up` or
 `make down` (`AUTH_MODE=dev` needs no `Authorization` header; the

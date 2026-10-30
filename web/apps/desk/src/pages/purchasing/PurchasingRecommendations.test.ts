@@ -40,6 +40,21 @@ describe('purchasing recommendations', () => {
     expect(yards).toEqual(['Lake Country Outpost', 'West Kelowna Satellite'])
   })
 
+  it('prints Est. Cost with digit grouping and two places', async () => {
+    const item = {
+      branch_id: 'y1', branch_name: 'Lake Country Outpost', product_id: 'p1', product_sku: 'HANGER-28', product_name: 'Joist Hanger 2x8',
+      current_stock: 10, avg_daily_sales: 2, std_dev_sales: 0.6, lead_time_days: 7, reorder_point: 20,
+      safety_stock: 4, suggested_qty: 40, estimated_cost: 12345.6, urgency: 'HIGH', days_until_out: 5,
+    }
+    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse({
+      total_items: 1, critical_count: 0, high_count: 1, medium_count: 0, low_count: 0,
+      total_estimated_cost: 12345.6, items: [item],
+    })))
+    const el = await mountAsync<LitElement>('gable-purchasing-recommendations')
+    expect(text(el)).toContain('$12,345.60')
+    expect(text(el)).not.toContain('$12345.60')
+  })
+
   it('opens the new purchase order at the row\'s own yard', async () => {
     const item = (branch_id: string, branch_name: string) => ({
       branch_id, branch_name, product_id: 'p1', product_sku: 'HANGER-28', product_name: 'Joist Hanger 2x8',

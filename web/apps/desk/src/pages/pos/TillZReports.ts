@@ -9,8 +9,9 @@ import { formatDateTime } from '../../lib/dates.ts';
 import '../../components/ui/gable-date-field.ts';
 import type { GableDateField } from '../../components/ui/gable-date-field.ts';
 import './TillReportView.ts';
+import { formatCents } from '../../lib/utils.ts';
 
-const fmt = (cents: number) => `$${(cents / 100).toFixed(2)}`;
+const fmt = formatCents;
 
 /**
  * The register's stored Z reports (CP-08): the frozen close of each past

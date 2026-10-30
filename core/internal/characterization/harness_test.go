@@ -32,6 +32,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gablelbm/gable/pkg/devauth"
 	_ "github.com/jackc/pgx/v5/stdlib"
 )
 
@@ -242,8 +243,16 @@ func newHarness(t *testing.T, freshURL string) *harness {
 	// The one core binary, once: every role the harness runs (migrate, seed,
 	// serve) is a subcommand of it, so the goldens exercise cmd/core's
 	// dispatch and the exact entry point the image runs.
+	//
+	// The harness serves with AUTH_MODE=dev, which only a binary built with
+	// the devauth tag starts (ADR 0012 section 7). The inner build carries the
+	// tag exactly when this test binary does; an untagged run says so and
+	// skips rather than failing on a start refusal.
+	if !devauth.Enabled {
+		t.Skip("the goldens serve with AUTH_MODE=dev, which needs a build with the devauth tag; run go test -tags devauth")
+	}
 	run(t, backendRoot, subprocessEnv(nil), "go", "",
-		"build", "-o", buildDir+string(os.PathSeparator), "./cmd/core")
+		"build", "-tags", "devauth", "-o", buildDir+string(os.PathSeparator), "./cmd/core")
 
 	// The seed draws demo data through the global math/rand source. Go
 	// auto-seeds it randomly at startup, which would make two runs of the

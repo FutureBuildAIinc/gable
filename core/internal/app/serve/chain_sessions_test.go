@@ -9,8 +9,10 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
+	"github.com/gablelbm/gable/internal/staffauth"
 	"github.com/gablelbm/gable/pkg/middleware"
 )
 
@@ -81,5 +83,40 @@ func TestStaffSessionRoutesArePublicPaths(t *testing.T) {
 				t.Error("the session read must go through the auth layer")
 			}
 		}
+	}
+}
+
+// The shell's email and password door through the real chain: a public path
+// that reaches its own handler with no session, and whose answer carries no
+// CORS allowance even for an origin the CORS layer allows, so no page can
+// read it (CP-13 shell password, item 340).
+func TestShellPasswordDoorIsPublicAndAnswersNoPage(t *testing.T) {
+	t.Setenv("CORS_ORIGINS", "https://desk.example")
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	am, err := middleware.NewAuthMiddleware(context.Background(), middleware.AuthConfig{
+		PublicPaths: publicAPIPaths,
+		Sessions:    neverSession{},
+	}, logger)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mux := http.NewServeMux()
+	staffauth.NewHandler(staffauth.NewService(nil, nil, nil, staffauth.Settings{}, logger), staffauth.HandlerConfig{}).RegisterRoutes(mux)
+	h := buildChain(ChainDeps{Mux: mux, Logger: logger, AuthMw: am})
+
+	// No session and a bad body: the handler's own 400, not the auth layer's 401.
+	r := httptest.NewRequest(http.MethodPost, "/api/v1/auth/shell/signin", strings.NewReader("not json"))
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("no Origin, bad body = %d, want the handler's 400", w.Code)
+	}
+
+	r = httptest.NewRequest(http.MethodPost, "/api/v1/auth/shell/signin", strings.NewReader(`{"email":"a@x.example","password":"pw"}`))
+	r.Header.Set("Origin", "https://desk.example")
+	w = httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+	if w.Code != http.StatusUnauthorized || w.Header().Get("Access-Control-Allow-Origin") != "" || w.Header().Get("Access-Control-Allow-Credentials") != "" {
+		t.Fatalf("an allowed page's POST = %d with %v", w.Code, w.Header())
 	}
 }

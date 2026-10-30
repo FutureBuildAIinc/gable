@@ -102,6 +102,7 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	// The shell's token path (ADR 0012 section 3): redeem the one time code,
 	// rotate the refresh token, sign out by the access token. Not cookie
 	// requests, so no CSRF header; each is limited per client address.
+	mux.HandleFunc("POST /api/v1/auth/shell/signin", h.ShellSignIn)
 	mux.HandleFunc("POST /api/v1/auth/shell/redeem", h.ShellRedeem)
 	mux.HandleFunc("POST /api/v1/auth/shell/refresh", h.ShellRefresh)
 	mux.HandleFunc("POST /api/v1/auth/shell/signout", h.ShellSignOut)
@@ -147,16 +148,14 @@ func (h *Handler) limited(w http.ResponseWriter, r *http.Request, d time.Duratio
 	httpx.WriteError(w, r, httpx.RateLimited(refusedMessage))
 }
 
-// SignIn is POST /api/v1/auth/signin. A presented session id is ignored and a
-// fresh one is issued every time.
-func (h *Handler) SignIn(w http.ResponseWriter, r *http.Request) {
-	if !h.sameSiteIntent(r) {
-		httpx.WriteError(w, r, httpx.Unauthorized(refusedMessage))
-		return
-	}
+// passwordAttempt is the step both email and password doors share, so they
+// answer alike: the dealer's allowlist before any credential is read, the
+// body, then one budget per client address and per email across both doors.
+// It answers the refusal itself and reports false.
+func (h *Handler) passwordAttempt(w http.ResponseWriter, r *http.Request) (email, password string, ok bool) {
 	if h.emailPasswordAllowed != nil && !h.emailPasswordAllowed(r.Context()) {
 		httpx.WriteError(w, r, httpx.Forbidden("Sign in with email and password is not allowed for this dealer"))
-		return
+		return "", "", false
 	}
 	var body struct {
 		Email    string `json:"email"`
@@ -165,17 +164,31 @@ func (h *Handler) SignIn(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, 8<<10)
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		httpx.WriteError(w, r, httpx.BadRequest("request body must be {email, password}"))
-		return
+		return "", "", false
 	}
 	if ok, d := h.byAddress.allow(h.cfg.Trusted.Of(r)); !ok {
 		h.limited(w, r, d)
-		return
+		return "", "", false
 	}
 	if ok, d := h.byEmail.allow(strings.ToLower(strings.TrimSpace(body.Email))); !ok {
 		h.limited(w, r, d)
+		return "", "", false
+	}
+	return body.Email, body.Password, true
+}
+
+// SignIn is POST /api/v1/auth/signin. A presented session id is ignored and a
+// fresh one is issued every time.
+func (h *Handler) SignIn(w http.ResponseWriter, r *http.Request) {
+	if !h.sameSiteIntent(r) {
+		httpx.WriteError(w, r, httpx.Unauthorized(refusedMessage))
 		return
 	}
-	id, who, err := h.svc.SignIn(r.Context(), body.Email, body.Password, "web")
+	email, password, ok := h.passwordAttempt(w, r)
+	if !ok {
+		return
+	}
+	id, who, err := h.svc.SignIn(r.Context(), email, password, "web")
 	switch {
 	case errors.Is(err, ErrRefused):
 		httpx.WriteError(w, r, httpx.Unauthorized(refusedMessage))

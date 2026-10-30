@@ -8,6 +8,7 @@ import { ArrowLeft, TrendingUp, AlertTriangle, ShoppingCart, RefreshCw, Package 
 import { PurchaseOrderService } from '../../services/PurchaseOrderService.ts';
 import { ToastService } from '../../lib/toast-service.ts';
 import { router } from '../../lib/router.ts';
+import { formatDollars } from '../../lib/utils.ts';
 import type { PurchaseRecommendation, RecommendationSummary, UrgencyLevel } from '../../types/purchaseOrder.ts';
 
 const urgencyConfig: Record<UrgencyLevel, { label: string; color: string; bg: string; border: string }> = {
@@ -216,7 +217,7 @@ export class GablePurchasingRecommendations extends LitElement {
                                                     </span>
                                                 </td>
                                                 <td class="py-3 px-4 text-right text-sm font-mono font-medium text-gable-green">${rec.suggested_qty.toFixed(0)}</td>
-                                                <td class="py-3 px-4 text-right text-sm font-mono text-zinc-300">$${rec.estimated_cost.toFixed(2)}</td>
+                                                <td class="py-3 px-4 text-right text-sm font-mono text-zinc-300">${formatDollars(rec.estimated_cost)}</td>
                                                 <td class="py-3 px-4 text-right">
                                                     <button
                                                         @click=${() => this._handleCreatePO(rec)}

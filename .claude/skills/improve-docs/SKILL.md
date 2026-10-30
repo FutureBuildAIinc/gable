@@ -55,7 +55,7 @@ Never "fix" a doc by making it read better. Fix it by making it **true**.
 
 ```bash
 make db && make migrate && DEMO_SEED=1 make seed
-cd core && go run ./cmd/server
+cd core && AUTH_MODE=dev go run -tags devauth ./cmd/server
 cd web/apps/desk && npm install && npm run dev
 ```
 
