@@ -751,6 +751,7 @@ func Run() {
 		os.Exit(1)
 	}
 	if staffHandler != nil {
+		staffHandler.WithEmailPasswordGuard(func(ctx context.Context) bool { return signinSvc.Allowed(ctx, signinmethods.MethodEmailPassword) })
 		staffHandler.RegisterRoutes(mux)
 		staffLinks.RegisterRoutes(mux, middleware.RequireRole("admin", "owner"))
 	}

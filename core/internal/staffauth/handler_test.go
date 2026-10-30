@@ -234,3 +234,22 @@ func TestConcurrentSignInsIssueDistinctSessions(t *testing.T) {
 		t.Fatalf("ids %d rows %d, want 3 and 3", len(seen), rowCount(t, svc))
 	}
 }
+
+// A dealer that dropped email and password refuses the staff sign in before
+// any credential is read, and no session is issued.
+func TestSignInRefusedWhenEmailPasswordIsOffTheAllowlist(t *testing.T) {
+	h, _, hd := stack(t, okDir())
+	allowed := false
+	hd.WithEmailPasswordGuard(func(context.Context) bool { return allowed })
+	w := post(h, "/api/v1/auth/signin", goodBody, csrf)
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("method off: status %d, want 403", w.Code)
+	}
+	if len(w.Result().Cookies()) != 0 {
+		t.Fatal("a cookie was set on a refusal")
+	}
+	allowed = true
+	if w := post(h, "/api/v1/auth/signin", goodBody, csrf); w.Code != http.StatusOK {
+		t.Fatalf("method on: status %d, want 200", w.Code)
+	}
+}
