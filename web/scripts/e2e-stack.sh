@@ -42,7 +42,13 @@ up)
   mkdir -p "$E2E_DIR"
   sed "s/__CORE_PORT__/$CORE_PORT/" "$HERE/e2e/gable-api.conf" > "$E2E_DIR/gable-api.conf"
 
-  (cd "$HERE/../core" && go build -tags devauth -o "$E2E_DIR/core" ./cmd/core)
+  # Appwrite mode builds the core without the devauth tag, as the published
+  # image is; dev mode needs a devauth build (ADR 0012 section 7).
+  if [ -n "${APPWRITE_SEED_JSON:-}" ]; then
+    (cd "$HERE/../core" && go build -o "$E2E_DIR/core" ./cmd/core)
+  else
+    (cd "$HERE/../core" && go build -tags devauth -o "$E2E_DIR/core" ./cmd/core)
+  fi
   # The large cash payer capture refuses to store a taxpayer id without a
   # vault key, so the stack runs with an obvious test pattern unless the
   # caller gives one.
