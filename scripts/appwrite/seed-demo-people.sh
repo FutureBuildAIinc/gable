@@ -64,6 +64,8 @@ req() {
     curl "${args[@]}" "$ENDPOINT$path"
   fi
 }
+# Prints the Appwrite response body; the request body (it carries the password)
+# must never be echoed here.
 die() { echo "seed-demo-people.sh: $1 (status ${2:-?}): $(cat "$RESP" 2>/dev/null)" >&2; exit 1; }
 
 while IFS=$'\t' read -r uid name role; do
