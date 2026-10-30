@@ -306,10 +306,7 @@ func (s *Service) repriceSaleLines(ctx context.Context, sale *Sale, lines []sale
 				family[j].Position = places[len(places)-1] + (j - len(places) + 1)
 			}
 		}
-		if err := s.repo.RemoveLine(ctx, sale.ID, old.ID); err != nil {
-			return err
-		}
-		if err := s.repo.AddLines(ctx, sale.ID, family); err != nil {
+		if err := s.reAddLine(ctx, sale.ID, old, family); err != nil {
 			return err
 		}
 	}
