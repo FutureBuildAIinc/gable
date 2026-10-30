@@ -10,6 +10,7 @@ package tint
 // unique per customer name.
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/gablelbm/gable/internal/testutil"
@@ -181,3 +182,86 @@ func TestSavedColorUniquePerName(t *testing.T) {
 		t.Fatalf("delete: %v", err)
 	}
 }
+
+// RULE: a base's product link can be set, changed and cleared after create
+// (row CP-16, item 341): the update changes only what it names, answers the
+// whole base, refuses an unknown base or product, and never touches the code.
+func TestUpdateBaseLinksAndClearsTheProduct(t *testing.T) {
+	svc, s := seed(t)
+	ctx := t.Context()
+	db := testutil.RequireDB(t)
+	product := newUUID()
+	if _, err := db.Pool.Exec(ctx, `INSERT INTO products (id, sku, description, uom_primary, base_price, average_unit_cost)
+		VALUES ($1, $2, 'Base paint', 'PCS', 10, 6)`, product, "TINT-"+product.String()[:8]); err != nil {
+		t.Fatalf("seed product: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = db.Pool.Exec(t.Context(), `DELETE FROM paint_bases WHERE id = $1`, s.base.ID)
+		_, _ = db.Pool.Exec(t.Context(), `DELETE FROM products WHERE id = $1`, product)
+	})
+
+	linked, err := svc.UpdateBase(ctx, s.base.ID, &BaseUpdate{SetProduct: true, ProductID: &product})
+	if err != nil {
+		t.Fatalf("link: %v", err)
+	}
+	if linked.ProductID == nil || *linked.ProductID != product {
+		t.Fatalf("product link = %v, want %s", linked.ProductID, product)
+	}
+	if linked.Code != s.base.Code || linked.Name != s.base.Name || linked.FillVolumeOZ != 122 {
+		t.Errorf("a link changed other fields: %+v", linked)
+	}
+	listed, err := svc.ListBases(ctx, nil, &product)
+	if err != nil || len(listed) != 1 || listed[0].ID != s.base.ID {
+		t.Fatalf("list by product = %v, %v", listed, err)
+	}
+	name := "Deep base, renamed"
+	deepest := true
+	renamed, err := svc.UpdateBase(ctx, s.base.ID, &BaseUpdate{Name: &name, IsDeepest: &deepest})
+	if err != nil {
+		t.Fatalf("rename: %v", err)
+	}
+	if renamed.Name != name || !renamed.IsDeepest || renamed.ProductID == nil {
+		t.Errorf("rename lost the link or missed a field: %+v", renamed)
+	}
+	cleared, err := svc.UpdateBase(ctx, s.base.ID, &BaseUpdate{SetProduct: true})
+	if err != nil || cleared.ProductID != nil {
+		t.Fatalf("clear = %+v, %v", cleared, err)
+	}
+	ghost := newUUID()
+	if _, err := svc.UpdateBase(ctx, s.base.ID, &BaseUpdate{SetProduct: true, ProductID: &ghost}); err == nil {
+		t.Error("linking an unknown product was accepted")
+	}
+	if _, err := svc.UpdateBase(ctx, newUUID(), &BaseUpdate{Name: &name}); err == nil {
+		t.Error("updating an unknown base was accepted")
+	}
+}
+
+// RULE: the update body is strict: no field at all, a bad product id or a
+// non positive fill is refused before the store is reached.
+func TestBaseUpdateRequestParse(t *testing.T) {
+	bad := "not-a-uuid"
+	zero := 0
+	empty := ""
+	for name, r := range map[string]baseUpdateRequest{
+		"empty":     {},
+		"bad id":    {ProductID: rawJSON(`"` + bad + `"`)},
+		"zero fill": {FillVolumeOZ: &zero},
+		"blank":     {Name: &empty},
+	} {
+		if _, err := r.parse(); err == nil {
+			t.Errorf("%s: accepted", name)
+		}
+	}
+	id := newUUID().String()
+	for name, r := range map[string]baseUpdateRequest{
+		"link":  {ProductID: rawJSON(`"` + id + `"`)},
+		"clear": {ProductID: rawJSON(`null`)},
+	} {
+		u, err := r.parse()
+		if err != nil || !u.SetProduct {
+			t.Errorf("%s: %+v, %v", name, u, err)
+		}
+	}
+}
+
+func rawJSON(s string) json.RawMessage { return json.RawMessage(s) }

@@ -22572,6 +22572,40 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '500':
           $ref: '#/components/responses/InternalError'
+  /api/v1/tint/bases/{id}:
+    patch:
+      operationId: tintBaseUpdate
+      tags: [tint]
+      summary: Update a base
+      description: Changes the fields the body names. A product_id sets the link to the stocked base paint can the counter sells; null clears it. The code and the tint system never change. Admin and owner.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TintBaseUpdate'
+      responses:
+        '200':
+          description: The updated base.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TintBase'
+        '400':
+          $ref: '#/components/responses/BadRequestEither'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
   /api/v1/tint/colorants:
     get:
       operationId: tintColorantList
@@ -40624,6 +40658,13 @@ components:
         name: {type: string}
         manufacturer_base_code: {type: string}
         product_id: {type: string, format: uuid}
+        fill_volume_oz: {type: integer}
+        is_deepest: {type: boolean}
+    TintBaseUpdate:
+      type: object
+      properties:
+        name: {type: string}
+        product_id: {type: string, format: uuid, nullable: true}
         fill_volume_oz: {type: integer}
         is_deepest: {type: boolean}
     TintBasePage:

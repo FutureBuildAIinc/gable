@@ -76,6 +76,16 @@ func (s *Service) CreateBase(ctx context.Context, d *BaseDraft) (*Base, error) {
 	return out, httpErr(err)
 }
 
+func (s *Service) UpdateBase(ctx context.Context, id uuid.UUID, u *BaseUpdate) (*Base, error) {
+	var out *Base
+	err := s.inTx(ctx, func(ctx context.Context) error {
+		var err error
+		out, err = s.repo.UpdateBase(ctx, id, u)
+		return err
+	})
+	return out, httpErr(err)
+}
+
 func (s *Service) ListColorants(ctx context.Context, systemID *uuid.UUID) ([]Colorant, error) {
 	return s.repo.ListColorants(ctx, systemID)
 }

@@ -86,6 +86,7 @@ type Repository interface {
 	CreateSystem(ctx context.Context, d *SystemDraft) (*System, error)
 	ListBases(ctx context.Context, systemID, productID *uuid.UUID) ([]Base, error)
 	CreateBase(ctx context.Context, d *BaseDraft) (*Base, error)
+	UpdateBase(ctx context.Context, id uuid.UUID, u *BaseUpdate) (*Base, error)
 	ListColorants(ctx context.Context, systemID *uuid.UUID) ([]Colorant, error)
 	CreateColorant(ctx context.Context, d *ColorantDraft) (*Colorant, error)
 	ListColors(ctx context.Context, systemID *uuid.UUID, q string) ([]Color, error)
@@ -201,6 +202,28 @@ func (r *PostgresRepository) CreateBase(ctx context.Context, d *BaseDraft) (*Bas
 		return nil, mapInsert(err, "failed to create the base")
 	}
 	return b, nil
+}
+
+func (r *PostgresRepository) UpdateBase(ctx context.Context, id uuid.UUID, u *BaseUpdate) (*Base, error) {
+	var b Base
+	err := r.db.GetExecutor(ctx).QueryRow(ctx, `
+		UPDATE paint_bases SET
+		    name           = COALESCE($2, name),
+		    product_id     = CASE WHEN $3 THEN $4::uuid ELSE product_id END,
+		    fill_volume_oz = COALESCE($5, fill_volume_oz),
+		    is_deepest     = COALESCE($6, is_deepest)
+		WHERE id = $1
+		RETURNING id, tint_system_id, code, name, manufacturer_base_code, product_id, fill_volume_oz, is_deepest, created_at`,
+		id, u.Name, u.SetProduct, u.ProductID, u.FillVolumeOZ, u.IsDeepest).
+		Scan(&b.ID, &b.TintSystemID, &b.Code, &b.Name, &b.ManufacturerBaseCode, &b.ProductID,
+			&b.FillVolumeOZ, &b.IsDeepest, &b.CreatedAt)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, mapInsert(err, "failed to update the base")
+	}
+	return &b, nil
 }
 
 func (r *PostgresRepository) ListColorants(ctx context.Context, systemID *uuid.UUID) ([]Colorant, error) {
