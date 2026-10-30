@@ -286,10 +286,18 @@ export class GableInvoiceDetail extends LitElement {
                             ${renderSalesLines(inv.lines, { ariaLabel: 'Invoice line items' })}
                             <div class="bg-white/5 px-6 py-4 space-y-2 text-sm" data-testid="invoice-totals">
                                 <div class="flex justify-between"><span class="font-bold text-white uppercase">Subtotal</span><span class="font-bold text-white font-mono">${formatCents(inv.subtotal_cents)}</span></div>
-                                <div class="flex justify-between text-zinc-400">
-                                    <span>Tax ${inv.tax_exempt ? '(exempt)' : inv.tax_rate_percent !== null ? `(${inv.tax_rate_percent}%, ${inv.tax_source.replace(/_/g, ' ')})` : `(${inv.tax_source.replace(/_/g, ' ')})`}</span>
-                                    <span class="font-mono">${formatCents(inv.tax_cents)}</span>
-                                </div>
+                                ${inv.tax_lines && inv.tax_lines.length > 0
+                                    // a Canadian invoice: each part its own line, GST then PST (CP-14 A1)
+                                    ? inv.tax_lines.map((l) => html`
+                                        <div class="flex justify-between text-zinc-400" data-testid="tax-line">
+                                            <span>${l.label} ${l.rate_percent}%</span>
+                                            <span class="font-mono">${formatCents(l.cents)}</span>
+                                        </div>`)
+                                    : html`
+                                        <div class="flex justify-between text-zinc-400">
+                                            <span>Tax ${inv.tax_exempt ? '(exempt)' : inv.tax_rate_percent !== null ? `(${inv.tax_rate_percent}%, ${inv.tax_source.replace(/_/g, ' ')})` : `(${inv.tax_source.replace(/_/g, ' ')})`}</span>
+                                            <span class="font-mono">${formatCents(inv.tax_cents)}</span>
+                                        </div>`}
                                 <div class="flex justify-between border-t border-white/10 pt-2"><span class="font-bold text-white uppercase">Total</span><span class="font-bold text-gable-green font-mono text-lg">${formatCents(inv.total_cents)}</span></div>
                                 <div class="flex justify-between"><span class="text-zinc-300">Open amount</span><span class="font-mono ${inv.open_cents > 0 ? 'text-amber-400' : 'text-zinc-500'}" data-testid="open-amount">${formatCents(inv.open_cents)}</span></div>
                             </div>

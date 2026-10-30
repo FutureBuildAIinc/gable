@@ -192,7 +192,7 @@ const summaryColumns = `
 	o.status, o.revision, o.currency, o.delivery_type, o.ship_to_id, o.customer_po, o.ordered_by_contact_id,
 	o.salesperson_id, COALESCE(st.name, ''), o.scheduled_delivery_date::text,
 	ROUND(o.subtotal * 100)::bigint, ROUND(o.tax_amount * 100)::bigint, o.tax_rate::text, o.tax_exempt, o.tax_source,
-	ROUND(o.total_amount * 100)::bigint,
+	o.tax_rate_parts, ROUND(o.total_amount * 100)::bigint,
 	ROUND(COALESCE((
 		SELECT SUM(cost_sum) FROM (
 			SELECT ROUND(COALESCE(l.stock_quantity, l.quantity) * COALESCE(p.average_unit_cost, 0), 2) AS cost_sum
@@ -228,7 +228,7 @@ func (r *PostgresRepository) scanSummary(row pgx.Row, s *OrderSummary, extra ...
 		&s.ID, &s.Number, &s.BranchID, &s.CustomerID, &s.CustomerName, &s.QuoteID, &s.JobID,
 		&status, &s.Revision, &s.Currency, &delivery, &s.ShipToID, &s.CustomerPO, &s.OrderedByContactID,
 		&s.SalespersonID, &s.SalespersonName, &s.ScheduledDeliveryDate,
-		&subtotal, &tax, &taxRate, &s.TaxExempt, &taxSource, &total, &cost,
+		&subtotal, &tax, &taxRate, &s.TaxExempt, &taxSource, &s.TaxRateParts, &total, &cost,
 		&holdReason, &s.HoldNote, &confirmed, &created, &updated,
 		&s.InvoiceIDs, &deposit,
 	}, extra...)
@@ -238,6 +238,7 @@ func (r *PostgresRepository) scanSummary(row pgx.Row, s *OrderSummary, extra ...
 	s.Status = OrderStatus(status)
 	s.DeliveryType = DeliveryType(delivery)
 	s.TaxSource = salesdoc.TaxSource(taxSource)
+	s.TaxLines = taxzone.Lines(s.TaxRateParts)
 	s.SubtotalCents, s.TaxCents, s.TotalCents = httpx.Cents(subtotal), httpx.Cents(tax), httpx.Cents(total)
 	s.TotalCostCents = httpx.Cents(cost)
 	s.DepositUnappliedCents = httpx.Cents(deposit)

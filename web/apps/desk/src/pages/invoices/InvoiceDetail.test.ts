@@ -73,6 +73,18 @@ describe('gable-invoice-detail', () => {
       expect(el.querySelector(`a[href="/orders/${ORDER_ID}"]`)).not.toBeNull()
     })
 
+    it('lists a Canadian invoice\'s GST and PST as their own lines, in place of the one tax line (CP-14 A1)', async () => {
+      vi.unstubAllGlobals()
+      stub(invoice({ tax_rate_percent: '12', tax_cents: 396, tax_lines: [
+        { part: 'GOODS_TAX', label: 'GST', rate_percent: '5', cents: 165, exempt: false },
+        { part: 'PROVINCIAL_SALES_TAX', label: 'PST', rate_percent: '7', cents: 231, exempt: false },
+      ] }))
+      el = await mountAsync<GableInvoiceDetail>('gable-invoice-detail', { routeId: INVOICE_ID })
+      const lines = Array.from(el.querySelectorAll('[data-testid="tax-line"]')).map((n) => text(n))
+      expect(lines).toEqual(['GST 5% $1.65', 'PST 7% $2.31'])
+      expect(text(el.querySelector('[data-testid="invoice-totals"]'))).not.toContain('branch rate')
+    })
+
     it('renders cents as dollars: line, subtotal, tax with its rate and source, total and open amount', async () => {
       el = await mountAsync<GableInvoiceDetail>('gable-invoice-detail', { routeId: INVOICE_ID })
       const totals = text(el.querySelector('[data-testid="invoice-totals"]'))

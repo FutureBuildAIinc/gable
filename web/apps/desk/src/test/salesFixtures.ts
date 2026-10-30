@@ -90,6 +90,7 @@ export function invoice(overrides: Partial<Invoice> = {}): Invoice {
     tax_rate_percent: '8.875',
     tax_exempt: false,
     tax_source: 'branch_rate',
+    tax_lines: null,
     total_cents: 84_662,
     open_cents: 84_662,
     is_overdue: false,

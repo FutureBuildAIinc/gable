@@ -3964,7 +3964,7 @@ components:
     PosTransaction:
       type: object
       description: "The full sale: the head with its lines and tenders."
-      required: [id, number, revision, branch_id, register_id, cashier_id, customer_id, currency, subtotal_cents, tax_cents, total_cents, change_cents, till_session_id, status, invoice_id, completed_at, created_at, customer_po, job_id, buyer_contact_id, print_count, exchange_return_id, delivery_type, ship_to_id, lines, tenders]
+      required: [id, number, revision, branch_id, register_id, cashier_id, customer_id, currency, subtotal_cents, tax_cents, tax_lines, total_cents, change_cents, till_session_id, status, invoice_id, completed_at, created_at, customer_po, job_id, buyer_contact_id, print_count, exchange_return_id, delivery_type, ship_to_id, lines, tenders]
       properties:
         id: {type: string, format: uuid}
         number: {type: string, description: "POS-000001, human readable."}
@@ -3976,6 +3976,7 @@ components:
         currency: {type: string, description: "ISO 4217, the customer's or the dealer default."}
         subtotal_cents: {type: integer, format: int64}
         tax_cents: {type: integer, format: int64}
+        tax_lines: {type: [array, "null"], items: {$ref: "#/components/schemas/DocumentTaxLine"}, description: "A completed Canadian sale's tax parts, read from its invoice (CP-14); null on a cart and on a US sale."}
         total_cents: {type: integer, format: int64}
         change_cents: {type: integer, format: int64, description: "The change given, never subtracted from the payments a second time."}
         till_session_id: {type: [string, "null"], format: uuid}

@@ -312,7 +312,6 @@ func (r *PostgresRepository) UnbumpPrintCount(ctx context.Context, saleID uuid.U
 // thermal receipt prints beside it.
 type receiptSaleFacts struct {
 	sale          Sale
-	taxRateParts  []byte // the invoice's frozen zone, its parts with cents on a Canadian sale
 	cashierName   string
 	customerName  string
 	accountNumber string
@@ -332,16 +331,15 @@ func (r *PostgresRepository) ReceiptSaleByInvoice(ctx context.Context, invoiceID
 			         (SELECT NULLIF(btrim(st.email), '') FROM staff st WHERE st.id = t.cashier_id), ''),
 			COALESCE((SELECT CASE WHEN c.account_number = 'WALK-IN' THEN '' ELSE c.name END FROM customers c WHERE c.id = t.customer_id), ''),
 			COALESCE((SELECT CASE WHEN c.account_number = 'WALK-IN' THEN '' ELSE COALESCE(c.account_number, '') END FROM customers c WHERE c.id = t.customer_id), ''),
-			COALESCE((SELECT p.name FROM projects p WHERE p.id = t.job_id), ''),
-			(SELECT i.tax_rate_parts FROM invoices i WHERE i.id = t.invoice_id)
+			COALESCE((SELECT p.name FROM projects p WHERE p.id = t.job_id), '')
 		FROM pos_transactions t
 		WHERE t.invoice_id = $1 AND `+middleware.Wall("t", 2, 3),
 		invoiceID, middleware.BranchIDForQuery(ctx), middleware.GrantsSubForQuery(ctx)).
 		Scan(&s.ID, &s.Number, &s.Revision, &s.BranchID, &s.RegisterID, &s.CashierID, &s.CustomerID, &s.Currency,
 			&s.SubtotalCents, &s.TaxCents, &s.TotalCents, &s.ChangeCents, &s.TillSessionID, &s.Status, &s.InvoiceID,
 			&completed, &created, &s.CustomerPO, &s.JobID, &s.BuyerContactID, &s.PrintCount, &s.ExchangeReturnID,
-			&s.DeliveryType, &s.ShipToID,
-			&out.cashierName, &out.customerName, &out.accountNumber, &out.jobName, &out.taxRateParts)
+			&s.DeliveryType, &s.ShipToID, &s.taxRateParts,
+			&out.cashierName, &out.customerName, &out.accountNumber, &out.jobName)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, httpx.NotFound("sale not found")
 	}

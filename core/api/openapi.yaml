@@ -29954,6 +29954,7 @@ components:
         - tax_rate_percent
         - tax_exempt
         - tax_source
+        - tax_lines
         - total_cents
         - open_cents
         - is_overdue
@@ -30064,6 +30065,13 @@ components:
           type: boolean
         tax_source:
           $ref: '#/components/schemas/OrderTaxSource'
+        tax_lines:
+          type:
+            - array
+            - 'null'
+          description: A Canadian document's tax parts as printed lines (CP-14), GST first, each rounded on its own; null on a document with no Canadian parts.
+          items:
+            $ref: '#/components/schemas/DocumentTaxLine'
         total_cents:
           type: integer
           format: int64
@@ -30133,6 +30141,7 @@ components:
         - tax_rate_percent
         - tax_exempt
         - tax_source
+        - tax_lines
         - total_cents
         - open_cents
         - is_overdue
@@ -30245,6 +30254,13 @@ components:
           type: boolean
         tax_source:
           $ref: '#/components/schemas/OrderTaxSource'
+        tax_lines:
+          type:
+            - array
+            - 'null'
+          description: A Canadian document's tax parts as printed lines (CP-14), GST first, each rounded on its own; null on a document with no Canadian parts.
+          items:
+            $ref: '#/components/schemas/DocumentTaxLine'
         total_cents:
           type: integer
           format: int64
@@ -32712,6 +32728,7 @@ components:
         - tax_rate_percent
         - tax_exempt
         - tax_source
+        - tax_lines
         - total_cents
         - total_cost_cents
         - total_margin_cents
@@ -32810,6 +32827,13 @@ components:
           type: boolean
         tax_source:
           $ref: '#/components/schemas/OrderTaxSource'
+        tax_lines:
+          type:
+            - array
+            - 'null'
+          description: A Canadian document's tax parts as printed lines (CP-14), GST first, each rounded on its own; null on a document with no Canadian parts.
+          items:
+            $ref: '#/components/schemas/DocumentTaxLine'
         total_cents:
           type: integer
           format: int64
@@ -32890,6 +32914,7 @@ components:
         - tax_rate_percent
         - tax_exempt
         - tax_source
+        - tax_lines
         - total_cents
         - total_cost_cents
         - total_margin_cents
@@ -32993,6 +33018,13 @@ components:
           type: boolean
         tax_source:
           $ref: '#/components/schemas/OrderTaxSource'
+        tax_lines:
+          type:
+            - array
+            - 'null'
+          description: A Canadian document's tax parts as printed lines (CP-14), GST first, each rounded on its own; null on a document with no Canadian parts.
+          items:
+            $ref: '#/components/schemas/DocumentTaxLine'
         total_cents:
           type: integer
           format: int64
@@ -35936,7 +35968,7 @@ components:
     PosTransaction:
       type: object
       description: "The full sale: the head with its lines and tenders."
-      required: [id, number, revision, branch_id, register_id, cashier_id, customer_id, currency, subtotal_cents, tax_cents, total_cents, change_cents, till_session_id, status, invoice_id, completed_at, created_at, customer_po, job_id, buyer_contact_id, print_count, exchange_return_id, delivery_type, ship_to_id, lines, tenders]
+      required: [id, number, revision, branch_id, register_id, cashier_id, customer_id, currency, subtotal_cents, tax_cents, tax_lines, total_cents, change_cents, till_session_id, status, invoice_id, completed_at, created_at, customer_po, job_id, buyer_contact_id, print_count, exchange_return_id, delivery_type, ship_to_id, lines, tenders]
       properties:
         id: {type: string, format: uuid}
         number: {type: string, description: "POS-000001, human readable."}
@@ -35948,6 +35980,7 @@ components:
         currency: {type: string, description: "ISO 4217, the customer's or the dealer default."}
         subtotal_cents: {type: integer, format: int64}
         tax_cents: {type: integer, format: int64}
+        tax_lines: {type: [array, "null"], items: {$ref: "#/components/schemas/DocumentTaxLine"}, description: "A completed Canadian sale's tax parts, read from its invoice (CP-14); null on a cart and on a US sale."}
         total_cents: {type: integer, format: int64}
         change_cents: {type: integer, format: int64, description: "The change given, never subtracted from the payments a second time."}
         till_session_id: {type: [string, "null"], format: uuid}
@@ -40556,6 +40589,28 @@ components:
         is_estimate:
           type: boolean
           description: True when the flat rate fallback was used.
+    DocumentTaxLine:
+      type: object
+      description: >-
+        One printed tax line of a Canadian document (CP-14): BC's PST must stand as its own item, and GST prints as its own line at every total.
+      required: [part, label, rate_percent, cents, exempt]
+      properties:
+        part:
+          type: string
+          description: GOODS_TAX or PROVINCIAL_SALES_TAX.
+        label:
+          type: string
+          description: GST, or HST in a harmonized province; PST in BC and SK, RST in MB; the part's name in Quebec until its rendering lands.
+        rate_percent:
+          type: string
+          description: The part's rate as a percent without trailing zeros ("5").
+        cents:
+          type: integer
+          format: int64
+          description: The part's own tax, rounded on its own.
+        exempt:
+          type: boolean
+          description: The part was exempted (PST exemptions land with A2); false today.
     TaxSetup:
       type: object
       required: [canadian, gst_hst_number_missing, unzoned_provinces]

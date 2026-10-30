@@ -4,6 +4,7 @@
 package invoice
 
 import (
+	"github.com/gablelbm/gable/internal/taxzone"
 	"context"
 	"encoding/json"
 	"errors"
@@ -141,6 +142,7 @@ func scanSummary(row pgx.Row, s *InvoiceSummary, extra ...any) error {
 	s.Status = InvoiceStatus(status)
 	s.Origin, s.DeliveryType = Origin(origin), DeliveryType(delivery)
 	s.TaxSource = salesdoc.TaxSource(taxSource)
+	s.TaxLines = taxzone.Lines(s.TaxRateParts)
 	s.SubtotalCents, s.TaxCents, s.TotalCents, s.OpenCents = httpx.Cents(subtotal), httpx.Cents(tax), httpx.Cents(total), httpx.Cents(open)
 	s.DiscountPercent = salesdoc.PtrQuantity(discount)
 	if taxRate != nil {

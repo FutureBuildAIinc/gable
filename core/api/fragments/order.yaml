@@ -1225,6 +1225,7 @@ components:
       - tax_rate_percent
       - tax_exempt
       - tax_source
+      - tax_lines
       - total_cents
       - total_cost_cents
       - total_margin_cents
@@ -1329,6 +1330,14 @@ components:
           type: boolean
         tax_source:
           $ref: '#/components/schemas/OrderTaxSource'
+        tax_lines:
+          type:
+          - array
+          - 'null'
+          description: A Canadian document's tax parts as printed lines (CP-14), GST first, each rounded on its own; null on
+            a document with no Canadian parts.
+          items:
+            $ref: '#/components/schemas/DocumentTaxLine'
         total_cents:
           type: integer
           format: int64
@@ -1409,6 +1418,7 @@ components:
       - tax_rate_percent
       - tax_exempt
       - tax_source
+      - tax_lines
       - total_cents
       - total_cost_cents
       - total_margin_cents
@@ -1518,6 +1528,14 @@ components:
           type: boolean
         tax_source:
           $ref: '#/components/schemas/OrderTaxSource'
+        tax_lines:
+          type:
+          - array
+          - 'null'
+          description: A Canadian document's tax parts as printed lines (CP-14), GST first, each rounded on its own; null on
+            a document with no Canadian parts.
+          items:
+            $ref: '#/components/schemas/DocumentTaxLine'
         total_cents:
           type: integer
           format: int64

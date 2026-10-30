@@ -5,6 +5,7 @@ package pos
 
 import (
 	"encoding/json"
+	"github.com/gablelbm/gable/internal/taxzone"
 	"strings"
 	"time"
 
@@ -93,16 +94,20 @@ func (m RefundMethod) MarshalText() ([]byte, error) { return []byte(m.Status()),
 // cart the register builds, then the completed money moment, all money in
 // cents and prices at scale 4, the lines in the shared shape of section 2.2.
 type Sale struct {
-	ID            uuid.UUID        `json:"id"`
-	Number        string           `json:"number"`
-	Revision      int64            `json:"revision"`
-	BranchID      uuid.UUID        `json:"branch_id"`
-	RegisterID    string           `json:"register_id"`
-	CashierID     uuid.UUID        `json:"cashier_id"`
-	CustomerID    *uuid.UUID       `json:"customer_id"`
-	Currency      string           `json:"currency"`
-	SubtotalCents httpx.Cents      `json:"subtotal_cents"`
-	TaxCents      httpx.Cents      `json:"tax_cents"`
+	ID            uuid.UUID   `json:"id"`
+	Number        string      `json:"number"`
+	Revision      int64       `json:"revision"`
+	BranchID      uuid.UUID   `json:"branch_id"`
+	RegisterID    string      `json:"register_id"`
+	CashierID     uuid.UUID   `json:"cashier_id"`
+	CustomerID    *uuid.UUID  `json:"customer_id"`
+	Currency      string      `json:"currency"`
+	SubtotalCents httpx.Cents `json:"subtotal_cents"`
+	TaxCents      httpx.Cents `json:"tax_cents"`
+	// TaxLines are a completed Canadian sale's tax parts, read from its
+	// invoice's frozen zone (CP-14 A1); null on a cart and on a US sale.
+	TaxLines      []taxzone.TaxLine `json:"tax_lines"`
+	taxRateParts  []byte
 	TotalCents    httpx.Cents      `json:"total_cents"`
 	ChangeCents   httpx.Cents      `json:"change_cents"`
 	TillSessionID *uuid.UUID       `json:"till_session_id"`

@@ -175,6 +175,29 @@ paths:
         "500": { $ref: "#/components/responses/InternalError" }
 components:
   schemas:
+    DocumentTaxLine:
+      type: object
+      description: >-
+        One printed tax line of a Canadian document (CP-14): BC's PST must stand
+        as its own item, and GST prints as its own line at every total.
+      required: [part, label, rate_percent, cents, exempt]
+      properties:
+        part:
+          type: string
+          description: GOODS_TAX or PROVINCIAL_SALES_TAX.
+        label:
+          type: string
+          description: GST, or HST in a harmonized province; PST in BC and SK, RST in MB; the part's name in Quebec until its rendering lands.
+        rate_percent:
+          type: string
+          description: The part's rate as a percent without trailing zeros ("5").
+        cents:
+          type: integer
+          format: int64
+          description: The part's own tax, rounded on its own.
+        exempt:
+          type: boolean
+          description: The part was exempted (PST exemptions land with A2); false today.
     TaxSetup:
       type: object
       required: [canadian, gst_hst_number_missing, unzoned_provinces]

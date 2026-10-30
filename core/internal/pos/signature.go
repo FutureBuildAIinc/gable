@@ -229,7 +229,7 @@ func (s *Service) ThermalReceipt(ctx context.Context, invoiceID uuid.UUID, print
 		JobName:       facts.jobName,
 		SubtotalCents: sale.SubtotalCents,
 		TaxCents:      sale.TaxCents,
-		TaxLines:      taxzone.Lines(facts.taxRateParts),
+		TaxLines:      taxzone.Lines(sale.taxRateParts),
 		TotalCents:    sale.TotalCents,
 	}
 	for i := range lines {

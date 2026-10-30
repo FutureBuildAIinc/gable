@@ -4,6 +4,7 @@
 package invoice
 
 import (
+	"github.com/gablelbm/gable/internal/taxzone"
 	"strings"
 	"time"
 
@@ -99,8 +100,12 @@ type InvoiceSummary struct {
 	// TaxRateParts is the zone the invoice was charged on, frozen at the
 	// sale (CP-10), with each part's cents on a Canadian invoice (CP-14
 	// A1): the documents print a line per part from it.
-	TaxRateParts []byte      `json:"-"`
-	TotalCents   httpx.Cents `json:"total_cents"`
+	TaxRateParts []byte `json:"-"`
+	// TaxLines are TaxRateParts as printed lines (CP-14 A1): each part's
+	// label, rate and cents, GST first; null on an invoice with no Canadian
+	// parts.
+	TaxLines   []taxzone.TaxLine `json:"tax_lines"`
+	TotalCents httpx.Cents       `json:"total_cents"`
 	// OpenCents is what is still owed: the total less the payments recorded
 	// against the invoice while it is unpaid or partial, zero when it is
 	// paid, written off or void. Until C2-4 stores amount_open this is read

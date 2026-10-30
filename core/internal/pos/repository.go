@@ -636,7 +636,7 @@ const saleDaySQL = `(t.created_at AT TIME ZONE ` + saleZoneSQL + `)::date`
 // order and job a charge sale names, and the delivery answer a delivered
 // sale carries (CP-10).
 const saleCols = saleHeadCols + `, t.customer_po, t.job_id, t.buyer_contact_id, t.print_count, t.exchange_return_id,
-	t.delivery_type, t.ship_to_id`
+	t.delivery_type, t.ship_to_id, (SELECT i.tax_rate_parts FROM invoices i WHERE i.id = t.invoice_id)`
 
 func scanSale(row pgx.Row, s *Sale) error {
 	var completed *time.Time
@@ -644,9 +644,10 @@ func scanSale(row pgx.Row, s *Sale) error {
 	if err := row.Scan(&s.ID, &s.Number, &s.Revision, &s.BranchID, &s.RegisterID, &s.CashierID, &s.CustomerID, &s.Currency,
 		&s.SubtotalCents, &s.TaxCents, &s.TotalCents, &s.ChangeCents, &s.TillSessionID, &s.Status, &s.InvoiceID,
 		&completed, &created, &s.CustomerPO, &s.JobID, &s.BuyerContactID, &s.PrintCount, &s.ExchangeReturnID,
-		&s.DeliveryType, &s.ShipToID); err != nil {
+		&s.DeliveryType, &s.ShipToID, &s.taxRateParts); err != nil {
 		return err
 	}
+	s.TaxLines = taxzone.Lines(s.taxRateParts)
 	// the wire's spelling is lowercase, like every enum on the wire
 	s.DeliveryType = strings.ToLower(s.DeliveryType)
 	if s.DeliveryType == "" {

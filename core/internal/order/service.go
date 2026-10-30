@@ -775,6 +775,7 @@ func (s *Service) chargeRateTax(o *Order, totals salesdoc.Totals, resolved sales
 		return err
 	}
 	applyZone(o, frozen)
+	o.TaxLines = taxzone.Lines(o.TaxRateParts)
 	o.SubtotalCents = totals.SubtotalCents
 	pct, err := RateToPercent(*resolved.Rate)
 	if err != nil {

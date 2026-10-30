@@ -9,6 +9,15 @@
 export type OrderStatus = 'draft' | 'on_hold' | 'confirmed' | 'backordered' | 'fulfilled' | 'cancelled';
 export type OrderStatusColor = 'default' | 'info' | 'success' | 'warning' | 'error';
 export type OrderDeliveryType = 'pickup' | 'delivery';
+/** One printed tax line of a Canadian document (CP-14 A1): GST 5%, PST 7%, each rounded on its own. */
+export interface DocumentTaxLine {
+    part: string;
+    label: string;
+    rate_percent: string;
+    cents: number;
+    exempt: boolean;
+}
+
 export type OrderTaxSource = 'exempt' | 'provider' | 'ship_to_rate' | 'branch_rate' | 'legacy';
 export type SalesLineType = 'product' | 'kit' | 'component' | 'charge' | 'text';
 export type SalesPriceSource = 'price_list' | 'quote' | 'override' | 'manual' | 'none';
@@ -38,6 +47,8 @@ export interface OrderSummary {
     tax_rate_percent: string | null;
     tax_exempt: boolean;
     tax_source: OrderTaxSource;
+    /** A Canadian order's tax parts as printed lines (CP-14 A1), GST first; null otherwise. */
+    tax_lines?: DocumentTaxLine[] | null;
     total_cents: number;
 
     total_cost_cents: number;

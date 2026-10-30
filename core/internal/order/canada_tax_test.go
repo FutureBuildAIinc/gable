@@ -18,8 +18,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/gablelbm/gable/internal/invoice"
 	"github.com/gablelbm/gable/internal/taxzone"
 	"github.com/gablelbm/gable/internal/testutil"
+	"github.com/gablelbm/gable/pkg/branchctx"
 	"github.com/google/uuid"
 )
 
@@ -116,6 +118,19 @@ func TestCanadianPickupOrderChargesGSTAndPSTEachRoundedOnItsOwn(t *testing.T) {
 	}
 	if pct := str(t, r.body, "tax_rate_percent"); pct != "12" {
 		t.Errorf("tax_rate_percent = %q, want 12", pct)
+	}
+	// The wire's tax_lines: GST then PST, each with its own cents (CP-14 A1).
+	lines, _ := r.body["tax_lines"].([]any)
+	if len(lines) != 2 {
+		t.Fatalf("tax_lines = %v", r.body["tax_lines"])
+	}
+	gst, pst := lines[0].(map[string]any), lines[1].(map[string]any)
+	if gst["label"] != "GST" || gst["rate_percent"] != "5" || num(t, gst, "cents") != 138 ||
+		pst["label"] != "PST" || pst["rate_percent"] != "7" || num(t, pst, "cents") != 193 || gst["exempt"] != false {
+		t.Errorf("tax_lines = %v", lines)
+	}
+	if got := f.do("GET", "/api/v1/orders/"+str(t, r.body, "id"), nil); len(got.body["tax_lines"].([]any)) != 2 {
+		t.Errorf("the read's tax_lines = %v", got.body["tax_lines"])
 	}
 	src, parts := orderParts(t, f, str(t, r.body, "id"))
 	if src != "BRANCH_RATE" || parts.Country != "CA" || parts.Province != "BC" {
@@ -222,6 +237,9 @@ func TestUSBranchNeverReadsItsOwnZone(t *testing.T) {
 	if src := str(t, r.body, "tax_source"); src != "branch_rate" {
 		t.Errorf("tax_source = %q, want branch_rate", src)
 	}
+	if v, ok := r.body["tax_lines"]; !ok || v != nil {
+		t.Errorf("a US order's tax_lines = %v (present %v), want null", v, ok)
+	}
 	// 27.50 at 8.875 percent is 2.440625: 244.
 	if got := num(t, r.body, "tax_cents"); got != 244 {
 		t.Errorf("tax_cents = %d, want 244", got)
@@ -254,6 +272,13 @@ func TestCanadianFulfilmentInvoiceFreezesTheParts(t *testing.T) {
 		t.Fatalf("fulfil = %d: %s", r.status, r.raw)
 	}
 	inv := invoiceIDOf(t, r)
+	read, err := invoice.NewRepository(db).GetInvoice(branchctx.WithSystem(context.Background()), uuid.MustParse(inv))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(read.TaxLines) != 2 || read.TaxLines[0].Label != "GST" || read.TaxLines[0].Cents != 138 || read.TaxLines[1].Cents != 193 {
+		t.Errorf("the invoice's tax_lines = %+v", read.TaxLines)
+	}
 	var (
 		taxCents int64
 		src      string

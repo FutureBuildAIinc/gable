@@ -4,6 +4,7 @@
 package order
 
 import (
+	"github.com/gablelbm/gable/internal/taxzone"
 	"strings"
 
 	"github.com/gablelbm/gable/internal/platform/httpx"
@@ -113,6 +114,11 @@ type OrderSummary struct {
 	TaxSource      salesdoc.TaxSource `json:"tax_source"`
 	TotalCents     httpx.Cents        `json:"total_cents"`
 
+	// TaxLines are TaxRateParts as printed lines (CP-14 A1): each Canadian
+	// part's label, rate and cents, GST first; null on an order with no
+	// Canadian parts.
+	TaxLines []taxzone.TaxLine `json:"tax_lines"`
+
 	// The zone that answered a delivered sale's tax, and the rate parts
 	// frozen at the sale (CP-10): never on the wire, the invoice carries
 	// them to the reader.
@@ -165,9 +171,9 @@ type Order struct {
 // OrderDepositApplication is one invoice a deposit settled, on the order's
 // own answer.
 type OrderDepositApplication struct {
-	InvoiceID   uuid.UUID    `json:"invoice_id"`
-	AmountCents httpx.Cents  `json:"amount_cents"`
-	AppliedOn   string       `json:"applied_on"`
+	InvoiceID   uuid.UUID   `json:"invoice_id"`
+	AmountCents httpx.Cents `json:"amount_cents"`
+	AppliedOn   string      `json:"applied_on"`
 }
 
 // OrderDeposit is a payment taken against the order, on the order's own

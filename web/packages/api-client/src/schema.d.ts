@@ -14556,6 +14556,8 @@ export interface components {
             tax_rate_percent: string | null;
             tax_exempt: boolean;
             tax_source: components["schemas"]["OrderTaxSource"];
+            /** @description A Canadian document's tax parts as printed lines (CP-14), GST first, each rounded on its own; null on a document with no Canadian parts. */
+            tax_lines: components["schemas"]["DocumentTaxLine"][] | null;
             /** Format: int64 */
             total_cents: number;
             /**
@@ -14644,6 +14646,8 @@ export interface components {
             tax_rate_percent: string | null;
             tax_exempt: boolean;
             tax_source: components["schemas"]["OrderTaxSource"];
+            /** @description A Canadian document's tax parts as printed lines (CP-14), GST first, each rounded on its own; null on a document with no Canadian parts. */
+            tax_lines: components["schemas"]["DocumentTaxLine"][] | null;
             /** Format: int64 */
             total_cents: number;
             /**
@@ -16075,6 +16079,8 @@ export interface components {
             tax_rate_percent: string | null;
             tax_exempt: boolean;
             tax_source: components["schemas"]["OrderTaxSource"];
+            /** @description A Canadian document's tax parts as printed lines (CP-14), GST first, each rounded on its own; null on a document with no Canadian parts. */
+            tax_lines: components["schemas"]["DocumentTaxLine"][] | null;
             /**
              * Format: int64
              * @description The subtotal plus the tax estimate.
@@ -16166,6 +16172,8 @@ export interface components {
             tax_rate_percent: string | null;
             tax_exempt: boolean;
             tax_source: components["schemas"]["OrderTaxSource"];
+            /** @description A Canadian document's tax parts as printed lines (CP-14), GST first, each rounded on its own; null on a document with no Canadian parts. */
+            tax_lines: components["schemas"]["DocumentTaxLine"][] | null;
             /**
              * Format: int64
              * @description The subtotal plus the tax estimate.
@@ -18535,6 +18543,8 @@ export interface components {
             subtotal_cents: number;
             /** Format: int64 */
             tax_cents: number;
+            /** @description A completed Canadian sale's tax parts, read from its invoice (CP-14); null on a cart and on a US sale. */
+            tax_lines: components["schemas"]["DocumentTaxLine"][] | null;
             /** Format: int64 */
             total_cents: number;
             /**
@@ -22204,6 +22214,22 @@ export interface components {
             lines: components["schemas"]["TaxLine"][];
             /** @description True when the flat rate fallback was used. */
             is_estimate: boolean;
+        };
+        /** @description One printed tax line of a Canadian document (CP-14): BC's PST must stand as its own item, and GST prints as its own line at every total. */
+        DocumentTaxLine: {
+            /** @description GOODS_TAX or PROVINCIAL_SALES_TAX. */
+            part: string;
+            /** @description GST, or HST in a harmonized province; PST in BC and SK, RST in MB; the part's name in Quebec until its rendering lands. */
+            label: string;
+            /** @description The part's rate as a percent without trailing zeros ("5"). */
+            rate_percent: string;
+            /**
+             * Format: int64
+             * @description The part's own tax, rounded on its own.
+             */
+            cents: number;
+            /** @description The part was exempted (PST exemptions land with A2); false today. */
+            exempt: boolean;
         };
         TaxSetup: {
             /** @description A branch's country (its own, else the dealer default) is CA. */

@@ -63,6 +63,9 @@ func TestCanadianCounterSaleChargesGSTAndPSTAndFreezesTheParts(t *testing.T) {
 	if r.status != http.StatusOK {
 		t.Fatalf("complete = %d: %s", r.status, r.raw)
 	}
+	if lines, _ := f.getSale(t, saleID)["tax_lines"].([]any); len(lines) != 2 {
+		t.Errorf("the completed sale's tax_lines = %v", f.getSale(t, saleID)["tax_lines"])
+	}
 	var (
 		taxCents int64
 		src      string
