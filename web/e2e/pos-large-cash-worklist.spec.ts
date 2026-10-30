@@ -95,10 +95,13 @@ async function ringQuantity(page: Page, sku: string, qty: number) {
   await page.getByTestId('catalog-search').fill(sku);
   await page.getByTestId('catalog-search').press('Enter');
   await expect(lines).toHaveCount(1, { timeout: 10000 });
+  // the one unit's total, read before the quantity is raised: the wait below
+  // holds the spec until the raised quantity has reached the summary
+  const oneUnit = (await page.getByTestId('summary-total').textContent()) ?? '';
   const quantity = lines.nth(0).getByRole('textbox', { name: /Quantity of/i });
   await quantity.fill(String(qty));
   await quantity.press('Enter');
-  await expect(page.getByTestId('summary-total')).not.toContainText('$0', { timeout: 10000 });
+  await expect(page.getByTestId('summary-total')).not.toContainText(oneUnit, { timeout: 10000 });
 }
 
 /** Adds a cash tender for the whole total through the Payment panel. */
