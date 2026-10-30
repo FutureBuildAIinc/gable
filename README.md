@@ -58,7 +58,7 @@ make migrate
 DEMO_SEED=1 make seed
 
 # 4. Run backend and frontend in two terminals
-cd core && AUTH_MODE=dev go run ./cmd/server   # API on :8080
+cd core && AUTH_MODE=dev go run -tags devauth ./cmd/server   # API on :8080
 cd web/apps/desk && npm install && npm run dev              # SPA on :5173
 
 # 5. Run the background jobs in a third terminal (the idempotency retention
@@ -78,6 +78,10 @@ Open <http://localhost:5173>. To wipe and rebuild the dev database, run
 > `JWKS_URL not set and AUTH_MODE != dev` (`core/internal/app/serve/serve.go`). It
 > exits rather than starting without authentication. You must opt in
 > explicitly, which is the point.
+>
+> `-tags devauth` is the second half: only a binary built with that tag starts
+> with `AUTH_MODE=dev`. The published image is built without it and exits at
+> start if `AUTH_MODE=dev` is set (ADR 0012 section 7).
 >
 > `AUTH_MODE=dev` disables authentication and authorization entirely: no JWT
 > is verified and every role check passes, so any request reaching the port has

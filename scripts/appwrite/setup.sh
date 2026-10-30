@@ -26,14 +26,21 @@ done
 [[ -n "$OUT" ]] || { echo "setup.sh: --out FILE is required" >&2; exit 64; }
 command -v curl >/dev/null || { echo "setup.sh: curl not found" >&2; exit 69; }
 command -v jq >/dev/null || { echo "setup.sh: jq not found" >&2; exit 69; }
+command -v openssl >/dev/null || { echo "setup.sh: openssl not found" >&2; exit 69; }
 
-# All invented, on a reserved domain. Not credentials for anything real.
-PASSWORD="s9proof-not-a-real-password"
+# The shared password and the server key id come from the environment
+# (APPWRITE_PROOF_CONSOLE_PASSWORD, APPWRITE_PROOF_KEY_ID); when unset each is
+# generated for this run. Neither is ever printed; both land only in the --out
+# file (mode 600). The key id stays a valid Appwrite id: at most 36 of a-z A-Z
+# 0-9 . _ -, not starting with a special character. Against a kept stack, pass
+# the same password on a rerun, because the users already exist with it.
+PASSWORD="${APPWRITE_PROOF_CONSOLE_PASSWORD:-$(openssl rand -hex 16)}"
+# Invented, on a reserved domain.
 CONSOLE_EMAIL="console-admin@s9proof.example"
 PROJECT_ID="s9proof"
 ORG_TEAM_ID="s9proof-org"
 STAFF_TEAM_ID="s9proof-staff"
-KEY_ID="s9proof-key"
+KEY_ID="${APPWRITE_PROOF_KEY_ID:-s9proof-$(openssl rand -hex 8)}"
 ROLES=(owner admin sales finance purchasing warehouse cashier driver)
 NON_MEMBER_ID="s9proof-nomember"
 
@@ -55,6 +62,8 @@ req() {
   curl "${args[@]}" "$ENDPOINT$path"
 }
 
+# The Appwrite response body is printed here; the request body (it can carry the
+# password) must never be echoed.
 die() { echo "setup.sh: $1 (status ${2:-?}): $(cat "$RESP" 2>/dev/null)" >&2; exit 1; }
 
 # Wait for the stack.
@@ -183,14 +192,18 @@ for role in "${ROLES[@]}"; do
   users_json="$(jq -nc --argjson users "$users_json" --arg role "$role" --arg id "s9proof-$role" --arg email "$role@s9proof.example" \
     '$users + {($role): {id: $id, email: $email}}')"
 done
+umask 077
 jq -nc \
   --arg endpoint "$ENDPOINT" \
   --arg projectId "$PROJECT_ID" \
   --arg teamId "$STAFF_TEAM_ID" \
   --arg apiKey "$API_KEY" \
+  --arg password "$PASSWORD" \
+  --arg keyId "$KEY_ID" \
   --argjson users "$users_json" \
   --arg nonMemberId "$NON_MEMBER_ID" \
   --arg nonMemberEmail "nomember@s9proof.example" \
-  '{endpoint:$endpoint,projectId:$projectId,teamId:$teamId,apiKey:$apiKey,users:$users,nonMember:{id:$nonMemberId,email:$nonMemberEmail}}' \
+  '{endpoint:$endpoint,projectId:$projectId,teamId:$teamId,apiKey:$apiKey,password:$password,keyId:$keyId,users:$users,nonMember:{id:$nonMemberId,email:$nonMemberEmail}}' \
   > "$OUT"
+chmod 600 "$OUT"
 echo "setup.sh: wrote $OUT"
