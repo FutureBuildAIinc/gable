@@ -2,6 +2,7 @@
 // SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { authCustody } from '@gable/auth';
 import './OfflineCounter';
 import { draftOf, policyOf } from './OfflineCounter';
 import type { GableOfflineCounter } from './OfflineCounter';
@@ -18,7 +19,10 @@ const policy = (patch: Partial<OfflinePolicy> = {}): OfflinePolicy => ({
 let requests: { method: string; url: string; body?: Record<string, unknown> }[] = [];
 let current: OfflinePolicy;
 
+let roles: { mockReturnValue(v: string[]): unknown; mockRestore(): void };
+
 beforeEach(() => {
+  roles = vi.spyOn(authCustody, 'roles', 'get').mockReturnValue(['admin']);
   requests = [];
   current = policy();
   localStorage.setItem('token', 'test-token');
@@ -38,6 +42,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  roles.mockRestore();
   vi.unstubAllGlobals();
   document.body.innerHTML = '';
   branchContext.setCurrent(null);
@@ -105,6 +110,19 @@ describe('the counter\'s offline settings', () => {
   });
 });
 
+describe('a finance caller', () => {
+  it('reads the figures but is offered no Save, no dealer wide button and no editable field', async () => {
+    roles.mockReturnValue(['finance']);
+    const el = await mountAsync<GableOfflineCounter>('gable-offline-counter');
+    expect(text(q(el, '[data-testid="offline-exposure"]'))).toContain('$3,000.00');
+    expect(el.querySelector('[data-testid="offline-save"]')).toBeNull();
+    expect(el.querySelector('[data-testid="offline-use-defaults"]')).toBeNull();
+    expect(q<HTMLFieldSetElement>(el, '[data-testid="offline-caps"]').disabled).toBe(true);
+    expect(q<HTMLInputElement>(el, '[data-testid="offline-enabled"]').disabled).toBe(true);
+    expect(text(q(el, '[data-testid="offline-counter-readonly"]'))).toContain('owner or admin');
+  });
+});
+
 describe('the draft and its policy', () => {
   it('round trips a policy to the same cents', () => {
     const p = policy({ sale_cap_cents: 5 });
@@ -115,6 +133,7 @@ describe('the draft and its policy', () => {
   it('refuses an enabled policy with no tender and a queue count past the limit', () => {
     expect(policyOf({ ...draftOf(policy()), tenders: [] }).ok).toBe(false);
     expect(policyOf({ ...draftOf(policy()), maxQueued: '100001' }).ok).toBe(false);
+    expect(policyOf({ ...draftOf(policy()), maxQueued: '100000' }).ok).toBe(true);
     expect(policyOf({ ...draftOf(policy()), enabled: false, tenders: [] }).ok).toBe(true);
   });
 });

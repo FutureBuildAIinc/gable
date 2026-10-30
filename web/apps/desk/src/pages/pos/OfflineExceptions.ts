@@ -3,7 +3,7 @@
 
 import { LitElement, html, nothing } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
-import { offlineAdminService } from '../../services/OfflineAdminService.ts';
+import { canManageOffline, offlineAdminService } from '../../services/OfflineAdminService.ts';
 import type { ExceptionResolution, OfflineException } from '../../services/OfflineAdminService.ts';
 import { ApiError, apiErrorMessage } from '../../services/apiError.ts';
 import { branchContext } from '../../services/BranchContext.ts';
@@ -11,14 +11,15 @@ import { onBranchChanged } from '../../lib/branch-listener.ts';
 import { ToastService } from '../../lib/toast-service.ts';
 import { formatCents } from '../../lib/utils.ts';
 import { formatDay } from '../../lib/dates.ts';
-import { reasonWords, resolutionsFor } from './offlineExceptions.ts';
+import { reasonWords, resolutionsFor } from './offlineExceptionRules.ts';
 
 /**
  * The branch's offline exceptions (ADR 0011 section 3.4), under the end of day
  * on the Daily Till page: the sales a register made offline that the server
  * could not post or verify. A manager settles each one; the till close and the
- * day close wait for the list to empty. Owner and admin only: a user the server
- * refuses sees nothing.
+ * day close wait for the list to empty. Owner, admin and finance read it; only
+ * owner and admin settle (finance sees the list without Settle). A user the
+ * server refuses sees nothing.
  */
 @customElement('gable-offline-exceptions')
 export class GableOfflineExceptions extends LitElement {
@@ -121,9 +122,10 @@ export class GableOfflineExceptions extends LitElement {
                 </div>
                 <p class="text-xs text-zinc-400" data-testid="offline-way-help">${picked.help}</p>
                 <input type="text" data-testid="offline-reason" maxlength="200" .value=${this.reason}
-                    placeholder=${picked.needsReason ? 'Why (goes on the audit row)' : 'Note (optional)'}
+                    placeholder="Why" aria-label="Why"
                     @input=${(e: Event) => { this.reason = (e.target as HTMLInputElement).value; }}
                     class="w-full px-3 py-2 bg-black/20 border border-zinc-700 rounded text-white text-sm" />
+                <p class="text-xs text-zinc-500">Your reason goes on the audit row.</p>
                 <div class="flex gap-3">
                     <button type="button" data-testid="offline-resolve" @click=${() => this.settle(item)} ?disabled=${this.busy}
                         class="px-4 py-2 rounded bg-emerald-500 text-black text-sm font-bold disabled:opacity-40">${picked.label}</button>
@@ -146,8 +148,8 @@ export class GableOfflineExceptions extends LitElement {
         return html`
             <div class="mt-6 bg-zinc-900 border border-zinc-800 rounded-lg p-6" data-testid="offline-exceptions">
                 <div class="flex items-center justify-between gap-4 mb-2">
-                    <h2 class="text-xl font-bold text-amber-500">Offline exceptions
-                        <span class="font-mono" data-testid="offline-exceptions-count">${this.items.length}</span></h2>
+                    <h2 class="flex items-center gap-3 text-xl font-bold text-amber-500">Offline exceptions
+                        <span class="rounded-full bg-amber-500/15 px-2.5 py-0.5 text-sm font-mono" data-testid="offline-exceptions-count">${this.items.length}</span></h2>
                 </div>
                 <p class="text-sm text-zinc-400 mb-4">A register sold these while offline and the server could not post them. The drawer and the day cannot close until each is settled.</p>
                 <ul class="space-y-3" data-testid="offline-exceptions-list">
@@ -165,7 +167,7 @@ export class GableOfflineExceptions extends LitElement {
                                 </div>
                                 <div class="flex items-center gap-4">
                                     <span class="font-mono text-white text-lg" data-testid="offline-exception-total">${formatCents(item.total_cents)}</span>
-                                    ${this.openId === item.id ? nothing : html`
+                                    ${this.openId === item.id || !canManageOffline() ? nothing : html`
                                         <button type="button" data-testid="offline-settle" @click=${() => this.begin(item)}
                                             class="px-4 py-2 rounded border border-zinc-700 text-zinc-200 text-sm font-bold">Settle</button>`}
                                 </div>

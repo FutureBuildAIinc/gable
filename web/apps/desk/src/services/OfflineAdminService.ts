@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: LicenseRef-OpenLBM-Surface-1.0
 // SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
 
+import { authCustody } from '@gable/auth';
 import { fetchWithAuth } from './fetchClient';
 import { parseApiError } from './apiError';
 import { posService } from './POSService';
@@ -80,6 +81,14 @@ export interface RegisterDevice {
     enrolled_by: string | null;
     enrolled_at: string | null;
     revoked_at: string | null;
+    /** What a revoke did to the register's web sessions; null on a read. */
+    sessions: RegisterSessions | null;
+}
+
+export interface RegisterSessions {
+    supported: boolean;
+    ended: number;
+    message: string;
 }
 
 interface WireDevice {
@@ -94,6 +103,7 @@ interface WireEnrolment {
     next_epoch: number;
     device: WireDevice | null;
     previous: WireDevice | null;
+    sessions?: RegisterSessions | null;
 }
 
 function foldDevice(w: WireEnrolment): RegisterDevice {
@@ -108,7 +118,14 @@ function foldDevice(w: WireEnrolment): RegisterDevice {
         enrolled_by: shown?.enrolled_by ?? null,
         enrolled_at: shown?.enrolled_at ?? null,
         revoked_at: d ? null : p?.revoked_at ?? null,
+        sessions: w.sessions ?? null,
     };
+}
+
+/** True for owner and admin: the roles the server lets write the offline policy, enrol and revoke and settle (finance reads only). */
+export function canManageOffline(): boolean {
+    const roles = authCustody.roles ?? [];
+    return roles.includes('owner') || roles.includes('admin');
 }
 
 /** The manager's proof at the register: their staff number and own counter PIN. */

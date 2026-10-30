@@ -3,7 +3,7 @@
 
 import { describe, expect, it } from 'vitest';
 import type { ExceptionResolution } from '../../services/OfflineAdminService';
-import { reasonWords, resolutionsFor } from './offlineExceptions';
+import { reasonWords, resolutionsFor } from './offlineExceptionRules';
 
 const ways = (actions: ExceptionResolution[]) => resolutionsFor(actions).map((c) => c.value);
 
@@ -19,8 +19,7 @@ describe('the ways a manager may settle an offline exception', () => {
     expect(reasonWords('unknown_tail')).toContain('re-enrolled');
   });
 
-  it('asks for a reason on every act except a retry', () => {
-    expect(resolutionsFor(['retry', 'write_off']).find((c) => c.value === 'retry')?.needsReason).toBe(false);
-    expect(resolutionsFor(['retry', 'write_off']).find((c) => c.value === 'write_off')?.needsReason).toBe(true);
+  it('asks for a reason on every act, a retry included, as the server does', () => {
+    expect(resolutionsFor(['retry', 'write_off']).map((c) => c.needsReason)).toEqual([true, true]);
   });
 });

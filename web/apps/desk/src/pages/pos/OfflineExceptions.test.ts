@@ -2,6 +2,7 @@
 // SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { authCustody } from '@gable/auth';
 import './OfflineExceptions';
 import type { GableOfflineExceptions } from './OfflineExceptions';
 import { branchContext } from '../../services/BranchContext';
@@ -18,7 +19,10 @@ const item = (patch: Partial<OfflineException> = {}): OfflineException => ({
 let requests: { method: string; url: string; body?: Record<string, unknown> }[] = [];
 let handler: (method: string, url: string) => Response;
 
+let roles: { mockReturnValue(v: string[]): unknown; mockRestore(): void };
+
 beforeEach(() => {
+  roles = vi.spyOn(authCustody, 'roles', 'get').mockReturnValue(['admin']);
   requests = [];
   localStorage.setItem('token', 'test-token');
   branchContext.setCurrent('b-1');
@@ -30,6 +34,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  roles.mockRestore();
   vi.unstubAllGlobals();
   document.body.innerHTML = '';
   branchContext.setCurrent(null);
@@ -106,15 +111,40 @@ describe('the offline exceptions on the branch day page', () => {
     expect(text(q(el, '[data-testid="offline-exceptions-count"]'))).toBe('2');
   });
 
-  it('retries with no reason, and keeps the item with the server\'s words when the manager is refused', async () => {
+  it('lists the exceptions to a finance caller with no Settle button', async () => {
+    roles.mockReturnValue(['finance']);
+    handler = () => jsonResponse({ items: [item()] });
+    const el = await mountAsync<GableOfflineExceptions>('gable-offline-exceptions');
+    expect(text(q(el, '[data-testid="offline-exception-x-1"]'))).toContain('Not enough stock on hand');
+    expect(el.querySelector('[data-testid="offline-settle"]')).toBeNull();
+  });
+
+  it('sends nothing for a retry with no reason, then retries with the reason typed', async () => {
+    handler = (method) => (method === 'POST' ? jsonResponse(item({ status: 'resolved' })) : jsonResponse({ items: [item()] }));
+    const el = await mountAsync<GableOfflineExceptions>('gable-offline-exceptions');
+    q<HTMLButtonElement>(el, '[data-testid="offline-settle"]').click();
+    await update(el, {});
+    q<HTMLButtonElement>(el, '[data-testid="offline-resolve"]').click(); // retry is first
+    await flush();
+    await update(el, {});
+    expect(requests.some((r) => r.method === 'POST')).toBe(false);
+    expect(text(q(el, '[data-testid="offline-exceptions-error"]'))).toContain('Say why');
+    await type(el, '[data-testid="offline-reason"]', 'Stock received');
+    q<HTMLButtonElement>(el, '[data-testid="offline-resolve"]').click();
+    await flush();
+    await update(el, {});
+    expect(requests.find((r) => r.method === 'POST')?.body).toEqual({ action: 'retry', reason: 'Stock received', revision: 3 });
+  });
+
+  it('keeps the item with the server\'s words when the manager is refused', async () => {
     handler = (method) => (method === 'POST' ? jsonResponse({ error: { code: 'forbidden', message: 'A manager other than the cashier settles it' } }, 403) : jsonResponse({ items: [item()] }));
     const el = await mountAsync<GableOfflineExceptions>('gable-offline-exceptions');
     q<HTMLButtonElement>(el, '[data-testid="offline-settle"]').click();
     await update(el, {});
-    q<HTMLButtonElement>(el, '[data-testid="offline-resolve"]').click(); // retry is first and needs no reason
+    await type(el, '[data-testid="offline-reason"]', 'Stock received');
+    q<HTMLButtonElement>(el, '[data-testid="offline-resolve"]').click(); // retry is first
     await flush();
     await update(el, {});
-    expect(requests.find((r) => r.method === 'POST')?.body).toEqual({ action: 'retry', reason: '', revision: 3 });
     expect(text(q(el, '[data-testid="offline-exceptions-error"]'))).toContain('A manager other than the cashier');
     expect(el.querySelector('[data-testid="offline-exception-x-1"]')).not.toBeNull();
   });

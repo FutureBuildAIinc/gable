@@ -6,13 +6,13 @@ import type { ExceptionResolution } from '../../services/OfflineAdminService.ts'
 export interface ResolutionChoice {
     value: ExceptionResolution;
     label: string;
-    /** A reason is typed for every act that changes what posts; a retry needs none. */
+    /** The server asks for a reason on every act, a retry included (O4 parse). */
     needsReason: boolean;
     help: string;
 }
 
 const CHOICES: Record<ExceptionResolution, ResolutionChoice> = {
-    retry: { value: 'retry', label: 'Retry', needsReason: false, help: 'Post it again once the cause is fixed.' },
+    retry: { value: 'retry', label: 'Retry', needsReason: true, help: 'Post it again once the cause is fixed.' },
     accept: { value: 'accept', label: 'Accept', needsReason: true, help: 'Post it at the figures the register recorded, after you checked them.' },
     restate: { value: 'restate', label: 'Restate stock', needsReason: true, help: 'Convert the stock quantity to the current stocking unit, then post.' },
     late_post: { value: 'late_post', label: 'Late post', needsReason: true, help: 'Post it on the earliest open day; it joins no drawer.' },

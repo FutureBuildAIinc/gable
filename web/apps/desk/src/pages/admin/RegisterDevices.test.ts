@@ -2,6 +2,7 @@
 // SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { authCustody } from '@gable/auth';
 import './RegisterDevices';
 import type { GableRegisterDevices } from './RegisterDevices';
 import { branchContext } from '../../services/BranchContext';
@@ -31,7 +32,10 @@ let requests: { method: string; url: string; body?: Record<string, unknown> }[] 
 // the registers list and the device read are answered per URL, as the server does
 let handler: (method: string, url: string) => Response;
 
+let roles: { mockReturnValue(v: string[]): unknown; mockRestore(): void };
+
 beforeEach(() => {
+  roles = vi.spyOn(authCustody, 'roles', 'get').mockReturnValue(['admin']);
   requests = [];
   localStorage.setItem('token', 'test-token');
   branchContext.setCurrent('b-1');
@@ -43,6 +47,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  roles.mockRestore();
   vi.unstubAllGlobals();
   document.body.innerHTML = '';
   branchContext.setCurrent(null);
@@ -138,6 +143,52 @@ describe('the registers\' offline devices', () => {
     expect(post?.url).toContain(DEV('REG-01'));
     expect(post?.body).toEqual({ device_epoch: 1, public_key: 'PUBKEY-PLACEHOLDER', manager: 'M-100', pin: '1234' });
     expect(text(q(el, '[data-testid="device-REG-01"] [data-testid="device-status"]'))).toBe('Enrolled (epoch 3)');
+  });
+
+  it('shows the server\'s words about the register\'s web sessions beside a revoked register', async () => {
+    const words = "This sign in method cannot end the register's web sessions from here: disable the user if the device is lost.";
+    handler = (method, url) => (method === 'POST'
+      ? jsonResponse({ ...wire('REG-01', 'revoked'), sessions: { supported: false, ended: 0, message: words } })
+      : url.endsWith('/pos/registers') ? registers('REG-01') : jsonResponse(wire('REG-01')));
+    const el = await mountAsync<GableRegisterDevices>('gable-register-devices');
+    q<HTMLButtonElement>(el, '[data-testid="device-revoke"]').click();
+    await update(el, {});
+    await type(el, 'device-manager', 'M-100');
+    await type(el, 'device-pin', '1234');
+    await type(el, 'device-reason', 'Lost at the yard');
+    q<HTMLButtonElement>(el, '[data-testid="device-confirm"]').click();
+    await flush();
+    await update(el, {});
+    const note = q(el, '[data-testid="device-REG-01"] [data-testid="device-sessions"]');
+    expect(text(note)).toBe(words);
+    expect(note.className).toContain('text-amber-500');
+  });
+
+  it('shows a clean session end quietly', async () => {
+    handler = (method, url) => (method === 'POST'
+      ? jsonResponse({ ...wire('REG-01', 'revoked'), sessions: { supported: true, ended: 2, message: 'Ended 2 web sessions on this register.' } })
+      : url.endsWith('/pos/registers') ? registers('REG-01') : jsonResponse(wire('REG-01')));
+    const el = await mountAsync<GableRegisterDevices>('gable-register-devices');
+    q<HTMLButtonElement>(el, '[data-testid="device-revoke"]').click();
+    await update(el, {});
+    await type(el, 'device-manager', 'M-100');
+    await type(el, 'device-pin', '1234');
+    await type(el, 'device-reason', 'Lost at the yard');
+    q<HTMLButtonElement>(el, '[data-testid="device-confirm"]').click();
+    await flush();
+    await update(el, {});
+    const note = q(el, '[data-testid="device-sessions"]');
+    expect(text(note)).toBe('Ended 2 web sessions on this register.');
+    expect(note.className).not.toContain('text-amber-500');
+  });
+
+  it('lists the registers to a finance caller with no Enrol and no Revoke', async () => {
+    roles.mockReturnValue(['finance']);
+    handler = (_m, url) => (url.endsWith('/pos/registers') ? registers('REG-01') : jsonResponse(wire('REG-01')));
+    const el = await mountAsync<GableRegisterDevices>('gable-register-devices');
+    expect(text(q(el, '[data-testid="device-REG-01"] [data-testid="device-status"]'))).toBe('Enrolled (epoch 2)');
+    expect(el.querySelector('[data-testid="device-enrol"]')).toBeNull();
+    expect(el.querySelector('[data-testid="device-revoke"]')).toBeNull();
   });
 
   it('shows nothing to a user the server refuses', async () => {

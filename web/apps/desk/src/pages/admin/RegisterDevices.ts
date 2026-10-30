@@ -3,8 +3,8 @@
 
 import { LitElement, html, nothing } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
-import { offlineAdminService, shellDevicePublicKey } from '../../services/OfflineAdminService.ts';
-import type { RegisterDevice } from '../../services/OfflineAdminService.ts';
+import { canManageOffline, offlineAdminService, shellDevicePublicKey } from '../../services/OfflineAdminService.ts';
+import type { RegisterDevice, RegisterSessions } from '../../services/OfflineAdminService.ts';
 import { apiErrorMessage } from '../../services/apiError.ts';
 import { branchContext } from '../../services/BranchContext.ts';
 import { onBranchChanged } from '../../lib/branch-listener.ts';
@@ -19,7 +19,8 @@ type Act = 'enrol' | 'revoke';
  * number and own counter PIN: the proof they stand at the register. An
  * enrolment starts a new epoch and revokes the earlier key; a revoked
  * register's later offline sales go to the exception list, never dropped.
- * A yard with no registers lists none.
+ * A yard with no registers lists none. Owner, admin and finance read the list;
+ * only owner and admin enrol or revoke, so finance sees no buttons.
  */
 @customElement('gable-register-devices')
 export class GableRegisterDevices extends LitElement {
@@ -36,6 +37,8 @@ export class GableRegisterDevices extends LitElement {
     @state() private pin = '';
     /** Why a register is revoked: the audit row keeps it. */
     @state() private reason = '';
+    /** What a revoke did to each register's web sessions, kept to show beside it. */
+    @state() private sessionNotes: Record<string, RegisterSessions> = {};
 
     private unsubscribe: (() => void) | null = null;
     private seq = 0;
@@ -114,6 +117,10 @@ export class GableRegisterDevices extends LitElement {
                 device = await offlineAdminService.revokeDevice(t.registerId, current.epoch, this.reason.trim(), proof);
             }
             this.devices = this.devices.map((d) => (d.register_id === device.register_id ? device : d));
+            const notes = { ...this.sessionNotes };
+            if (device.sessions) notes[device.register_id] = device.sessions;
+            else delete notes[device.register_id];
+            this.sessionNotes = notes;
             this.target = null;
             ToastService.show(`${t.registerId} ${t.act === 'enrol' ? 'enrolled' : 'revoked'}`, 'success');
         } catch (err: unknown) {
@@ -123,6 +130,11 @@ export class GableRegisterDevices extends LitElement {
             this.pin = '';
             this.busy = false;
         }
+    }
+
+    /** A session note is a warning unless the server ended the sessions cleanly. */
+    private sessionWarns(s: RegisterSessions): boolean {
+        return !s.supported || !/^Ended \d+ web sessions/.test(s.message);
     }
 
     private statusWords(d: RegisterDevice): string {
@@ -189,7 +201,7 @@ export class GableRegisterDevices extends LitElement {
                                         <p class="text-sm ${d.status === 'active' ? 'text-emerald-400' : d.status === 'revoked' ? 'text-red-400' : 'text-zinc-400'}" data-testid="device-status">${this.statusWords(d)}</p>
                                         ${d.enrolled_by ? html`<p class="text-xs text-zinc-500">Enrolled by ${d.enrolled_by}${d.enrolled_at ? ` on ${formatDateTime(d.enrolled_at)}` : ''}</p>` : nothing}
                                     </div>
-                                    ${this.target?.registerId === d.register_id ? nothing : html`
+                                    ${this.target?.registerId === d.register_id || !canManageOffline() ? nothing : html`
                                         <div class="flex gap-3">
                                             <button type="button" data-testid="device-enrol" @click=${() => this.begin(d.register_id, 'enrol')}
                                                 class="px-4 py-2 rounded border border-zinc-700 text-zinc-200 text-sm font-bold">${d.status === 'active' ? 'Enrol again' : 'Enrol'}</button>
@@ -198,6 +210,8 @@ export class GableRegisterDevices extends LitElement {
                                                     class="px-4 py-2 rounded border border-red-500/40 text-red-400 text-sm font-bold">Revoke</button>` : nothing}
                                         </div>`}
                                 </div>
+                                ${this.sessionNotes[d.register_id] ? html`
+                                    <p class="mt-2 text-sm ${this.sessionWarns(this.sessionNotes[d.register_id]) ? 'text-amber-500' : 'text-zinc-400'}" data-testid="device-sessions">${this.sessionNotes[d.register_id].message}</p>` : nothing}
                                 ${this.target?.registerId === d.register_id ? this.renderForm(d.register_id, this.target.act) : nothing}
                             </li>`)}
                     </ul>`}

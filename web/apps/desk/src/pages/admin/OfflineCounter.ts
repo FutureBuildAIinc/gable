@@ -7,7 +7,7 @@ import { icon } from '../../lib/icons.ts';
 import { WifiOff } from 'lucide';
 import { apiErrorMessage } from '../../services/apiError';
 import { dollarsToCents } from '../../services/POSService';
-import { offlineAdminService } from '../../services/OfflineAdminService';
+import { canManageOffline, offlineAdminService } from '../../services/OfflineAdminService';
 import type { OfflinePolicy, OfflinePolicyInput, OfflineTender } from '../../services/OfflineAdminService';
 import { branchContext } from '../../services/BranchContext';
 import { onBranchChanged } from '../../lib/branch-listener';
@@ -64,7 +64,7 @@ export function policyOf(d: Draft): { ok: true; input: OfflinePolicyInput } | { 
         if (isNaN(c) || c < 0) return { ok: false, message: `${label} must be a dollar amount, 0 or more` };
         cents.push(c);
     }
-    if (!/^\d{1,5}$/.test(d.maxQueued.trim())) return { ok: false, message: 'The most waiting sales must be a whole number from 0 to 100000' };
+    if (!/^\d{1,6}$/.test(d.maxQueued.trim())) return { ok: false, message: 'The most waiting sales must be a whole number from 0 to 100000' };
     const max = Number(d.maxQueued.trim());
     if (max > 100000) return { ok: false, message: 'The most waiting sales must be a whole number from 0 to 100000' };
     if (d.enabled && d.tenders.length === 0) return { ok: false, message: 'Choose at least one tender the register may take offline' };
@@ -226,12 +226,12 @@ export class GableOfflineCounter extends LitElement {
 
                 <div class="bg-slate-900/50 border border-white/10 rounded-lg p-6 space-y-6" data-testid="offline-counter-form">
                     <label class="flex items-center gap-2 text-sm text-slate-200">
-                        <input type="checkbox" data-testid="offline-enabled" .checked=${d.enabled}
+                        <input type="checkbox" data-testid="offline-enabled" .checked=${d.enabled} ?disabled=${!canManageOffline()}
                             @change=${(e: Event) => { this.draft = { ...d, enabled: (e.target as HTMLInputElement).checked }; }} />
                         Registers at this yard may sell while offline
                     </label>
 
-                    <fieldset class="space-y-2" data-testid="offline-tenders">
+                    <fieldset class="space-y-2" data-testid="offline-tenders" ?disabled=${!canManageOffline()}>
                         <legend class="text-sm font-semibold text-slate-200 mb-1">Taken offline</legend>
                         <p class="text-xs text-slate-500">Cards and store credit need the connection and cannot be taken offline.</p>
                         ${TENDERS.map((t) => html`
@@ -245,7 +245,7 @@ export class GableOfflineCounter extends LitElement {
                             </label>`)}
                     </fieldset>
 
-                    <fieldset class="grid grid-cols-1 sm:grid-cols-2 gap-4" data-testid="offline-caps">
+                    <fieldset class="grid grid-cols-1 sm:grid-cols-2 gap-4" data-testid="offline-caps" ?disabled=${!canManageOffline()}>
                         <legend class="text-sm font-semibold text-slate-200 mb-2">Limits</legend>
                         ${this.capField('Most on one sale', 'saleCap', 'offline-cap-sale')}
                         ${this.capField('Most on one check', 'checkCap', 'offline-cap-check')}
@@ -263,7 +263,7 @@ export class GableOfflineCounter extends LitElement {
                         </label>
                     </fieldset>
 
-                    <div class="flex flex-wrap justify-end gap-3">
+                    ${canManageOffline() ? html`<div class="flex flex-wrap justify-end gap-3">
                         ${p.source === 'branch' ? html`
                             <button type="button" data-testid="offline-use-defaults" @click=${() => void this.useDefaults()} ?disabled=${this.saving}
                                 class="inline-flex items-center rounded border border-white/20 px-4 py-2 text-sm font-semibold text-slate-200 hover:bg-white/5 disabled:opacity-50">
@@ -273,13 +273,13 @@ export class GableOfflineCounter extends LitElement {
                             class="inline-flex items-center gap-2 bg-gable-green text-black font-semibold px-4 py-2 rounded disabled:opacity-50">
                             ${this.saving ? 'Saving...' : 'Save'}
                         </button>
-                    </div>
+                    </div>` : html`<p class="text-xs text-slate-500" data-testid="offline-counter-readonly">Only an owner or admin changes these settings.</p>`}
                 </div>
 
                 ${this.error ? html`<div class="bg-red-500/10 border border-red-500/20 rounded-lg p-3 text-sm text-red-400" role="alert" data-testid="offline-counter-error">${this.error}</div>` : nothing}
                 ${this.success ? html`<div class="bg-emerald-500/10 border border-emerald-500/20 rounded-lg p-3 text-sm text-emerald-400" data-testid="offline-counter-saved">${this.success}</div>` : nothing}
 
-                <gable-register-devices></gable-register-devices>
+                <gable-register-devices class="block"></gable-register-devices>
             </div>
         `;
     }
