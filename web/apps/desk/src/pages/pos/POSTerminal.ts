@@ -26,7 +26,7 @@ import './SignaturePad';
 import type { SignaturePad } from './SignaturePad';
 import './ScalePanel';
 import { weightBadgeText } from './scale';
-import { formatPrice4, formatCents } from '../../lib/utils';
+import { formatPrice2, formatCents } from '../../lib/utils';
 import { isCountedUnit, normalizeQuantity } from '../../lib/money';
 import { payPlan, panelProgress, type PanelState, type PanelKey } from './panels';
 import { roundCashFor, type CashRoundingMode } from '../../lib/cashRounding';
@@ -3261,7 +3261,7 @@ export class POSTerminal extends LitElement {
                 <div class="min-w-0 flex-1">
                   <div class="truncate text-sm font-semibold text-white">${item.description}</div>
                   ${weightBadgeText(item) ? html`<div class="font-mono text-xs text-gable-green" data-testid="pos-line-weight-badge">${weightBadgeText(item)}</div>` : nothing}
-                  <div class="font-mono text-xs text-slate-400">${item.quantity} ${item.uom} at ${item.unit_price_ten_thousandths !== null ? formatPrice4(item.unit_price_ten_thousandths) : '-'}</div>
+                  <div class="font-mono text-xs text-slate-400">${item.quantity} ${item.uom} at ${item.unit_price_ten_thousandths !== null ? formatPrice2(item.unit_price_ten_thousandths) : '-'}</div>
                   ${item.tint ? html`
                     <div class="font-mono text-xs text-slate-400" data-testid="pos-line-tint">
                       ${item.tint.color_name}${item.tint.color_code ? ` (${item.tint.color_code})` : ''} on ${item.tint.base_code} ${item.tint.container_size_code}

@@ -399,13 +399,14 @@ describe('the counter as the Panels layout', () => {
     });
   });
 
-  it('shows a unit price at the wire precision and its line total to the cent', async () => {
+  it('shows a unit price as money to two places and its line total to the cent', async () => {
     const odd = { ...line('o', 1658), unit_price_ten_thousandths: 165750 };
     const whole = { ...line('w', 500), unit_price_ten_thousandths: 50000 };
     const el = await mount(sale({ lines: [odd as never, whole as never] }));
     const text = el.querySelector('[data-testid="pos-lines"]')?.textContent ?? '';
-    expect(text).toContain('$16.575');
+    // the wire keeps its precision; the counter's line shows money, not the wire
     expect(text).toContain('$16.58');
+    expect(text).not.toContain('$16.575');
     expect(text).toContain('$5.00');
     expect(text).not.toContain('$5.0000');
   });
