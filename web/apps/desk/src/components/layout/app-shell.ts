@@ -12,8 +12,8 @@
 import { LitElement, html, nothing } from 'lit';
 import { customElement, state, property } from 'lit/decorators.js';
 import { cn } from '../../lib/utils.ts';
-import { router } from '../../lib/router.ts';
-import { workspace, menuForKey, activeMenuPath, type WorkspaceTab } from '../../lib/workspace.ts';
+import { router, heldRoles } from '../../lib/router.ts';
+import { workspace, menuForKey, visibleMenu, activeMenuPath, type WorkspaceTab } from '../../lib/workspace.ts';
 import '@gable/design-system';
 import { framedByShell } from '@gable/design-system';
 import { authCustody, signOutStaff } from '@gable/auth';
@@ -292,7 +292,7 @@ export class GableAppShell extends LitElement {
   private _appMenu() {
     const key = workspace.activeKey;
     if (key === 'home') return nothing;
-    const menu = menuForKey(key);
+    const menu = visibleMenu(menuForKey(key), heldRoles());
     if (menu.length === 0) return nothing;
     const tab = workspace.tabs.find((t) => t.key === key);
     const active = activeMenuPath(menu, router.currentPath);

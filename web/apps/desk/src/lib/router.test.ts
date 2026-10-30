@@ -7,7 +7,8 @@
  * in the app renders.
  */
 import { describe, it, expect, beforeEach, vi } from 'vitest'
-import { router, type RouteConfig, type RouteMatch } from './router'
+import { authCustody, authConfig } from '@gable/auth'
+import { router, rolesAllow, heldRoles, routeRefused, refusalWords, ADMIN_OWNER, type RouteConfig, type RouteMatch } from './router'
 
 const noop = async () => {}
 
@@ -157,5 +158,52 @@ describe('router — navigation', () => {
     router.replace('/quotes')
     expect(router.currentPath).toBe('/quotes')
     expect(router.currentMatch?.route.path).toBe('/quotes')
+  })
+})
+
+describe('router — role gate', () => {
+  it('lets every role into a route that names none', () => {
+    expect(rolesAllow(undefined, ['cashier'])).toBe(true)
+    expect(rolesAllow([], ['cashier'])).toBe(true)
+  })
+
+  it('refuses a person whose roles are not on the route', () => {
+    expect(rolesAllow(ADMIN_OWNER, ['cashier'])).toBe(false)
+    expect(rolesAllow(ADMIN_OWNER, ['finance', 'sales'])).toBe(false)
+  })
+
+  it('admits a person holding any one of the roles', () => {
+    expect(rolesAllow(ADMIN_OWNER, ['owner'])).toBe(true)
+    expect(rolesAllow(ADMIN_OWNER, ['cashier', 'admin'])).toBe(true)
+  })
+
+  it('leaves a person who names no role to the server', () => {
+    expect(rolesAllow(ADMIN_OWNER, [])).toBe(true)
+  })
+
+  it('reads the roles of a staff session and a dev persona', () => {
+    authCustody.signInStaff({ sub: 'u1', roles: ['cashier'] })
+    expect(heldRoles()).toEqual(['cashier'])
+    expect(routeRefused({ path: '/x', load: noop, layout: 'erp', roles: ADMIN_OWNER })).toBe(true)
+    authConfig.devMode = true
+    authCustody.signInDev('Jordan Pike', { role: 'cashier' })
+    expect(heldRoles()).toEqual(['cashier'])
+    expect(routeRefused({ path: '/x', load: noop, layout: 'erp', roles: ADMIN_OWNER })).toBe(true)
+    authCustody.signInDev('Owner', { role: 'owner' })
+    expect(routeRefused({ path: '/x', load: noop, layout: 'erp', roles: ADMIN_OWNER })).toBe(false)
+    authCustody.signOut()
+    authConfig.devMode = false
+  })
+
+  it('words the refusal from the roles', () => {
+    expect(refusalWords(ADMIN_OWNER)).toBe('This page is for admin and owner')
+    expect(refusalWords(['admin', 'owner', 'finance'])).toBe('This page is for admin, owner and finance')
+  })
+
+  it('gates the counter rules and offline selling pages to admin and owner', async () => {
+    const { routes } = await import('../routes')
+    for (const path of ['/admin/counter-rules', '/admin/offline-counter']) {
+      expect(routes.find((r) => r.path === path)?.roles).toEqual(['admin', 'owner'])
+    }
   })
 })

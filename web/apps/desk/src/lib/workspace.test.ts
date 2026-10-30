@@ -9,7 +9,7 @@
  * /admin vs /admin/branches) that a naive `startsWith` would get wrong.
  */
 import { describe, it, expect } from 'vitest'
-import { zoneForPath, menuForKey, activeMenuPath, type ZoneMenuItem } from './workspace'
+import { zoneForPath, menuForKey, visibleMenu, activeMenuPath, type ZoneMenuItem } from './workspace'
 
 describe('zoneForPath', () => {
   it('resolves an exact zone prefix', () => {
@@ -134,5 +134,16 @@ describe('activeMenuPath', () => {
 
   it('respects segment boundaries', () => {
     expect(activeMenuPath(menu, '/quotes-archive')).toBeNull()
+  })
+})
+
+describe('visibleMenu', () => {
+  it('hides the admin only Tech Admin items from a cashier', () => {
+    const paths = visibleMenu(menuForKey('techadmin'), ['cashier']).map((m) => m.path)
+    expect(paths).toEqual(['/admin/market-indices'])
+  })
+
+  it('shows every Tech Admin item to an owner', () => {
+    expect(visibleMenu(menuForKey('techadmin'), ['owner'])).toHaveLength(menuForKey('techadmin').length)
   })
 })
