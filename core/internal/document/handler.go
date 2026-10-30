@@ -163,6 +163,18 @@ func (h *Handler) HandlePrintInvoice(w http.ResponseWriter, r *http.Request) {
 // printInvoice answers the invoice's document: the documents route and the
 // counter's receipt route render it through this one function.
 func (h *Handler) printInvoice(w http.ResponseWriter, r *http.Request, id uuid.UUID) bool {
+	return h.printDocument(w, r, id, false)
+}
+
+// printSaleDocument answers the counter sale's default document: the receipt
+// of a sale that took the money, the invoice of one that did not (CP-14).
+func (h *Handler) printSaleDocument(w http.ResponseWriter, r *http.Request, id uuid.UUID) bool {
+	return h.printDocument(w, r, id, true)
+}
+
+// printDocument answers a document: the invoice's own document, or the
+// counter sale's default document.
+func (h *Handler) printDocument(w http.ResponseWriter, r *http.Request, id uuid.UUID, counterSale bool) bool {
 	if h.invoiceSvc == nil || h.customerSvc == nil || h.docSvc == nil {
 		httputil.RespondError(w, r, "failed to generate invoice PDF", http.StatusInternalServerError, errors.New("invoice document service not configured"))
 		return false
@@ -182,16 +194,28 @@ func (h *Handler) printInvoice(w http.ResponseWriter, r *http.Request, id uuid.U
 		return false
 	}
 
-	pdfBytes, err := h.docSvc.GenerateInvoicePDF(r.Context(), inv, cust)
+	kind := DocumentInvoice
+	if counterSale {
+		kind = h.docSvc.SaleDocumentKind(r.Context(), inv)
+	}
+	pdfBytes, err := h.docSvc.GenerateDocumentPDF(r.Context(), inv, cust, kind)
 	if err != nil {
 		httputil.RespondError(w, r, "failed to generate invoice PDF", http.StatusInternalServerError, err)
 		return false
 	}
 
 	w.Header().Set("Content-Type", "application/pdf")
-	w.Header().Set("Content-Disposition", "inline; filename=invoice.pdf")
+	w.Header().Set("Content-Disposition", "inline; filename="+documentFilename(kind))
 	w.Write(pdfBytes)
 	return true
+}
+
+// documentFilename is the file name a document is offered under.
+func documentFilename(kind DocumentKind) string {
+	if kind == DocumentReceipt {
+		return "receipt.pdf"
+	}
+	return "invoice.pdf"
 }
 
 func (h *Handler) HandlePrintPickTicket(w http.ResponseWriter, r *http.Request) {
@@ -235,13 +259,15 @@ func (h *Handler) HandleEmailInvoice(w http.ResponseWriter, r *http.Request) {
 		httputil.RespondError(w, r, "invalid id", http.StatusBadRequest, err)
 		return
 	}
-	h.emailInvoice(w, r, id, noEmail)
+	h.emailInvoice(w, r, id, noEmail, false)
 }
 
 // emailInvoice queues the invoice's email to its customer: the invoice email
 // route and the counter's receipt email route send through this one function,
 // and differ only in the refusal they answer when the customer has no address.
-func (h *Handler) emailInvoice(w http.ResponseWriter, r *http.Request, id uuid.UUID, noAddress func() error) {
+// counterSale says the document is the counter sale's default document, the
+// receipt of a sale that took the money (CP-14).
+func (h *Handler) emailInvoice(w http.ResponseWriter, r *http.Request, id uuid.UUID, noAddress func() error, counterSale bool) {
 	inv, err := h.invoiceSvc.GetInvoiceRecord(r.Context(), id)
 	if err != nil {
 		httputil.RespondError(w, r, "invoice not found", http.StatusNotFound, err)
@@ -266,10 +292,24 @@ func (h *Handler) emailInvoice(w http.ResponseWriter, r *http.Request, id uuid.U
 		httpx.WriteError(w, r, noAddress())
 		return
 	}
-	pdfBytes, err := h.docSvc.GenerateInvoicePDF(r.Context(), inv, cust)
+	kind := DocumentInvoice
+	if counterSale {
+		kind = h.docSvc.SaleDocumentKind(r.Context(), inv)
+	}
+	pdfBytes, err := h.docSvc.GenerateDocumentPDF(r.Context(), inv, cust, kind)
 	if err != nil {
 		httputil.RespondError(w, r, "failed to generate pdf", http.StatusInternalServerError, err)
 		return
+	}
+	// The receipt of a sale that took the money is sent as a receipt, in the
+	// words the customer reads (CP-14).
+	subject := "Invoice " + inv.Number
+	body := "Please find invoice " + inv.Number + " attached."
+	filename := "invoice-" + inv.Number + ".pdf"
+	if kind == DocumentReceipt {
+		subject = "Receipt " + inv.Number
+		body = "Please find receipt " + inv.Number + " attached."
+		filename = "receipt-" + inv.Number + ".pdf"
 	}
 	// Async dispatch: the HTTP thread never waits on the mail server. The
 	// delivery row is written queued before the 202 answers (so the 202 can
@@ -278,9 +318,9 @@ func (h *Handler) emailInvoice(w http.ResponseWriter, r *http.Request, id uuid.U
 	dealer := h.docSvc.DealerName(r.Context())
 	deliveryID := h.dispatch(r.Context(), outgoing{
 		to:       email,
-		subject:  withDealer("Invoice "+inv.Number, dealer),
-		body:     closing("Please find invoice "+inv.Number+" attached.", dealer),
-		filename: "invoice-" + inv.Number + ".pdf",
+		subject:  withDealer(subject, dealer),
+		body:     closing(body, dealer),
+		filename: filename,
 		pdf:      pdfBytes,
 		entry: emaildelivery.Entry{
 			BranchID: branchPtr(inv.BranchID), DocumentType: emaildelivery.DocInvoice,

@@ -132,6 +132,8 @@ export interface Sale {
     tax_cents: number;
     total_cents: number;
     change_cents: number;
+    /** The cash the branch's own rounding rule moved the cash leg by (CP-18): positive when the drawer kept more than the sale needed. */
+    rounding_cents: number;
     till_session_id: string | null;
     status: SaleStatus;
     invoice_id: string | null;

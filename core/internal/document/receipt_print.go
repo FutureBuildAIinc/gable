@@ -14,8 +14,8 @@ import (
 )
 
 // The layouts of the counter receipt route (GET /pos/transactions/{id}/receipt,
-// the layout query). The default is the sale's invoice document, as it has
-// always printed; thermal80 is the 80mm till receipt.
+// the layout query). The default is the sale's own document, the receipt of a
+// sale that took the money (CP-14); thermal80 is the 80mm till receipt.
 const (
 	LayoutInvoice   = "invoice"
 	LayoutThermal80 = "thermal80"
@@ -101,8 +101,9 @@ func receiptLayout(w http.ResponseWriter, r *http.Request) (string, bool) {
 
 // printSaleReceipt prints the sale's receipt in the layout: it counts the
 // print first (so racing prints are numbered apart), renders, and takes the
-// count back when the render fails. The default layout is the invoice
-// document exactly as before.
+// count back when the render fails. The default layout is the sale's own
+// document: the receipt of a sale that took the money, the invoice of one
+// that did not (CP-14).
 func (h *Handler) printSaleReceipt(w http.ResponseWriter, r *http.Request, saleID, invoiceID uuid.UUID, layout string) {
 	if layout == LayoutThermal80 && (h.thermal == nil || h.prints == nil) {
 		msg := "the 80mm receipt layout is not available on this server: print the default layout"
@@ -121,7 +122,7 @@ func (h *Handler) printSaleReceipt(w http.ResponseWriter, r *http.Request, saleI
 		w.Header().Set("X-Receipt-Print", strconv.Itoa(print.Number))
 	}
 	if layout == LayoutInvoice {
-		if !h.printInvoice(w, r, invoiceID) && h.prints != nil {
+		if !h.printSaleDocument(w, r, invoiceID) && h.prints != nil {
 			h.prints.CancelReceiptPrint(r.Context(), saleID)
 		}
 		return

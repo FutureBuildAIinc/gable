@@ -35,9 +35,11 @@ func (h *Handler) RegisterReceiptRoutes(mux *http.ServeMux, guard func(http.Hand
 }
 
 // HandlePrintSaleReceipt is GET /pos/transactions/{id}/receipt: the sale's
-// invoice document, rendered by the documents print route's own function, or
-// the 80mm till receipt with ?layout=thermal80. Each print is counted against
-// the sale: the second and later say REPRINT with their number.
+// default document, the receipt of a sale that took the money (CP-14) or the
+// invoice of a sale that did not, rendered by the documents print route's own
+// function, or the 80mm till receipt with ?layout=thermal80. Each print is
+// counted against the sale: the second and later say REPRINT with their
+// number.
 func (h *Handler) HandlePrintSaleReceipt(w http.ResponseWriter, r *http.Request) {
 	layout, ok := receiptLayout(w, r)
 	if !ok {
@@ -56,8 +58,8 @@ func (h *Handler) HandlePrintSaleReceipt(w http.ResponseWriter, r *http.Request)
 }
 
 // HandleEmailSaleReceipt is POST /pos/transactions/{id}/receipt/email: the
-// sale's invoice to the account's contact, sent by the invoice email route's
-// own function.
+// sale's default document to the account's contact, sent by the invoice email
+// route's own function.
 func (h *Handler) HandleEmailSaleReceipt(w http.ResponseWriter, r *http.Request) {
 	invoiceID, walkIn, ok := h.saleInvoice(w, r)
 	if !ok {
@@ -69,7 +71,7 @@ func (h *Handler) HandleEmailSaleReceipt(w http.ResponseWriter, r *http.Request)
 		httpx.WriteError(w, r, noContact())
 		return
 	}
-	h.emailInvoice(w, r, invoiceID, noContact)
+	h.emailInvoice(w, r, invoiceID, noContact, true)
 }
 
 func (h *Handler) saleInvoice(w http.ResponseWriter, r *http.Request) (uuid.UUID, bool, bool) {

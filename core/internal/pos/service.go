@@ -1422,6 +1422,9 @@ func (s *Service) GetSale(ctx context.Context, saleID uuid.UUID) (*Sale, error) 
 			return nil, err
 		}
 	}
+	// The cash the branch's rounding rule moved the cash leg by (CP-18): the
+	// counter and the documents say it, the stored total does not move.
+	sale.RoundingCents = roundingOf(sale, sale.Tenders)
 	return sale, nil
 }
 

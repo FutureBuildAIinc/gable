@@ -255,6 +255,10 @@ func (s *Service) ThermalReceipt(ctx context.Context, invoiceID uuid.UUID, print
 			PriceUOM:    priceUOM,
 			LineTotal:   *l.LineTotal,
 			Tint:        thermalTintOf(l.Tint),
+			// The discount the line was sold under, so the receipt can say
+			// the tint charge it names is the undiscounted one.
+			DiscountPercent: l.DiscountPercent,
+			DiscountAmount:  l.DiscountAmount,
 		}
 		// The weighed line's marking (CP-19): the ticket on the paper, MAN
 		// WT when the weight was typed.
@@ -373,15 +377,22 @@ func roundingOf(sale *Sale, tenders []Tender) httpx.Cents {
 	// counts for nothing here; a sale the rule did not touch shows no
 	// rounding.
 	var cashKept, nonCash int64
+	hasCash := false
 	for i := range tenders {
 		switch tenders[i].Method {
 		case TenderCash:
+			hasCash = true
 			if tenders[i].PaymentID != nil {
 				cashKept += int64(tenders[i].AmountCents)
 			}
 		default:
 			nonCash += int64(tenders[i].AmountCents)
 		}
+	}
+	if !hasCash {
+		// No cash leg, so no cash was rounded: a sale the rule did not
+		// touch, or one still open and not tendered yet.
+		return 0
 	}
 	exactCash := int64(sale.TotalCents) - nonCash
 	if exactCash < 0 {
@@ -418,20 +429,33 @@ func receiptTenders(sale *Sale, tenders []Tender) []document.ThermalTender {
 	return out
 }
 
-// InvoiceTenders is the tender legs of the counter sale that owns invoiceID,
-// for the full page layout; an invoice that is not a counter sale has none.
-func (s *Service) InvoiceTenders(ctx context.Context, invoiceID uuid.UUID) ([]document.ThermalTender, error) {
+// InvoicePayment is the money the counter sale that owns invoiceID took: the
+// tender legs as the paper shows them, the cash rounding the branch's rule
+// made, the change given back and the share of the total that went on
+// account. An invoice that is not a counter sale has none.
+func (s *Service) InvoicePayment(ctx context.Context, invoiceID uuid.UUID) (document.SalePayment, error) {
 	facts, err := s.repo.ReceiptSaleByInvoice(ctx, invoiceID)
 	if err != nil {
 		var he *httpx.Error
 		if errors.As(err, &he) && he.Status == http.StatusNotFound {
-			return nil, nil
+			return document.SalePayment{}, nil
 		}
-		return nil, err
+		return document.SalePayment{}, err
 	}
 	tenders, err := s.repo.GetTenders(ctx, facts.sale.ID)
 	if err != nil {
-		return nil, err
+		return document.SalePayment{}, err
 	}
-	return receiptTenders(&facts.sale, tenders), nil
+	sale := &facts.sale
+	out := document.SalePayment{
+		Tenders:       receiptTenders(sale, tenders),
+		RoundingCents: roundingOf(sale, tenders),
+		ChangeCents:   sale.ChangeCents,
+	}
+	for i := range tenders {
+		if tenders[i].Method == TenderAccount {
+			out.AccountCents += tenders[i].AmountCents
+		}
+	}
+	return out, nil
 }

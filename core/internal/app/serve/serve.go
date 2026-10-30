@@ -938,7 +938,7 @@ func Run() {
 		logger.Warn("the simulated scale is wired: a demo stack only, never a production configuration")
 	}
 	wall.pos(mux, posHandler, "admin", "owner", "cashier")
-	docSvc.WithInvoiceTenders(posSvc)
+	docSvc.WithInvoicePayments(posSvc)
 	wall.posReceipts(mux, docHandler, posSvc, "admin", "owner", "cashier")
 
 	// Accounts Payable Module: the vendor invoice routes on the wire contract

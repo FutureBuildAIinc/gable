@@ -94,6 +94,7 @@
         "print_count": 0,
         "register_id": "REG-01",
         "revision": 1,
+        "rounding_cents": 0,
         "ship_to_id": null,
         "status": "open",
         "subtotal_cents": 0,

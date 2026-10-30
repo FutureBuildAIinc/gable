@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: LicenseRef-OpenLBM-Surface-1.0
 // SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
 
-import { expect, test, type Page } from '@playwright/test'
+import { expect, test, type Page } from '../../../e2e/font-guard'
 import { join } from 'node:path'
 import { installPortalMocks, setTheme } from './fixtures.ts'
 import { quoteIds } from '../src/test/customer-quote-fixtures.ts'
