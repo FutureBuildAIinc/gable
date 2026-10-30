@@ -42,12 +42,16 @@ for (const { role, card, name, roleWords } of FIRST_RUN_ROLES) {
     await expect(page.getByRole('heading', { name: /good to see you/i })).toBeVisible();
     await expect(page.getByRole('heading', { name: /good to see you/i })).toContainText(name);
 
-    // The desk tile opens the desk; the shell renders the persona and its role.
+    // The desk tile opens the desk; the shell renders the persona and its role
+    // in the account chip (the launcher grid names apps too, so the role words
+    // are asserted inside the chip, not anywhere on the page).
     await page.getByRole('button', { name: 'Open Gable Desk' }).click();
     await expect(page).toHaveURL(/\/home$/);
     await expect(page.locator('gable-app-shell')).toBeVisible();
-    await expect(page.locator('gable-app-shell').getByText(name, { exact: true }).first()).toBeVisible();
-    await expect(page.locator('gable-app-shell').getByText(roleWords, { exact: true }).first()).toBeVisible();
+    const account = page.locator('gable-app-shell').getByRole('button', { name: 'Account menu' });
+    await expect(account).toBeVisible();
+    await expect(account.getByText(name, { exact: true })).toBeVisible();
+    await expect(account.getByText(roleWords, { exact: true })).toBeVisible();
     await shot(page, `first-run-${role}.png`);
   });
 }
