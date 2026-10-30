@@ -165,8 +165,8 @@ func seedMultiYard(ctx context.Context, db *sql.DB, ar *receivables, yards map[s
 		if err != nil {
 			log.Printf("Seed: Quillfield Formwork: %v", err)
 		} else {
-			seedExec(db, "Quillfield ship to", `INSERT INTO customer_ship_tos (customer_id, code, name, line1, is_default)
-				VALUES ($1, 'MAIN', 'Quillfield Formwork Ltd', '610 Plywood Ct, West Kelowna BC', TRUE)
+			seedExec(db, "Quillfield ship to", `INSERT INTO customer_ship_tos (customer_id, code, name, line1, city, region, country, is_default)
+				VALUES ($1, 'MAIN', 'Quillfield Formwork Ltd', '610 Plywood Ct, West Kelowna BC', 'West Kelowna', 'BC', 'CA', TRUE)
 				ON CONFLICT (customer_id, code) DO NOTHING`, cid)
 			var invCount int
 			db.QueryRow(`SELECT COUNT(*) FROM invoices WHERE customer_id = $1`, cid).Scan(&invCount)
@@ -176,11 +176,15 @@ func seedMultiYard(ctx context.Context, db *sql.DB, ar *receivables, yards map[s
 				seedExec(db, "Quillfield order", `INSERT INTO orders (id, customer_id, branch_id, total_amount, subtotal, status, created_at, delivery_type, currency, tax_source)
 					VALUES ($1, $2, $3, 18816.00, 16800.00, 'FULFILLED', $4, 'PICKUP',
 						COALESCE((SELECT value FROM system_settings WHERE key = 'currency.default'), 'USD'), 'LEGACY')`, orderID, cid, branch, on)
+				// 168.00 at GST 5 and PST 7, each rounded on its own: 840 and
+				// 1176, the 20.16 the invoice has always carried (CP-14 A1).
+				_, quillParts := bcTax(1680000)
 				seedExec(db, "Quillfield invoice", `INSERT INTO invoices (id, order_id, customer_id, branch_id, status, total_amount, subtotal, tax_rate, tax_amount,
-						due_date, payment_terms_id, invoice_date, created_at)
+						due_date, payment_terms_id, invoice_date, created_at, tax_zone_id, tax_rate_parts, tax_zone_source)
 					VALUES ($1, $2, $3, $4, 'UNPAID', 18816.00, 16800.00, 0.12, 2016.00, $5::date,
-						(SELECT payment_terms_id FROM customers WHERE id = $3), $6::date, $6)`,
-					invID, orderID, cid, branch, on.AddDate(0, 1, 0), on.AddDate(0, 0, 1))
+						(SELECT payment_terms_id FROM customers WHERE id = $3), $6::date, $6,
+						$7, $8::jsonb, CASE WHEN $8::jsonb IS NULL THEN NULL ELSE 'seed demo' END)`,
+					invID, orderID, cid, branch, on.AddDate(0, 1, 0), on.AddDate(0, 0, 1), bcZoneID(), nullJSON(quillParts))
 				// The two lines the subtotal is made of, in the shared line shape
 				// seed.go writes, billed on the invoice. Both products or neither:
 				// never a document whose lines disagree with its subtotal.

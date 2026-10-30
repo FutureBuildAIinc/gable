@@ -415,6 +415,9 @@ func Run() {
 		ON CONFLICT (key) DO UPDATE SET value = 'CA'`); err != nil {
 		log.Printf("Seed: country.default: %v", err)
 	}
+	// Its own province's tax zone, so every BC document carries GST and PST
+	// as their own lines (CP-14 A1).
+	seedBCZone(db)
 
 	// Child ZONEs under KEL-MAIN (trigger 058 inherits branch_id from parent).
 	type zone struct {
@@ -752,10 +755,13 @@ func Run() {
 		custToBranch[custID] = branchID
 		custToProjects[custID] = []uuid.UUID{}
 
-		// The customer's main ship-to address, the default for its orders and deliveries.
-		if _, err := db.Exec(`INSERT INTO customer_ship_tos (customer_id, code, name, line1, is_default)
-			VALUES ($1, 'MAIN', $2, $3, TRUE)
-			ON CONFLICT (customer_id, code) DO UPDATE SET name = $2, line1 = $3`, custID, c.Name, c.Addr); err != nil {
+		// The customer's main ship-to address, the default for its orders and
+		// deliveries. Every demo customer is in British Columbia, so the row
+		// names BC and Canada: a delivery's tax comes from its province's
+		// zone (CP-14 A1: a ship-to no zone covers is refused).
+		if _, err := db.Exec(`INSERT INTO customer_ship_tos (customer_id, code, name, line1, region, country, is_default)
+			VALUES ($1, 'MAIN', $2, $3, 'BC', 'CA', TRUE)
+			ON CONFLICT (customer_id, code) DO UPDATE SET name = $2, line1 = $3, region = 'BC', country = 'CA'`, custID, c.Name, c.Addr); err != nil {
 			log.Printf("Ship-to for %s: %v", c.Name, err)
 		}
 
@@ -957,15 +963,18 @@ func Run() {
 				}
 				taxRate := 0.12 // BC: GST 5% + PST 7% on building materials.
 				subCents := cents(orderTotal)
-				taxCents := cents(float64(subCents) / 100 * taxRate)
+				// GST and PST each rounded on their own and frozen (CP-14 A1).
+				taxCents, taxParts := bcTax(subCents)
 				subtotal, taxAmt, total := float64(subCents)/100, float64(taxCents)/100, float64(subCents+taxCents)/100
 				invStatus := "UNPAID"
 				// number is left to the column DEFAULT: the seed numbers its invoices
 				// through the same gapless counter as every other writer.
 				_, err = db.Exec(`INSERT INTO invoices (id, order_id, customer_id, branch_id, status, total_amount, subtotal, tax_rate, tax_amount,
-						due_date, payment_terms_id, invoice_date, created_at)
-					VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::date,(SELECT payment_terms_id FROM customers WHERE id = $3),$11::date,$11)`,
-					invID, orderID, custID, branchID, invStatus, total, subtotal, taxRate, taxAmt, dueDate, invoiceDay)
+						due_date, payment_terms_id, invoice_date, created_at, tax_zone_id, tax_rate_parts, tax_zone_source)
+					VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::date,(SELECT payment_terms_id FROM customers WHERE id = $3),$11::date,$11,
+						$12, $13::jsonb, CASE WHEN $13::jsonb IS NULL THEN NULL ELSE 'seed demo' END)`,
+					invID, orderID, custID, branchID, invStatus, total, subtotal, taxRate, taxAmt, dueDate, invoiceDay,
+					bcZoneID(), nullJSON(taxParts))
 				if err == nil {
 					invoiceIDs = append(invoiceIDs, invID)
 					// the billed lines: the order's, in the shared line shape
@@ -1366,6 +1375,7 @@ func Run() {
 		ON CONFLICT DO NOTHING`)
 	fmt.Println("Seed: Portal Config")
 	seedDealerProfile(db)
+	seedDemoGSTHSTNumber(db)
 
 	// =========================================================================
 	// 19. CREDIT MEMOS

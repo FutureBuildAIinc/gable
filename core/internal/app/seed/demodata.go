@@ -690,11 +690,15 @@ func importCustomers(ctx context.Context, db *sql.DB, yards map[string]uuid.UUID
 		}
 
 		// customer_ship_tos: one MAIN row carrying the customer's address,
-		// plus one per job_site. Existing rows are preserved by code.
-		db.ExecContext(ctx, `INSERT INTO customer_ship_tos (customer_id, code, name, line1, is_default)
-			VALUES ($1, 'MAIN', $2, $3, TRUE)
-			ON CONFLICT (customer_id, code) DO UPDATE SET name = EXCLUDED.name, line1 = EXCLUDED.line1`,
-			cid, row.Name, row.AddressLine1)
+		// plus one per job_site. Existing rows are preserved by code. Each
+		// carries its city, province and Canada, so a delivery's tax comes
+		// from its province's zone (CP-14 A1: a ship-to no zone covers is
+		// refused).
+		db.ExecContext(ctx, `INSERT INTO customer_ship_tos (customer_id, code, name, line1, city, region, country, is_default)
+			VALUES ($1, 'MAIN', $2, $3, NULLIF($4, ''), NULLIF($5, ''), 'CA', TRUE)
+			ON CONFLICT (customer_id, code) DO UPDATE SET name = EXCLUDED.name, line1 = EXCLUDED.line1,
+				city = EXCLUDED.city, region = EXCLUDED.region, country = EXCLUDED.country`,
+			cid, row.Name, row.AddressLine1, row.City, row.Region)
 
 		for jsIdx, js := range row.JobSites {
 			code := fmt.Sprintf("JS-%03d", jsIdx+1)
@@ -709,10 +713,11 @@ func importCustomers(ctx context.Context, db *sql.DB, yards map[string]uuid.UUID
 					line2 = js.Region
 				}
 			}
-			db.ExecContext(ctx, `INSERT INTO customer_ship_tos (customer_id, code, name, line1, line2, is_default)
-				VALUES ($1, $2, $3, $4, NULLIF($5, ''), FALSE)
-				ON CONFLICT (customer_id, code) DO UPDATE SET name = EXCLUDED.name, line1 = EXCLUDED.line1`,
-				cid, code, js.Name, js.Line1, line2)
+			db.ExecContext(ctx, `INSERT INTO customer_ship_tos (customer_id, code, name, line1, line2, city, region, country, is_default)
+				VALUES ($1, $2, $3, $4, NULLIF($5, ''), NULLIF($6, ''), NULLIF($7, ''), 'CA', FALSE)
+				ON CONFLICT (customer_id, code) DO UPDATE SET name = EXCLUDED.name, line1 = EXCLUDED.line1,
+					city = EXCLUDED.city, region = EXCLUDED.region, country = EXCLUDED.country`,
+				cid, code, js.Name, js.Line1, line2, js.City, js.Region)
 		}
 
 		// customer_contacts: one row per contact. Existing rows are kept; the
@@ -962,9 +967,9 @@ func seedHistory(ctx context.Context, db *sql.DB, ar *receivables,
 					subtotal += hl.totalCents
 					lines = append(lines, hl)
 				}
-				taxCents := (subtotal*12 + 50) / 100
+				taxCents, taxParts := bcTax(subtotal)
 				seq++
-				in, err := writeHistoryDocs(ctx, tx, c.ID, c.Yard, day, lines, subtotal, taxCents)
+				in, err := writeHistoryDocs(ctx, tx, c.ID, c.Yard, day, lines, subtotal, taxCents, taxParts)
 				if err != nil {
 					// The day's transaction is aborted by a refused statement:
 					// stop the day, the rest of the history goes on.
@@ -1010,17 +1015,18 @@ func seedHistory(ctx context.Context, db *sql.DB, ar *receivables,
 // with the matching lines, in the shape the base seed writes them, and answers
 // the invoice for the AR core to post and settle in full.
 func writeHistoryDocs(ctx context.Context, tx *sql.Tx, customerID, branchID uuid.UUID, day time.Time,
-	lines []historyLine, subtotal, taxCents int64) (seedInvoice, error) {
+	lines []historyLine, subtotal, taxCents int64, taxParts []byte) (seedInvoice, error) {
 	orderID, invID := uuid.New(), uuid.New()
 	total := subtotal + taxCents
 	// The order and its invoice both take the tenant's currency, so the
 	// documents of one sale agree (the payment follows its invoice).
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO orders (id, customer_id, branch_id, total_amount, subtotal, tax_rate, tax_amount, status, created_at,
-			delivery_type, currency, tax_source)
+			delivery_type, currency, tax_source, tax_zone_id, tax_rate_parts, tax_zone_source)
 		VALUES ($1, $2, $3, $4::bigint::numeric / 100, $5::bigint::numeric / 100, $7, $8::bigint::numeric / 100,
-			'FULFILLED', $6, 'PICKUP', (SELECT value FROM system_settings WHERE key = 'currency.default'), 'LEGACY')`,
-		orderID, customerID, branchID, total, subtotal, day, historyTaxRate, taxCents); err != nil {
+			'FULFILLED', $6, 'PICKUP', (SELECT value FROM system_settings WHERE key = 'currency.default'), 'LEGACY',
+			$9, $10::jsonb, CASE WHEN $10::jsonb IS NULL THEN NULL ELSE 'seed demo' END)`,
+		orderID, customerID, branchID, total, subtotal, day, historyTaxRate, taxCents, bcZoneID(), nullJSON(taxParts)); err != nil {
 		return seedInvoice{}, fmt.Errorf("order: %w", err)
 	}
 	prod, qty, unit, tot, pos := make([]string, len(lines)), make([]string, len(lines)), make([]string, len(lines)),
@@ -1046,12 +1052,14 @@ func writeHistoryDocs(ctx context.Context, tx *sql.Tx, customerID, branchID uuid
 	// invoice is UNPAID and open at its total until the AR core settles it.
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO invoices (id, order_id, customer_id, branch_id, status, total_amount, subtotal,
-			tax_rate, tax_amount, due_date, payment_terms_id, invoice_date, created_at, currency)
+			tax_rate, tax_amount, due_date, payment_terms_id, invoice_date, created_at, currency,
+			tax_zone_id, tax_rate_parts, tax_zone_source)
 		VALUES ($1, $2, $3, $4, 'UNPAID', $5::bigint::numeric / 100, $6::bigint::numeric / 100, $7,
 			$8::bigint::numeric / 100, $9::date, (SELECT payment_terms_id FROM customers WHERE id = $3), $10::date, $10,
-			(SELECT value FROM system_settings WHERE key = 'currency.default'))`,
+			(SELECT value FROM system_settings WHERE key = 'currency.default'),
+			$11, $12::jsonb, CASE WHEN $12::jsonb IS NULL THEN NULL ELSE 'seed demo' END)`,
 		invID, orderID, customerID, branchID, total, subtotal, historyTaxRate, taxCents,
-		day.AddDate(0, 1, 0), day); err != nil {
+		day.AddDate(0, 1, 0), day, bcZoneID(), nullJSON(taxParts)); err != nil {
 		return seedInvoice{}, fmt.Errorf("invoice: %w", err)
 	}
 	if _, err := tx.ExecContext(ctx, `
