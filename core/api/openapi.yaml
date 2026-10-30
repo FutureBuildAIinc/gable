@@ -21300,6 +21300,89 @@ paths:
                 $ref: "#/components/schemas/StaffIdentity"
         "401":
           $ref: "#/components/responses/Unauthorized"
+  /api/v1/admin/staff/sign-in-people:
+    get:
+      operationId: adminStaffSignInPeople
+      tags: [auth]
+      summary: The people who have signed in, for the roster link
+      description: >-
+        Owner and admin. The distinct subjects the core's sessions have seen, each with the email read from Appwrite by the stored Appwrite user id (the session row holds none) and the staff row it is linked to, if any. This is the list the staff screen picks from to link a roster row.
+      security:
+        - BearerJWT: []
+        - StaffSession: []
+      responses:
+        "200":
+          description: The people.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StaffSignInPeople"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/v1/admin/staff/{id}/sign-in-link:
+    put:
+      operationId: adminStaffSignInLinkSet
+      tags: [auth]
+      summary: Link a staff row to a person who has signed in
+      description: >-
+        Owner and admin. Sets the staff row's sub to a person the sessions have seen, audited. A sub no session has seen is a 400, an unknown staff row a 404, and a staff row or a person already linked a 409 (the link is unique when set).
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: The staff row.
+          schema:
+            type: string
+            format: uuid
+      security:
+        - BearerJWT: []
+        - StaffSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/StaffSignInLinkRequest"
+      responses:
+        "204":
+          description: Linked.
+        "400":
+          $ref: "#/components/responses/WireBadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "409":
+          $ref: "#/components/responses/WireConflict"
+    delete:
+      operationId: adminStaffSignInLinkClear
+      tags: [auth]
+      summary: Clear a staff row's sign in link
+      description: Owner and admin. Clears the link, audited; clearing an unlinked row is a no-op.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: The staff row.
+          schema:
+            type: string
+            format: uuid
+      security:
+        - BearerJWT: []
+        - StaffSession: []
+      responses:
+        "204":
+          description: Cleared.
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
   /api/v1/tax/exemptions:
     post:
       operationId: taxExemptionCreate
@@ -38777,6 +38860,31 @@ components:
               oidc_label:
                 type: string
                 description: The display label; optional on the oidc method, refused on any other.
+    StaffSignInPeople:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            type: object
+            required: [sub, email, linked_staff_id]
+            properties:
+              sub:
+                type: string
+                format: uuid
+              email:
+                type: string
+              linked_staff_id:
+                type: [string, 'null']
+                format: uuid
+    StaffSignInLinkRequest:
+      type: object
+      required: [sub]
+      properties:
+        sub:
+          type: string
+          format: uuid
     StaffSignInRequest:
       type: object
       required: [email, password]

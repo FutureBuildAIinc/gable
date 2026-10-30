@@ -233,6 +233,7 @@ func Run() {
 	}
 	var authMw *middleware.AuthMiddleware
 	var staffHandler *staffauth.Handler
+	var staffLinks *staffauth.Links
 	var awClient *appwrite.Client
 	if awCfg.Enabled() {
 		// ADR 0012: Appwrite is the identity provider and its server must
@@ -255,6 +256,7 @@ func Run() {
 			IdleLimit: cfg.StaffSessionIdle, AbsoluteLimit: cfg.StaffSessionAbsolute,
 			RefreshAfter: cfg.StaffSessionRefresh, SnapshotMaxAge: cfg.StaffSessionSnapshot,
 		}, logger).WithFloorWatch(awClient, time.Minute)
+		staffLinks = staffauth.NewLinks(db, awClient, auditLog)
 		staffHandler = staffauth.NewHandler(staffSvc, staffauth.HandlerConfig{Origin: cfg.PublicURL, Trusted: cfg.TrustedProxies})
 		am, err := middleware.NewAuthMiddleware(context.Background(), middleware.AuthConfig{
 			JWKSURL:     cfg.JWKSURL,
@@ -747,6 +749,7 @@ func Run() {
 	}
 	if staffHandler != nil {
 		staffHandler.RegisterRoutes(mux)
+		staffLinks.RegisterRoutes(mux, middleware.RequireRole("admin", "owner"))
 	}
 	signinmethods.NewHandler(signinSvc, cfg.AuthMode).RegisterRoutes(mux, signinmethods.Guards{
 		Admin: middleware.RequireRole("admin", "owner"),

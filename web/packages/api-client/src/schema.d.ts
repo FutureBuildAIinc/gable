@@ -9548,6 +9548,50 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/admin/staff/sign-in-people": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The people who have signed in, for the roster link
+         * @description Owner and admin. The distinct subjects the core's sessions have seen, each with the email read from Appwrite by the stored Appwrite user id (the session row holds none) and the staff row it is linked to, if any. This is the list the staff screen picks from to link a roster row.
+         */
+        get: operations["adminStaffSignInPeople"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/staff/{id}/sign-in-link": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Link a staff row to a person who has signed in
+         * @description Owner and admin. Sets the staff row's sub to a person the sessions have seen, audited. A sub no session has seen is a 400, an unknown staff row a 404, and a staff row or a person already linked a 409 (the link is unique when set).
+         */
+        put: operations["adminStaffSignInLinkSet"];
+        post?: never;
+        /**
+         * Clear a staff row's sign in link
+         * @description Owner and admin. Clears the link, audited; clearing an unlinked row is a no-op.
+         */
+        delete: operations["adminStaffSignInLinkClear"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/tax/exemptions": {
         parameters: {
             query?: never;
@@ -20886,6 +20930,19 @@ export interface components {
                 /** @description The display label; optional on the oidc method, refused on any other. */
                 oidc_label?: string;
             }[];
+        };
+        StaffSignInPeople: {
+            items: {
+                /** Format: uuid */
+                sub: string;
+                email: string;
+                /** Format: uuid */
+                linked_staff_id: string | null;
+            }[];
+        };
+        StaffSignInLinkRequest: {
+            /** Format: uuid */
+            sub: string;
         };
         StaffSignInRequest: {
             email: string;
@@ -41422,6 +41479,82 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+        };
+    };
+    adminStaffSignInPeople: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The people. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StaffSignInPeople"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    adminStaffSignInLinkSet: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The staff row. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StaffSignInLinkRequest"];
+            };
+        };
+        responses: {
+            /** @description Linked. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["WireBadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["WireConflict"];
+        };
+    };
+    adminStaffSignInLinkClear: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The staff row. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Cleared. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["WireNotFound"];
         };
     };
     taxExemptionCreate: {

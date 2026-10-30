@@ -77,7 +77,7 @@ func (a *auditRec) actions() []string {
 
 func okDir() *fakeDir {
 	return &fakeDir{
-		user:   appwrite.User{ID: "u1", Status: true, EmailVerification: true},
+		user:   appwrite.User{ID: "u1", Email: "a@x.example", Status: true, EmailVerification: true},
 		member: appwrite.Membership{UserID: "u1", Confirmed: true, Roles: []string{"gable-sales", "gable-finance"}},
 		found:  true,
 	}
