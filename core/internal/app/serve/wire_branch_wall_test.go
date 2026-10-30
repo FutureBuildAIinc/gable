@@ -1969,6 +1969,37 @@ func TestReviewManagerRoutesUnderServeGuard(t *testing.T) {
 	}
 }
 
+// TestOfflinePolicyRoutesUnderServeGuard: the offline policy write is an admin
+// act (ADR 0011 section 4), so admin and owner write it and finance is refused;
+// admin, owner and finance read it; a cashier does neither.
+func TestOfflinePolicyRoutesUnderServeGuard(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	db := testutil.RequireDB(t)
+	f := newWallFixture(t, db, true)
+	A := f.branchA.String()
+	getPath := "/api/v1/pos/offline/policy?branch_id=" + A
+	putPath := "/api/v1/pos/offline/policy"
+	putBody := `{"branch_id":"` + A + `","clear":true}`
+
+	for _, c := range []struct {
+		name, method, path, body, role, sub, header string
+		want                                        int
+	}{
+		{"admin writes the policy", "PUT", putPath, putBody, "admin", "boss", "", http.StatusOK},
+		{"owner writes the policy", "PUT", putPath, putBody, "owner", "boss", "", http.StatusOK},
+		{"finance refused the write", "PUT", putPath, putBody, "finance", "u-a", A, http.StatusForbidden},
+		{"cashier refused the write", "PUT", putPath, putBody, "cashier", "u-a", A, http.StatusForbidden},
+		{"admin reads the policy", "GET", getPath, "", "admin", "boss", "", http.StatusOK},
+		{"owner reads the policy", "GET", getPath, "", "owner", "boss", "", http.StatusOK},
+		{"finance reads the policy", "GET", getPath, "", "finance", "u-a", A, http.StatusOK},
+		{"cashier refused the read", "GET", getPath, "", "cashier", "u-a", A, http.StatusForbidden},
+	} {
+		if got := f.call(t, c.method, c.path, c.body, c.role, c.sub, c.header); got != c.want {
+			t.Errorf("%s: got %d, want %d", c.name, got, c.want)
+		}
+	}
+}
+
 // TestBranchWall_LargeCashPreviewHoldsTheSale: the preview reads a sale by id
 // from the body, so the wall holds that sale to the caller's branches. A
 // cashier granted only A previews A's sale and finds B's a missing one; a

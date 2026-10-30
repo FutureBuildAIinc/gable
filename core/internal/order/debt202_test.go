@@ -70,15 +70,13 @@ func TestDebt202_DepositCapSubtractsWhatTheOrdersInvoicesWerePaid(t *testing.T) 
 	}
 }
 
-// openTill opens a till session on a register of the default branch and
-// removes it, with its ledger rows, when the test ends.
+// openTill opens a till session on a register of the fixture's own branch (the
+// branch the orders are made on, never the shared default) and removes it, with its ledger rows, when the test ends.
 func (f *fixture) openTill(reqID string) (tillID, branchID string) {
 	f.t.Helper()
 	ctx := context.Background()
 	regID := "REG-D202-" + uuid.NewString()[:8]
-	if err := f.db.Pool.QueryRow(ctx, `SELECT value FROM system_settings WHERE key = 'default_branch_id'`).Scan(&branchID); err != nil {
-		f.t.Fatal(err)
-	}
+	branchID = f.branchID.String()
 	if _, err := f.db.Pool.Exec(ctx, `INSERT INTO pos_registers (id, name, location_id, branch_id) VALUES ($1, $2, $3::uuid, $3::uuid)`, regID, "Counter "+regID, branchID); err != nil {
 		f.t.Fatal(err)
 	}
