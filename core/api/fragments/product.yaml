@@ -1251,8 +1251,14 @@ components:
         reorder_point, reorder_qty, on_hand, allocated, available, revision,
         created_at, updated_at, sale_uom, price_uom, purchase_uom,
         board_thickness_in, board_width_in, board_length_ft, random_length,
-        units, image_url, density_lb_per_cy, density_volume_state]
+        units, image_url, density_lb_per_cy, density_volume_state, is_non_stock]
       properties:
+        is_non_stock:
+          type: boolean
+          description: >-
+            True on a product the dealer never holds: a configured item, a
+            door or a millwork piece the dealer configures and prices on the
+            server. Such a row is kept out of the stock reads.
         id:
           type: string
           format: uuid

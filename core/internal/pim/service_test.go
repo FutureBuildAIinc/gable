@@ -16,8 +16,8 @@ import (
 	"time"
 
 	"github.com/gablelbm/gable/internal/ai"
-	"github.com/gablelbm/gable/internal/product"
 	"github.com/gablelbm/gable/internal/platform/httpx"
+	"github.com/gablelbm/gable/internal/product"
 	"github.com/gablelbm/gable/internal/units"
 	"github.com/google/uuid"
 )
@@ -88,6 +88,12 @@ func (r *stubProductRepo) UpdateDensity(context.Context, uuid.UUID, *httpx.Quant
 }
 func (r *stubProductRepo) UpdateLeadTime(context.Context, uuid.UUID, *int, int64) (int64, error) {
 	return 0, nil
+}
+
+// FindOrCreateNonStock is the configured item's catalog row; the fakes do
+// not stock one, so the answer is a fresh id and no row.
+func (stubProductRepo) FindOrCreateNonStock(context.Context, string, string, httpx.Price, httpx.Price) (uuid.UUID, error) {
+	return uuid.New(), nil
 }
 
 type stubPIMRepo struct {

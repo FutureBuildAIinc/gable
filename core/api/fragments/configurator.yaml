@@ -155,9 +155,13 @@ paths:
         required. The selections are validated first; a conflict is a 400
         validation_failed whose details carry one config_conflict blocker per
         violated rule (the base answered one fixed message and never said
-        which rules). The SKU is NS, the product type code, then the
-        Species, Grade, Treatment and Dimensions selections upper cased with
-        spaces as hyphens; the keys other than those four are ignored.
+        which rules). The server then prices the configuration from the
+        stored options and builds the configured item: the SKU is NS-, the
+        product type's short name and the first twelve hex characters of the
+        hash of the configuration's canonical form, so the same choices
+        always give the same SKU and the same product row. The price and
+        the cost are the server's; the client sends the choices and reads
+        the money.
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
@@ -296,11 +300,43 @@ components:
           type: object
           additionalProperties:
             type: string
+          description: >-
+            The choices, one per attribute. The names are the configurator's
+            own (Species, Grade, Treatment, Dimensions); the option catalog
+            folds them into its own categories (species, grade, treatment,
+            dimensions) on the way in.
+        width:
+          type: integer
+          description: The item's width in inches, when it has one.
+        height:
+          type: integer
+          description: The item's height in inches, when it has one.
     ConfiguratorBuildSKUResponse:
       type: object
-      required: [sku, description]
+      required: [sku, description, product_id, unit_price_ten_thousandths, unit_cost_ten_thousandths, configuration_json]
+      description: >-
+        The configured item: its SKU, the description the documents carry,
+        the product row it became, the server's price and cost and the
+        canonical configuration they came from.
       properties:
         sku:
           type: string
+          description: >-
+            The deterministic NS- SKU: NS-, the product type's short name
+            and the first twelve hex characters of the hash of the
+            configuration's canonical form.
         description:
           type: string
+        product_id:
+          type: string
+          format: uuid
+          description: The product row the configured item became.
+        unit_price_ten_thousandths:
+          type: integer
+          format: int64
+        unit_cost_ten_thousandths:
+          type: integer
+          format: int64
+        configuration_json:
+          $ref: "#/components/schemas/ConfiguredConfiguration"
+          description: The canonical configuration the price came from.

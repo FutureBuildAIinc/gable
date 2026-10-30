@@ -567,8 +567,19 @@
       "status": 200,
       "content_type": "application/json",
       "body": {
-        "description": "Lumber SYP #2",
-        "sku": "NS-LBR-SYP-#2"
+        "configuration_json": {
+          "product_type": "Lumber",
+          "selections": {
+            "grade": "#2",
+            "length": "8",
+            "species": "SYP"
+          }
+        },
+        "description": "Lumber SYP #2 8",
+        "product_id": "<id-32>",
+        "sku": "NS-LBR-19EB46763E86",
+        "unit_cost_ten_thousandths": 50000,
+        "unit_price_ten_thousandths": 80000
       }
     }
   },
@@ -600,7 +611,7 @@
           "message": "cannot build a SKU: the selections have 1 conflict(s)"
         },
         "meta": {
-          "request_id": "<id-32>"
+          "request_id": "<id-33>"
         }
       }
     }
@@ -629,7 +640,7 @@
           "message": "one or more fields failed validation"
         },
         "meta": {
-          "request_id": "<id-33>"
+          "request_id": "<id-34>"
         }
       }
     }

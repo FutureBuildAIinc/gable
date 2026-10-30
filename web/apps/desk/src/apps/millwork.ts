@@ -16,10 +16,12 @@ export const millworkApp: FrontendAppManifest = {
     { path: '/millwork/configure', tag: 'gable-door-configurator', load: () => import('../pages/millwork/DoorConfigurator.ts'), layout: 'erp' },
     { path: '/millwork/configurator', tag: 'gable-product-configurator', load: () => import('../pages/millwork/ProductConfigurator.ts'), layout: 'erp' },
     { path: '/millwork/blueprint', tag: 'gable-blueprint-verifier', load: () => import('../pages/millwork/BlueprintVerifier.ts'), layout: 'erp' },
+    { path: '/millwork/options', tag: 'gable-millwork-options', load: () => import('../pages/millwork/MillworkOptions.ts'), layout: 'erp' },
   ],
   nav: [
     { label: 'Product Configurator', path: '/millwork/configurator', icon: Hammer, order: 10 },
     { label: 'Door Configurator', path: '/millwork/configure', icon: Hammer, order: 20 },
     { label: 'Blueprint Verifier', path: '/millwork/blueprint', icon: Hammer, order: 30 },
+    { label: 'Option Catalog', path: '/millwork/options', icon: Hammer, order: 40 },
   ],
 };

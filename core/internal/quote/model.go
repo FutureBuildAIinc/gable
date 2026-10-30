@@ -166,6 +166,12 @@ type QuoteLine struct {
 	// the special order indicator for the auto purchase order.
 	UnitCost httpx.Price `json:"unit_cost_ten_thousandths"`
 
+	// Configuration is a configured item's configuration: the choices the
+	// dealer made, in the canonical form the configurator wrote. Null on an
+	// ordinary product line. It is what the line's price was computed from
+	// and what the documents show as a short description.
+	Configuration json.RawMessage `json:"configuration_json"`
+
 	CreatedAt httpx.Timestamp `json:"created_at"`
 }
 

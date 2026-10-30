@@ -867,7 +867,7 @@ components:
         its price unit, the conversion pair, and the extension in cents
         (quantity x unit price x price_uom_qty / uom_qty, rounded once, half
         away from zero).
-      required: [id, quote_id, product_id, sku, description, customer_note, quantity, uom, price_uom, uom_qty, price_uom_qty, unit_price_ten_thousandths, line_total_cents, stock_uom, stock_quantity, tally, unit_cost_ten_thousandths, created_at]
+      required: [id, quote_id, product_id, sku, description, customer_note, quantity, uom, price_uom, uom_qty, price_uom_qty, unit_price_ten_thousandths, line_total_cents, stock_uom, stock_quantity, tally, unit_cost_ten_thousandths, created_at, configuration_json]
       properties:
         id:
           type: string
@@ -920,6 +920,15 @@ components:
           type: integer
           format: int64
           description: The unit price per price_uom, times 10,000 (13725 is 1.3725).
+        configuration_json:
+          oneOf:
+            - $ref: "#/components/schemas/ConfiguredConfiguration"
+            - type: "null"
+          description: >-
+            A configured item's configuration: the choices the dealer made, in
+            the canonical form the configurator wrote. Null on an ordinary
+            product line. The line's price was computed from it and the
+            documents show it as a short description.
         line_total_cents:
           type: integer
           format: int64
@@ -1095,6 +1104,13 @@ components:
           type: integer
           format: int64
           minimum: 0
+        configuration_json:
+          $ref: "#/components/schemas/ConfiguredConfiguration"
+          description: >-
+            A configured item's configuration. A line that carries one is
+            priced by the server from the stored options, so the price is
+            not required on the wire for it and a price sent on it is read
+            and ignored.
         tally:
           $ref: "#/components/schemas/TallyRequest"
     QuoteTransitionRequest:

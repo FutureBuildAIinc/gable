@@ -116,6 +116,12 @@ func (m *mockProductRepo) ListProductsPaginated(_ context.Context, limit, offset
 	return m.products[offset:end], total, nil
 }
 
+// FindOrCreateNonStock is the configured item's catalog row; the fakes do
+// not stock one, so the answer is a fresh id and no row.
+func (mockProductRepo) FindOrCreateNonStock(context.Context, string, string, httpx.Price, httpx.Price) (uuid.UUID, error) {
+	return uuid.New(), nil
+}
+
 // testCatalog returns a realistic LBM product catalog for matching tests.
 func testCatalog() []product.Product {
 	return []product.Product{

@@ -277,8 +277,9 @@ func (s *Service) buildLines(ctx context.Context, d *Draft, orderID, customerID 
 	lines := make([]OrderLine, 0, len(d.Lines))
 	for i, pl := range d.Lines {
 		line := salesdoc.Line{
-			Description: pl.Description,
-			CreatedAt:   httpx.TimestampOf(s.now().UTC()),
+			Description:   pl.Description,
+			Configuration: pl.Configuration,
+			CreatedAt:     httpx.TimestampOf(s.now().UTC()),
 		}
 		if pl.ID != nil {
 			line.ID = *pl.ID
@@ -1813,6 +1814,9 @@ type QuoteSourceLine struct {
 	StockQuantity *httpx.Quantity
 	UnitCost      httpx.Price
 	Tally         *QuoteSourceTally
+	// Configuration is a configured item's configuration, copied as the
+	// quote stored it.
+	Configuration json.RawMessage
 }
 
 // QuoteSourceTally is one quote line's tally as the order copies it, the
@@ -2107,6 +2111,17 @@ func (s *Service) buildFromQuote(ctx context.Context, src *QuoteSource, branchID
 		line.UnitPrice = &price
 		line.PricedUnitPrice = &price
 		line.PriceSource = salesdoc.PriceSourceQuote
+		// A configured item's configuration rides from the quote to the
+		// order as the quote stored it.
+		line.Configuration = ql.Configuration
+		// A configured item is never served from the stock the dealer
+		// holds: it is made to the configuration, so its order line is a
+		// special order line and the convert raises the vendor purchase
+		// order for it. An ordinary stocked line stays served from stock
+		// and is never a special order line.
+		if len(ql.Configuration) > 0 {
+			line.IsSpecialOrder = true
+		}
 		lines = append(lines, OrderLine{Line: line, QuoteLineID: &quoteLineID})
 	}
 

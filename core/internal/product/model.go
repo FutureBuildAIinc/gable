@@ -135,6 +135,11 @@ type Product struct {
 	// setting in its statement), nil for a product with none.
 	ImageURL *string `json:"-"`
 
+	// IsNonStock marks a product the dealer never holds: a configured item
+	// (a door or a millwork piece the dealer configures and prices on the
+	// server). The mark is what keeps the row out of the stock reads.
+	IsNonStock bool `json:"-"`
+
 	CreatedAt httpx.Timestamp `json:"-"`
 	UpdatedAt httpx.Timestamp `json:"-"`
 }
@@ -169,6 +174,10 @@ type View struct {
 
 	LeadTimeDays    *int `json:"lead_time_days"`
 	ConsumerDurable bool `json:"consumer_durable"`
+
+	// IsNonStock marks a configured item: a row the dealer never holds.
+	// The desk reads it to tell a configured item from a stocked product.
+	IsNonStock bool `json:"is_non_stock"`
 
 	ReorderPoint httpx.Quantity `json:"reorder_point"`
 	ReorderQty   httpx.Quantity `json:"reorder_qty"`
@@ -248,7 +257,7 @@ func ViewOf(p *Product) View {
 		BoardThicknessIn: p.BoardThicknessIn, BoardWidthIn: p.BoardWidthIn,
 		BoardLengthFT: p.BoardLengthFT, RandomLength: p.RandomLength,
 		DensityLbPerCY: p.DensityLbPerCY, DensityVolumeState: p.DensityVolumeState,
-		Units: p.Units, ImageURL: p.ImageURL,
+		Units: p.Units, ImageURL: p.ImageURL, IsNonStock: p.IsNonStock,
 	}
 }
 

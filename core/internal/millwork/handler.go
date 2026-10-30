@@ -39,6 +39,8 @@ func (h *Handler) RegisterRoutes(mux apps.Router, roleGuard ...func(http.Handler
 	mux.HandleFunc("POST /api/v1/millwork/options", guard(h.handleCreateOption))
 	mux.HandleFunc("GET /api/v1/millwork/options", guard(h.handleListOptions))
 	mux.HandleFunc("GET /api/v1/millwork/options/{id}", guard(h.handleGetOption))
+	mux.HandleFunc("PUT /api/v1/millwork/options/{id}", guard(h.handleUpdateOption))
+	mux.HandleFunc("POST /api/v1/millwork/estimate", guard(h.handleEstimate))
 }
 
 func writeJSON(w http.ResponseWriter, status int, body any) {
@@ -190,4 +192,88 @@ func (h *Handler) handleCreateOption(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Location", "/api/v1/millwork/options/"+o.ID.String())
 	httpx.WriteRevisionETag(w, o.Revision)
 	writeJSON(w, http.StatusCreated, o)
+}
+
+// handleUpdateOption moves an option's money and its attributes, on the
+// revision the caller read (ADR 0001 section 11).
+func (h *Handler) handleUpdateOption(w http.ResponseWriter, r *http.Request) {
+	if err := noQuery(r); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	id, err := pathID(r)
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	var req Request
+	if err := httpx.DecodeJSON(r, &req); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	draft, err := req.Parse()
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	o, err := h.service.Update(r.Context(), id, draft,
+		Precondition{IfMatch: r.Header.Get("If-Match"), Revision: draft.Revision})
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	httpx.WriteRevisionETag(w, o.Revision)
+	writeJSON(w, http.StatusOK, o)
+}
+
+// EstimateRequest is the body of POST /api/v1/millwork/estimate: the
+// configuration, in the shape a configured item carries.
+type EstimateRequest struct {
+	ProductType string            `json:"product_type"`
+	Selections  map[string]string `json:"selections"`
+	Width       *int              `json:"width"`
+	Height      *int              `json:"height"`
+}
+
+// EstimateResponse is what the door costs: the server's price and cost, the
+// SKU and description of the configured item, its catalog row and the
+// breakdown that made the price. The client never sends a price; it reads
+// this one.
+type EstimateResponse = ConfiguredItem
+
+// handleEstimate prices a configuration from the stored options and finds or
+// creates the product row it becomes. The price is the server's: the client
+// sends the choices and reads the money.
+func (h *Handler) handleEstimate(w http.ResponseWriter, r *http.Request) {
+	if err := noQuery(r); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	var req EstimateRequest
+	if err := httpx.DecodeJSON(r, &req); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	if strings.TrimSpace(req.ProductType) == "" {
+		httpx.WriteError(w, r, httpx.BadRequest("the configuration names no product type",
+			httpx.FieldError{Field: "product_type", Message: "is required"}))
+		return
+	}
+	if len(req.Selections) == 0 {
+		httpx.WriteError(w, r, httpx.BadRequest("the configuration names no choice",
+			httpx.FieldError{Field: "selections", Message: "is required"}))
+		return
+	}
+	cfg := Configuration{
+		ProductType: req.ProductType,
+		Selections:  req.Selections,
+		Width:       req.Width,
+		Height:      req.Height,
+	}
+	resp, err := h.service.BuildConfigured(r.Context(), cfg.ProductType, cfg.Selections, cfg.Width, cfg.Height)
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, resp)
 }

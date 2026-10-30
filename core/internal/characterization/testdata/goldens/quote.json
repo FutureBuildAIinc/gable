@@ -39,6 +39,7 @@
         "job_id": null,
         "lines": [
           {
+            "configuration_json": null,
             "created_at": "<ts+0d>",
             "customer_note": null,
             "description": "2x4x8 SPF Premium",
@@ -101,6 +102,7 @@
         "job_id": null,
         "lines": [
           {
+            "configuration_json": null,
             "created_at": "<ts+0d>",
             "customer_note": null,
             "description": "2x4x8 SPF Premium",
@@ -434,6 +436,7 @@
         "job_id": null,
         "lines": [
           {
+            "configuration_json": null,
             "created_at": "<ts+0d>",
             "customer_note": null,
             "description": "2x4x8 SPF Premium",
@@ -581,6 +584,7 @@
         "job_id": null,
         "lines": [
           {
+            "configuration_json": null,
             "created_at": "<ts+0d>",
             "customer_note": null,
             "description": "2x4x8 SPF Premium",
@@ -652,6 +656,7 @@
           {
             "charge_code": null,
             "charge_code_id": null,
+            "configuration_json": null,
             "created_at": "<ts+0d>",
             "description": "2x4x8 SPF Premium",
             "discount_cents": null,
@@ -823,6 +828,7 @@
         "job_id": null,
         "lines": [
           {
+            "configuration_json": null,
             "created_at": "<ts+0d>",
             "customer_note": null,
             "description": "2x4x8 SPF Premium",
@@ -891,6 +897,7 @@
         "job_id": null,
         "lines": [
           {
+            "configuration_json": null,
             "created_at": "<ts+0d>",
             "customer_note": null,
             "description": "2x4x8 SPF Premium",
@@ -968,6 +975,7 @@
         "job_id": null,
         "lines": [
           {
+            "configuration_json": null,
             "created_at": "<ts+0d>",
             "customer_note": null,
             "description": "2x4x8 SPF Premium",
@@ -1036,6 +1044,7 @@
         "job_id": null,
         "lines": [
           {
+            "configuration_json": null,
             "created_at": "<ts+0d>",
             "customer_note": null,
             "description": "2x4x8 SPF Premium",
@@ -1104,6 +1113,7 @@
         "job_id": null,
         "lines": [
           {
+            "configuration_json": null,
             "created_at": "<ts+0d>",
             "customer_note": null,
             "description": "2x4x8 SPF Premium",
@@ -1181,6 +1191,7 @@
         "job_id": null,
         "lines": [
           {
+            "configuration_json": null,
             "created_at": "<ts+0d>",
             "customer_note": null,
             "description": "2x4x8 SPF Premium",
@@ -1249,6 +1260,7 @@
         "job_id": null,
         "lines": [
           {
+            "configuration_json": null,
             "created_at": "<ts+0d>",
             "customer_note": null,
             "description": "2x4x8 SPF Premium",
@@ -1317,6 +1329,7 @@
         "job_id": null,
         "lines": [
           {
+            "configuration_json": null,
             "created_at": "<ts+0d>",
             "customer_note": null,
             "description": "2x4x8 SPF Premium",
@@ -1394,6 +1407,7 @@
         "job_id": null,
         "lines": [
           {
+            "configuration_json": null,
             "created_at": "<ts+0d>",
             "customer_note": null,
             "description": "2x4x8 SPF Premium",
@@ -1462,6 +1476,7 @@
         "job_id": null,
         "lines": [
           {
+            "configuration_json": null,
             "created_at": "<ts+0d>",
             "customer_note": null,
             "description": "2x4x8 SPF Premium",
@@ -1530,6 +1545,7 @@
         "job_id": null,
         "lines": [
           {
+            "configuration_json": null,
             "created_at": "<ts+0d>",
             "customer_note": null,
             "description": "2x4x8 SPF Premium",
@@ -1607,6 +1623,7 @@
         "job_id": null,
         "lines": [
           {
+            "configuration_json": null,
             "created_at": "<ts+0d>",
             "customer_note": null,
             "description": "2x4x8 SPF Premium",
@@ -1675,6 +1692,7 @@
         "job_id": null,
         "lines": [
           {
+            "configuration_json": null,
             "created_at": "<ts+0d>",
             "customer_note": null,
             "description": "2x4x8 SPF Premium",
@@ -1743,6 +1761,7 @@
         "job_id": null,
         "lines": [
           {
+            "configuration_json": null,
             "created_at": "<ts+0d>",
             "customer_note": null,
             "description": "2x4x8 SPF Premium",
@@ -1820,6 +1839,7 @@
         "job_id": null,
         "lines": [
           {
+            "configuration_json": null,
             "created_at": "<ts+0d>",
             "customer_note": null,
             "description": "2x4x8 SPF Premium",
@@ -1888,6 +1908,7 @@
         "job_id": null,
         "lines": [
           {
+            "configuration_json": null,
             "created_at": "<ts+0d>",
             "customer_note": null,
             "description": "2x4x8 SPF Premium",
@@ -1956,6 +1977,7 @@
         "job_id": null,
         "lines": [
           {
+            "configuration_json": null,
             "created_at": "<ts+0d>",
             "customer_note": null,
             "description": "2x4x8 SPF Premium",

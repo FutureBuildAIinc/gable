@@ -99,6 +99,12 @@ func (f *fakeProductRepo) ProductUnitInUse(_ context.Context, _ uuid.UUID, _ []s
 	return false, "", nil
 }
 
+// FindOrCreateNonStock is the configured item's catalog row; the fakes do
+// not stock one, so the answer is a fresh id and no row.
+func (fakeProductRepo) FindOrCreateNonStock(context.Context, string, string, httpx.Price, httpx.Price) (uuid.UUID, error) {
+	return uuid.New(), nil
+}
+
 // fakeVendorRepo is an in-memory vendor.Repository.
 type fakeVendorRepo struct {
 	byName map[string]*vendor.Vendor

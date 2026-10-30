@@ -1547,6 +1547,15 @@ func Run() {
 		VALUES ('Do It Best', 'DIB-111111', 'GABLE-987654', 'DIB', 'GAB', 'AS2')`)
 	fmt.Println("Seed: EDI Trading Partners")
 
+	// =========================================================================
+	// 24. THE CONFIGURED ITEM'S OPTION CATALOG (QE)
+	//    The options a configured item is priced from: the door's and the
+	//    lumber's categories, each with the base price and the adjustments
+	//    the server sums. The rows live in qe.go, the QE section's file, and
+	//    this is the one call that writes them.
+	// =========================================================================
+	seedQE(db)
+
 	dropPlaceholderBranch(db)
 
 	// The seed finished. The marker is written here, after the last row, so a

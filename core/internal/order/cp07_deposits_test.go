@@ -1277,6 +1277,18 @@ func TestCP07_Migration147UpgradeFromV1AndDown(t *testing.T) {
 		t.Fatalf("after 147 re-apply: column=%d index=%d, want 1 and 1", hasCol(), hasIdx())
 	}
 
+	// The migrations after 147 are applied too, so the schema the flow below
+	// runs against is the current one: the current code writes the columns
+	// the later migrations add (migration 162 gives the order line its
+	// configuration), and a half migrated schema would refuse the write.
+	for _, file := range all {
+		base := filepath.Base(file)
+		if strings.HasSuffix(base, "_down.sql") || base < "148_" {
+			continue
+		}
+		apply(t, conn, file)
+	}
+
 	// Drive the counter deposit flow against the upgraded database.
 	upgradedDB, err := database.Connect(conn.Config().ConnString())
 	if err != nil {

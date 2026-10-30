@@ -36,6 +36,7 @@
           {
             "charge_code": null,
             "charge_code_id": null,
+            "configuration_json": null,
             "created_at": "<ts+0d>",
             "description": "2x4x8 SPF Premium",
             "discount_cents": null,
@@ -143,6 +144,7 @@
           {
             "charge_code": null,
             "charge_code_id": null,
+            "configuration_json": null,
             "created_at": "<ts+0d>",
             "description": "2x4x8 SPF Premium",
             "discount_cents": null,
@@ -253,6 +255,7 @@
           {
             "charge_code": null,
             "charge_code_id": null,
+            "configuration_json": null,
             "created_at": "<ts+0d>",
             "description": "2x4x8 SPF Premium",
             "discount_cents": null,
@@ -569,6 +572,7 @@
           {
             "charge_code": null,
             "charge_code_id": null,
+            "configuration_json": null,
             "cost_cents": 2100,
             "created_at": "<ts+0d>",
             "description": "2x4x8 SPF Premium",
@@ -874,6 +878,7 @@
           {
             "charge_code": "ADJUST",
             "charge_code_id": "<id-26>",
+            "configuration_json": null,
             "cost_cents": 0,
             "created_at": "<ts+0d>",
             "description": "Price adjustment",
@@ -966,6 +971,7 @@
           {
             "charge_code": "ADJUST",
             "charge_code_id": "<id-26>",
+            "configuration_json": null,
             "cost_cents": 0,
             "created_at": "<ts+0d>",
             "description": "Price adjustment",
@@ -1166,6 +1172,7 @@
           {
             "charge_code": "ADJUST",
             "charge_code_id": "<id-26>",
+            "configuration_json": null,
             "cost_cents": 0,
             "created_at": "<ts+0d>",
             "description": "Price adjustment",
@@ -1264,6 +1271,7 @@
           {
             "charge_code": "ADJUST",
             "charge_code_id": "<id-26>",
+            "configuration_json": null,
             "cost_cents": 0,
             "created_at": "<ts+0d>",
             "description": "Price adjustment",
@@ -1535,6 +1543,7 @@
           {
             "charge_code": "ADJUST",
             "charge_code_id": "<id-26>",
+            "configuration_json": null,
             "cost_cents": 0,
             "created_at": "<ts+0d>",
             "description": "Price adjustment",

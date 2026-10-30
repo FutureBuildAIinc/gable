@@ -197,7 +197,7 @@ type poCall struct {
 	branch    uuid.UUID
 }
 
-func (f *fakePO) CreatePOFromSpecialOrderLine(_ context.Context, productID *uuid.UUID, _ *uuid.UUID, qty, unitCost float64, lineID uuid.UUID, branch uuid.UUID) error {
+func (f *fakePO) CreatePOFromSpecialOrderLine(_ context.Context, productID *uuid.UUID, _ *uuid.UUID, qty, unitCost float64, lineID uuid.UUID, branch uuid.UUID, description string) error {
 	f.calls = append(f.calls, poCall{productID, qty, unitCost, lineID, branch})
 	return f.err
 }

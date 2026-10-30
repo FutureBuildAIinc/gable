@@ -8,6 +8,7 @@
 package salesdoc
 
 import (
+	"encoding/json"
 	"math/big"
 	"strings"
 
@@ -185,6 +186,12 @@ type Line struct {
 	IsSpecialOrder   bool         `json:"is_special_order"`
 	VendorID         *uuid.UUID   `json:"vendor_id"`
 	SpecialOrderCost *httpx.Price `json:"special_order_unit_cost_ten_thousandths"`
+
+	// Configuration is a configured item's configuration: the choices the
+	// dealer made, in the canonical form the configurator wrote. It rides
+	// the line from the quote to the order to the invoice, so every
+	// document shows what the item is. Null on an ordinary product line.
+	Configuration json.RawMessage `json:"configuration_json"`
 
 	// The weight block of a weighed line (CP-19, ruling D8): all null on a
 	// line that was not weighed. The weights are pounds at the wire's scale;

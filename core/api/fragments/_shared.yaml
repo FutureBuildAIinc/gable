@@ -548,3 +548,27 @@ components:
             last_checked_at:
               type: [string, "null"]
               format: date-time
+    ConfiguredConfiguration:
+      type: object
+      required: [selections]
+      description: >-
+        A configured item's configuration: the choices the dealer made, in the
+        canonical form the server wrote it. The category names are the option
+        catalog's own (snake_case); the values are the option names the
+        catalog stores. A configured line carries this so the server can price
+        it again and the documents can show it as a short description.
+      properties:
+        product_type:
+          type: string
+          description: The product type the configuration is for (Door, Lumber).
+        selections:
+          type: object
+          description: The chosen option for each attribute category.
+          additionalProperties:
+            type: string
+        width:
+          type: integer
+          description: The door's width in inches, when the configuration carries one.
+        height:
+          type: integer
+          description: The door's height in inches, when the configuration carries one.

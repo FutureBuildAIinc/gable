@@ -26,6 +26,7 @@ function product(overrides: Record<string, unknown> = {}) {
     sku: 'LUM-2X4-08',
     description: '2x4x8 SPF Premium',
     stock_uom: 'PCS',
+    is_non_stock: false,
     base_price_ten_thousandths: 79900,
     average_unit_cost_ten_thousandths: 50000,
     target_margin: 30,

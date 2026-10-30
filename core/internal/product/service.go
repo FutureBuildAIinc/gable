@@ -138,6 +138,23 @@ func (s *Service) WithVendorService(v *vendor.Service) *Service {
 	return s
 }
 
+// FindOrCreateNonStock finds the product row a configured item becomes, or
+// creates it. It is the seam the configurator reaches the product catalog
+// through: a configured item is a priced catalog row the dealer never holds,
+// and its SKU is the deterministic name of its configuration, so the same
+// configuration always lands on the same row.
+func (s *Service) FindOrCreateNonStock(ctx context.Context, sku, description string, price, cost httpx.Price) (uuid.UUID, error) {
+	if strings.TrimSpace(sku) == "" {
+		return uuid.Nil, httpx.BadRequest("the configured item needs a SKU",
+			httpx.FieldError{Field: "sku", Message: "is required"})
+	}
+	if strings.TrimSpace(description) == "" {
+		return uuid.Nil, httpx.BadRequest("the configured item needs a description",
+			httpx.FieldError{Field: "description", Message: "is required"})
+	}
+	return s.repo.FindOrCreateNonStock(ctx, sku, description, price, cost)
+}
+
 // CreateProduct creates a new product. If a vendor name is supplied without a
 // vendor_id and the vendor service is wired, the vendor row is upserted and
 // the resulting UUID is stamped onto the product so the two columns can never

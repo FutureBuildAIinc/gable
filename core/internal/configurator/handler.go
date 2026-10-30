@@ -96,7 +96,6 @@ func parseSelectionsBody(r *http.Request, productType bool) (Selections, string,
 	}
 	return req.Selections, pt, nil
 }
-
 func (h *Handler) handleValidate(w http.ResponseWriter, r *http.Request) {
 	if err := noQuery(r); err != nil {
 		httpx.WriteError(w, r, err)
@@ -120,12 +119,35 @@ func (h *Handler) handleBuildSKU(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, r, err)
 		return
 	}
-	selections, productType, err := parseSelectionsBody(r, true)
-	if err != nil {
+	var req struct {
+		Selections  map[string]string `json:"selections"`
+		ProductType *string           `json:"product_type"`
+		Width       *int              `json:"width"`
+		Height      *int              `json:"height"`
+	}
+	if err := httpx.DecodeJSON(r, &req); err != nil {
 		httpx.WriteError(w, r, err)
 		return
 	}
-	resp, err := h.service.BuildSKU(r.Context(), productType, selections)
+	v := &httpx.Validator{}
+	v.Check(len(req.Selections) > 0, "selections", "is required")
+	v.Required("product_type", deref(req.ProductType))
+	productType := ""
+	if req.ProductType != nil {
+		productType = strings.TrimSpace(*req.ProductType)
+		v.Check(productType != "", "product_type", "is required")
+	}
+	if req.Width != nil {
+		v.Check(*req.Width > 0, "width", "must be a positive number of inches")
+	}
+	if req.Height != nil {
+		v.Check(*req.Height > 0, "height", "must be a positive number of inches")
+	}
+	if err := v.Err(); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	resp, err := h.service.BuildSKU(r.Context(), productType, req.Selections, req.Width, req.Height)
 	if err != nil {
 		httpx.WriteError(w, r, err)
 		return

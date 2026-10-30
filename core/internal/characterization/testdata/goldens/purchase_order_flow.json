@@ -49,7 +49,7 @@
       "content_type": "application/json",
       "body": {
         "dry_run": true,
-        "products_skipped": 2,
+        "products_skipped": 3,
         "products_updated": 68,
         "proposals": [
           {
@@ -683,7 +683,7 @@
       "content_type": "application/json",
       "body": {
         "dry_run": true,
-        "products_skipped": 2,
+        "products_skipped": 3,
         "products_updated": 68,
         "proposals": [
           {
@@ -1314,7 +1314,7 @@
       "content_type": "application/json",
       "body": {
         "dry_run": true,
-        "products_skipped": 2,
+        "products_skipped": 3,
         "products_updated": 68,
         "proposals": [
           {

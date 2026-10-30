@@ -62,6 +62,10 @@ type LineRequest struct {
 	UnitPriceTenThousandths json.RawMessage `json:"unit_price_ten_thousandths"`
 	Tally                   *TallyRequest   `json:"tally"`
 	Tint                    json.RawMessage `json:"tint"`
+	// Configuration is a configured item's configuration. A line that
+	// carries one is priced by the server from the stored options, so the
+	// price on the wire is not the client's to send.
+	Configuration json.RawMessage `json:"configuration_json"`
 }
 
 // TallyRequest is the tally a line carries (ADR 0006 section 4.3): the
@@ -115,6 +119,9 @@ type DraftLine struct {
 	PriceUOMQty  httpx.Quantity
 	UnitPrice    httpx.Price
 	Tally        *DraftTally
+	// Configuration is the configured item's configuration, when the line
+	// carries one.
+	Configuration json.RawMessage
 }
 
 // DraftTally is the tally of a validated line: the rows the client sent,
@@ -382,7 +389,14 @@ func (l *LineRequest) parse(v *httpx.Validator, path string) (DraftLine, bool) {
 		}
 	}
 
-	if price, ok := v.Int(path+".unit_price_ten_thousandths", l.UnitPriceTenThousandths, true); ok {
+	// A configured item's price is the server's: the service prices it from
+	// the stored options and the line's configuration. The price is
+	// therefore not required on the wire for such a line, and a price sent
+	// on one is read for its shape and then ignored.
+	if !isAbsentRaw(l.Configuration) {
+		d.Configuration = l.Configuration
+	}
+	if price, ok := v.Int(path+".unit_price_ten_thousandths", l.UnitPriceTenThousandths, d.Configuration == nil); ok {
 		httpx.CheckLineSign(v, path, d.Quantity, httpx.Price(price), false)
 		d.UnitPrice = httpx.Price(price)
 	}

@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/gablelbm/gable/internal/millwork"
+	"github.com/gablelbm/gable/internal/product"
 	"github.com/gablelbm/gable/internal/testutil"
 	"github.com/gablelbm/gable/pkg/audit"
 	"github.com/gablelbm/gable/pkg/database"
@@ -42,10 +43,13 @@ func newFixture(t *testing.T) *fixture {
 	t.Setenv("AUTH_MODE", "dev")
 	db := testutil.RequireDB(t)
 	f := &fixture{t: t, db: db, prefix: "MW-" + uuid.NewString()[:8]}
+	// The product catalog is behind the module, the way serve wires it: a
+	// configured item becomes a product row of its own.
 	svc := millwork.NewService(millwork.NewRepository(db)).
 		WithOutbox(outbox.NewWriter(db, "")).
 		WithTxRunner(db).
-		WithAudit(audit.NewLogger(db))
+		WithAudit(audit.NewLogger(db)).
+		WithProducts(product.NewService(product.NewRepository(db)))
 	mux := http.NewServeMux()
 	millwork.NewHandler(svc).RegisterRoutes(mux)
 	f.srv = httptest.NewServer(middleware.Idempotency(db)(mux))
@@ -55,6 +59,7 @@ func newFixture(t *testing.T) *fixture {
 		_, _ = db.Pool.Exec(ctx, `DELETE FROM events_outbox WHERE entity_type = 'millwork_option' AND entity_id IN (SELECT id FROM millwork_options WHERE category LIKE $1)`, f.prefix+"%")
 		_, _ = db.Pool.Exec(ctx, `DELETE FROM audit_log WHERE entity_type = 'millwork_option' AND entity_id IN (SELECT id FROM millwork_options WHERE category LIKE $1)`, f.prefix+"%")
 		_, _ = db.Pool.Exec(ctx, `DELETE FROM millwork_options WHERE category LIKE $1`, f.prefix+"%")
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM products WHERE sku LIKE 'NS-DR-%' AND description LIKE $1`, f.prefix+"%")
 	})
 	return f
 }
@@ -254,6 +259,89 @@ func TestGet_Errors(t *testing.T) {
 }
 
 // The create writes its audit row and its event, in one transaction.
+// The estimate route on the wire: the price is the stored options' sum, in
+// the wire's integer units, and the answer carries the SKU, the description
+// and the configuration it priced.
+func TestEstimate_PricesFromTheStoredOptions(t *testing.T) {
+	testutil.LockOutboxTables(t) // this test writes events_outbox rows
+	f := newFixture(t)
+	door := f.create(t, `{"category":"`+f.prefix+`-door_type","name":"Panel Door","base_price_cents":25000,"base_cost_cents":15000,"price_adjustment_cents":0,"cost_adjustment_cents":0}`, nil)
+	if door.status != http.StatusCreated {
+		t.Fatalf("create the door type = %d %s", door.status, door.raw)
+	}
+	material := f.create(t, `{"category":"`+f.prefix+`-material","name":"Mahogany","base_price_cents":0,"base_cost_cents":0,"price_adjustment_cents":15000,"cost_adjustment_cents":8000}`, nil)
+	if material.status != http.StatusCreated {
+		t.Fatalf("create the material = %d %s", material.status, material.raw)
+	}
+
+	res := f.do(t, http.MethodPost, "/api/v1/millwork/estimate",
+		`{"product_type":"Door","selections":{"`+f.prefix+`-door_type":"Panel Door","`+f.prefix+`-material":"Mahogany"},"width":36,"height":80}`, nil)
+	if res.status != http.StatusOK {
+		t.Fatalf("estimate = %d %s", res.status, res.raw)
+	}
+	if got := res.body["unit_price_ten_thousandths"]; got != float64((25000+15000)*100) {
+		t.Errorf("unit_price_ten_thousandths = %v, want %d (the stored options' sum)", got, (25000+15000)*100)
+	}
+	if got := res.body["unit_cost_ten_thousandths"]; got != float64((15000+8000)*100) {
+		t.Errorf("unit_cost_ten_thousandths = %v, want %d (the stored options' sum)", got, (15000+8000)*100)
+	}
+	if sku, _ := res.body["sku"].(string); !strings.HasPrefix(sku, "NS-DR-") {
+		t.Errorf("sku = %q, want the NS- form", sku)
+	}
+	if desc, _ := res.body["description"].(string); !strings.Contains(desc, "Panel Door") {
+		t.Errorf("description = %q, want it to name the choices", desc)
+	}
+	if res.body["configuration_json"] == nil {
+		t.Error("the estimate answered no configuration")
+	}
+}
+
+// The option update on the wire: the money the server prices from is the
+// dealer's to set, the write is guarded by the revision, and the answer
+// carries the new revision.
+func TestUpdate_SetsTheMoneyOnItsRevision(t *testing.T) {
+	testutil.LockOutboxTables(t) // this test writes events_outbox rows
+	f := newFixture(t)
+	created := f.create(t, `{"category":"`+f.prefix+`-door_type","name":"Panel Door","base_price_cents":25000,"base_cost_cents":15000,"price_adjustment_cents":0,"cost_adjustment_cents":0}`, nil)
+	if created.status != http.StatusCreated {
+		t.Fatalf("create = %d %s", created.status, created.raw)
+	}
+	id := created.body["id"].(string)
+
+	res := f.do(t, http.MethodPut, "/api/v1/millwork/options/"+id,
+		`{"category":"`+f.prefix+`-door_type","name":"Panel Door","base_price_cents":26000,"base_cost_cents":15000,"price_adjustment_cents":0,"cost_adjustment_cents":0,"revision":1}`,
+		map[string]string{"If-Match": `"1"`})
+	if res.status != http.StatusOK {
+		t.Fatalf("update = %d %s", res.status, res.raw)
+	}
+	if res.body["base_price_cents"] != float64(26000) {
+		t.Errorf("base_price_cents = %v, want 26000", res.body["base_price_cents"])
+	}
+	if res.body["revision"] != float64(2) {
+		t.Errorf("revision = %v, want 2", res.body["revision"])
+	}
+	if etag := res.header.Get("ETag"); etag != `"2"` {
+		t.Errorf("ETag = %q, want \"2\"", etag)
+	}
+
+	// A stale revision is refused.
+	res = f.do(t, http.MethodPut, "/api/v1/millwork/options/"+id,
+		`{"category":"`+f.prefix+`-door_type","name":"Panel Door","base_price_cents":27000,"base_cost_cents":15000,"price_adjustment_cents":0,"cost_adjustment_cents":0,"revision":1}`,
+		map[string]string{"If-Match": `"1"`})
+	if res.status != http.StatusConflict {
+		t.Errorf("a stale revision = %d, want 409", res.status)
+	}
+
+	// The read shows the money the dealer set.
+	res = f.do(t, http.MethodGet, "/api/v1/millwork/options/"+id, "", nil)
+	if res.status != http.StatusOK {
+		t.Fatalf("get = %d %s", res.status, res.raw)
+	}
+	if res.body["base_price_cents"] != float64(26000) {
+		t.Errorf("the read base_price_cents = %v, want 26000", res.body["base_price_cents"])
+	}
+}
+
 func TestCreate_AuditRowAndEvent(t *testing.T) {
 	testutil.LockOutboxTables(t) // this test writes events_outbox rows
 	f := newFixture(t)
@@ -317,6 +405,7 @@ func TestTransactionProofs(t *testing.T) {
 		_, _ = db.Pool.Exec(ctx, `DELETE FROM events_outbox WHERE entity_type = 'millwork_option' AND entity_id IN (SELECT id FROM millwork_options WHERE category LIKE $1)`, f.prefix+"%")
 		_, _ = db.Pool.Exec(ctx, `DELETE FROM audit_log WHERE entity_type = 'millwork_option' AND entity_id IN (SELECT id FROM millwork_options WHERE category LIKE $1)`, f.prefix+"%")
 		_, _ = db.Pool.Exec(ctx, `DELETE FROM millwork_options WHERE category LIKE $1`, f.prefix+"%")
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM products WHERE sku LIKE 'NS-DR-%' AND description LIKE $1`, f.prefix+"%")
 	})
 	svc := millwork.NewService(millwork.NewRepository(db)).
 		WithOutbox(outbox.NewWriter(db, "")).WithTxRunner(db).WithAudit(audit.NewLogger(db))

@@ -1141,6 +1141,7 @@
         "job_id": null,
         "lines": [
           {
+            "configuration_json": null,
             "created_at": "<ts+0d>",
             "customer_note": "catalog line",
             "description": "2x4x8 SPF Premium",
@@ -1161,6 +1162,7 @@
             "uom_qty": "1"
           },
           {
+            "configuration_json": null,
             "created_at": "<ts+0d>",
             "customer_note": null,
             "description": "Custom cedar bracket",
@@ -1229,6 +1231,7 @@
         "job_id": null,
         "lines": [
           {
+            "configuration_json": null,
             "created_at": "<ts+0d>",
             "customer_note": null,
             "description": "2x4x8 SPF Premium",

@@ -14,14 +14,23 @@ import (
 // NUMERIC(10,2) column can hold.
 const maxPriceAdjustment = 99_999_999_999
 
-// Request is the body of POST /millwork/options. Fields decode as strings
-// and raw JSON, and Parse turns them into a Draft, collecting every problem
-// into one 400 (ADR 0001 section 4).
+// maxBasePrice bounds the base price and the base cost to what the cents
+// field and the BIGINT columns can hold.
+const maxBasePrice = 9_000_000_000_000
+
+// Request is the body of POST /millwork/options and PUT
+// /millwork/options/{id}. Fields decode as strings and raw JSON, and Parse
+// turns them into a Draft, collecting every problem into one 400 (ADR 0001
+// section 4).
 type Request struct {
 	Category             *string         `json:"category"`
 	Name                 *string         `json:"name"`
 	PriceAdjustmentCents json.RawMessage `json:"price_adjustment_cents"`
+	BasePriceCents       json.RawMessage `json:"base_price_cents"`
+	BaseCostCents        json.RawMessage `json:"base_cost_cents"`
+	CostAdjustmentCents  json.RawMessage `json:"cost_adjustment_cents"`
 	Attributes           json.RawMessage `json:"attributes"`
+	Revision             json.RawMessage `json:"revision"`
 }
 
 // Draft is a validated request.
@@ -29,7 +38,11 @@ type Draft struct {
 	Category             string
 	Name                 string
 	PriceAdjustmentCents int64
+	BasePriceCents       int64
+	BaseCostCents        int64
+	CostAdjustmentCents  int64
 	Attributes           json.RawMessage
+	Revision             *int64
 }
 
 // Parse validates the request in one pass.
@@ -55,8 +68,28 @@ func (req *Request) Parse() (*Draft, error) {
 			"must be between -99999999999 and 99999999999 cents")
 		d.PriceAdjustmentCents = n
 	}
+	if n, ok := v.Int("base_price_cents", req.BasePriceCents, false); ok {
+		v.Check(n >= 0 && n <= maxBasePrice, "base_price_cents",
+			"must be between 0 and 9000000000000 cents")
+		d.BasePriceCents = n
+	}
+	if n, ok := v.Int("base_cost_cents", req.BaseCostCents, false); ok {
+		v.Check(n >= 0 && n <= maxBasePrice, "base_cost_cents",
+			"must be between 0 and 9000000000000 cents")
+		d.BaseCostCents = n
+	}
+	if n, ok := v.Int("cost_adjustment_cents", req.CostAdjustmentCents, false); ok {
+		v.Check(n >= -maxPriceAdjustment && n <= maxPriceAdjustment, "cost_adjustment_cents",
+			"must be between -99999999999 and 99999999999 cents")
+		d.CostAdjustmentCents = n
+	}
 	if !isAbsent(req.Attributes) {
 		d.Attributes = req.Attributes
+	}
+	if !isAbsent(req.Revision) {
+		if n, ok := v.Int("revision", req.Revision, true); ok {
+			d.Revision = &n
+		}
 	}
 	if err := v.Err(); err != nil {
 		return nil, err

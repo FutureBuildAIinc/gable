@@ -185,6 +185,7 @@
           {
             "charge_code": null,
             "charge_code_id": null,
+            "configuration_json": null,
             "created_at": "<ts+0d>",
             "description": "2x4x8 SPF Premium",
             "discount_cents": null,

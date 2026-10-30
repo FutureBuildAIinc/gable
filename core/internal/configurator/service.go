@@ -7,8 +7,8 @@ import (
 	"context"
 	"fmt"
 	"sort"
-	"strings"
 
+	"github.com/gablelbm/gable/internal/millwork"
 	"github.com/gablelbm/gable/internal/platform/httpx"
 )
 
@@ -16,12 +16,31 @@ import (
 // carries: a map from attribute type to the chosen value.
 type Selections map[string]string
 
+// ConfiguredBuilder is the seam to the configured item. The millwork
+// service satisfies it: it prices a configuration from the stored options,
+// builds its deterministic SKU, finds or creates the catalog row it becomes
+// and answers the canonical configuration it did all that from.
+//
+// The seam exists so the configurator owns no pricing of its own. The
+// configurator knows the rule matrix (which choices go together); the
+// millwork catalog knows the money (what the choices cost).
+type ConfiguredBuilder interface {
+	BuildConfigured(ctx context.Context, productType string, selections map[string]string, width, height *int) (*millwork.ConfiguredItem, error)
+}
+
 type Service struct {
-	repo *Repository
+	repo    *Repository
+	builder ConfiguredBuilder
 }
 
 func NewService(repo *Repository) *Service {
 	return &Service{repo: repo}
+}
+
+// WithConfiguredBuilder wires the configured item's pricing and catalog row.
+func (s *Service) WithConfiguredBuilder(b ConfiguredBuilder) *Service {
+	s.builder = b
+	return s
 }
 
 // AllRules returns the complete rule set for the frontend to display.
@@ -127,9 +146,15 @@ func (s *Service) GetAvailableOptions(ctx context.Context, attributeType string,
 	return out, nil
 }
 
-// BuildSKU generates a non-stock SKU from validated selections. Conflicting
-// selections are a 400 whose details carry one blocker per conflict.
-func (s *Service) BuildSKU(ctx context.Context, productType string, selections Selections) (*BuildSKUResponse, error) {
+// BuildSKU prices a configuration from the stored options, builds its
+// deterministic non-stock SKU and finds or creates the catalog row it
+// becomes. Conflicting selections are a 400 whose details carry one blocker
+// per conflict.
+//
+// The money is the server's: the client sends the choices and reads the
+// price. A configured item's price is computed from the option catalog, in
+// integer arithmetic, and no client-sent price is ever taken.
+func (s *Service) BuildSKU(ctx context.Context, productType string, selections Selections, width, height *int) (*BuildSKUResponse, error) {
 	valResp, err := s.ValidateConfig(ctx, selections)
 	if err != nil {
 		return nil, err
@@ -143,39 +168,22 @@ func (s *Service) BuildSKU(ctx context.Context, productType string, selections S
 			Message: fmt.Sprintf("cannot build a SKU: the selections have %d conflict(s)", len(valResp.Conflicts)),
 			Details: blockers}
 	}
-
-	parts := []string{"NS"} // Non-Stock prefix
-	typeAbbrev := map[string]string{
-		"Lumber": "LBR",
-		"Door":   "DR",
-		"Trim":   "TRM",
-		"Panel":  "PNL",
+	if s.builder == nil {
+		return nil, httpx.BadRequest("the configured item cannot be priced",
+			httpx.FieldError{Field: "product_type", Message: "the option catalog is not wired"})
 	}
-	if abbr, ok := typeAbbrev[productType]; ok {
-		parts = append(parts, abbr)
-	} else {
-		pt := strings.ToUpper(productType)
-		if len(pt) > 3 {
-			pt = pt[:3]
-		}
-		parts = append(parts, pt)
+	item, err := s.builder.BuildConfigured(ctx, productType, selections, width, height)
+	if err != nil {
+		return nil, err
 	}
-
-	order := []string{"Species", "Grade", "Treatment", "Dimensions"}
-	for _, key := range order {
-		if val, ok := selections[key]; ok && val != "" && val != "None" {
-			parts = append(parts, strings.ToUpper(strings.ReplaceAll(val, " ", "-")))
-		}
-	}
-	sku := strings.Join(parts, "-")
-
-	descParts := []string{productType}
-	for _, key := range order {
-		if val, ok := selections[key]; ok && val != "" && val != "None" {
-			descParts = append(descParts, val)
-		}
-	}
-	return &BuildSKUResponse{SKU: sku, Description: strings.Join(descParts, " ")}, nil
+	return &BuildSKUResponse{
+		SKU:           item.SKU,
+		Description:   item.Description,
+		ProductID:     item.ProductID,
+		UnitPrice:     item.UnitPrice,
+		UnitCost:      item.UnitCost,
+		Configuration: item.Configuration,
+	}, nil
 }
 
 // staticOptions returns the defaults when no constraint applies.

@@ -15,11 +15,12 @@ import { OrderService } from '../../services/OrderService.ts';
 import { CustomerService } from '../../services/CustomerService.ts';
 import { InvoiceService } from '../../services/InvoiceService.ts';
 import { SalesTeamService } from '../../services/SalesTeamService.ts';
-import { type Order, type OrderStatus, formatOrderStatus, getStatusColor } from '../../types/order.ts';
+import { type Order, type OrderStatus, type CreateOrderLineRequest, formatOrderStatus, getStatusColor } from '../../types/order.ts';
 import type { SalesPerson } from '../../types/salesteam.ts';
 import type { Alert } from '../../types/customer.ts';
 import { Check, Printer, User, DollarSign, Mail, Phone, XCircle, LockOpen, Wallet } from 'lucide';
 import { formatCents, formatPrice4 } from '../../lib/utils.ts';
+import { ConfiguredItemHandoff } from '../../lib/configured-item.ts';
 
 
 @customElement('gable-order-detail')
@@ -59,6 +60,7 @@ export class GableOrderDetail extends LitElement {
             this.order = data;
             void this.loadAlerts(data.customer_id);
             this.loadInvoiceNumbers(data.id, data.invoice_ids);
+            await this.takePendingItem(data);
             if (data.salesperson_id) {
                 try {
                     const sp = await SalesTeamService.getSalesPerson(data.salesperson_id);
@@ -74,6 +76,57 @@ export class GableOrderDetail extends LitElement {
         } finally {
             this.loading = false;
         }
+    }
+
+    /**
+     * A configured item the configurator handed over lands on the draft order
+     * the dealer picked: the line carries the server's price and the
+     * configuration, and the order is saved with it.
+     */
+    private async takePendingItem(order: Order) {
+        const pending = ConfiguredItemHandoff.peek();
+        if (!pending || order.status !== 'draft') return;
+        ConfiguredItemHandoff.take();
+        const lines = order.lines.map((l) => this.toCreateLine(l));
+        lines.push({
+            product_id: pending.product_id,
+            sku: pending.sku,
+            description: pending.description,
+            quantity: '1',
+            uom: 'EA',
+            unit_price_ten_thousandths: pending.unit_price_ten_thousandths,
+            configuration_json: pending.configuration_json,
+        });
+        try {
+            this.order = await OrderService.updateOrder(order.id, {
+                customer_id: order.customer_id,
+                delivery_type: order.delivery_type,
+                revision: order.revision,
+                lines,
+            });
+            ToastService.success('The configured item is on the order');
+        } catch {
+            ToastService.error('The configured item could not be added to the order');
+        }
+    }
+
+    /** The order's own line, as the update request carries it. */
+    private toCreateLine(l: Order['lines'][number]): CreateOrderLineRequest {
+        return {
+            id: l.id,
+            line_type: l.line_type === 'kit' || l.line_type === 'component' ? 'product' : l.line_type,
+            product_id: l.product_id ?? undefined,
+            charge_code: l.charge_code ?? undefined,
+            sku: l.sku ?? undefined,
+            description: l.description,
+            quantity: l.quantity ?? undefined,
+            uom: l.uom ?? undefined,
+            price_uom: l.price_uom ?? undefined,
+            uom_qty: l.uom_qty ?? undefined,
+            price_uom_qty: l.price_uom_qty ?? undefined,
+            unit_price_ten_thousandths: l.unit_price_ten_thousandths ?? undefined,
+            taxable: l.taxable,
+        };
     }
 
     /** The numbers of the invoices this order billed, for the links; the id stands in until they arrive. */

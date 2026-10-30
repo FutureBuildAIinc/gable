@@ -1068,7 +1068,17 @@ components:
       - order_line_id
       - unit_cost_ten_thousandths
       - cost_cents
+      - configuration_json
       properties:
+        configuration_json:
+          oneOf:
+            - $ref: "#/components/schemas/ConfiguredConfiguration"
+            - type: "null"
+          description: >-
+            A configured item's configuration: the choices the dealer made, in
+            the canonical form the configurator wrote. Null on an ordinary
+            product line. The line's price was computed from it and the
+            documents show it as a short description.
         id:
           type: string
           format: uuid
@@ -1692,7 +1702,17 @@ components:
       - restock
       - unit_cost_ten_thousandths
       - cost_cents
+      - configuration_json
       properties:
+        configuration_json:
+          oneOf:
+            - $ref: "#/components/schemas/ConfiguredConfiguration"
+            - type: "null"
+          description: >-
+            A configured item's configuration: the choices the dealer made, in
+            the canonical form the configurator wrote. Null on an ordinary
+            product line. The line's price was computed from it and the
+            documents show it as a short description.
         id:
           type: string
           format: uuid

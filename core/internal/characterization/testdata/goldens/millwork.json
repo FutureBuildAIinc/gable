@@ -20,7 +20,10 @@
         "attributes": {
           "grade": "Clear"
         },
+        "base_cost_cents": 0,
+        "base_price_cents": 0,
         "category": "Species",
+        "cost_adjustment_cents": 0,
         "created_at": "<ts+0d>",
         "id": "<id-1>",
         "name": "Golden Douglas Fir",
@@ -43,7 +46,10 @@
         "attributes": {
           "grade": "Clear"
         },
+        "base_cost_cents": 0,
+        "base_price_cents": 0,
         "category": "Species",
+        "cost_adjustment_cents": 0,
         "created_at": "<ts+0d>",
         "id": "<id-1>",
         "name": "Golden Douglas Fir",
@@ -68,7 +74,10 @@
             "attributes": {
               "grade": "Clear"
             },
+            "base_cost_cents": 0,
+            "base_price_cents": 0,
             "category": "Species",
+            "cost_adjustment_cents": 0,
             "created_at": "<ts+0d>",
             "id": "<id-1>",
             "name": "Golden Douglas Fir",
@@ -123,7 +132,10 @@
             "at": "<ts+0d>",
             "branch_id": null,
             "data": {
+              "base_cost_cents": 0,
+              "base_price_cents": 0,
               "category": "Species",
+              "cost_adjustment_cents": 0,
               "price_adjustment_cents": 150,
               "revision": 1
             },

@@ -2798,7 +2798,7 @@ paths:
       tags: [configurator]
       summary: Build a non stock SKU from selections
       description: >-
-        The body is bounded by the platform request size limit (10 MiB); a larger body is a 413. Product type and selections are both required. The selections are validated first; a conflict is a 400 validation_failed whose details carry one config_conflict blocker per violated rule (the base answered one fixed message and never said which rules). The SKU is NS, the product type code, then the Species, Grade, Treatment and Dimensions selections upper cased with spaces as hyphens; the keys other than those four are ignored.
+        The body is bounded by the platform request size limit (10 MiB); a larger body is a 413. Product type and selections are both required. The selections are validated first; a conflict is a 400 validation_failed whose details carry one config_conflict blocker per violated rule (the base answered one fixed message and never said which rules). The server then prices the configuration from the stored options and builds the configured item: the SKU is NS-, the product type's short name and the first twelve hex characters of the hash of the configuration's canonical form, so the same choices always give the same SKU and the same product row. The price and the cost are the server's; the client sends the choices and reads the money.
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
@@ -10863,6 +10863,99 @@ paths:
                 oneOf:
                   - $ref: "#/components/schemas/AppsDisabledError"
                   - $ref: "#/components/schemas/WireError"
+        "500":
+          $ref: "#/components/responses/InternalErrorEither"
+    put:
+      operationId: millworkUpdateOption
+      tags: [millwork]
+      summary: Update an option
+      description: >-
+        The same body as the create, minus the fields the update leaves alone. The write moves the option's revision on and needs the revision the caller read, carried by If-Match, by the body's revision, or by both (ADR 0001 section 11); a row that moved past it is a 409 and a write without one is a 428. Writes the audit row millwork_option.updated and the event millwork_option.updated in the same transaction, the event last.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MillworkUpdateOptionRequest"
+      responses:
+        "200":
+          description: The updated option, with its ETag.
+          headers:
+            ETag:
+              description: The record's revision in quotes.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MillworkOption"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: >-
+            The millwork app is disabled on this instance (app_disabled, written by the registry gate), or no option has this id (not_found).
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/AppsDisabledError"
+                  - $ref: "#/components/schemas/WireError"
+        "409":
+          $ref: "#/components/responses/WireConflict"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "428":
+          $ref: "#/components/responses/WirePreconditionRequired"
+        "500":
+          $ref: "#/components/responses/InternalErrorEither"
+  /api/v1/millwork/estimate:
+    post:
+      operationId: millworkEstimate
+      tags: [millwork]
+      summary: Price a configured item
+      description: >-
+        The body is the configuration: the product type, the choices and the door's width and height. The server prices it from the stored options: the unit price is the sum over the options the configuration selects of that option's base plus its adjustment, and the unit cost is the same sum over the cost columns. The price is the server's; the client sends the choices and reads the money. A choice the catalog does not carry is a 400. The response carries the deterministic NS- SKU, the description the documents show, the product row the configured item becomes (found or created), the canonical configuration and the breakdown that made the price.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MillworkEstimateRequest"
+      responses:
+        "200":
+          description: The priced configured item.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MillworkEstimateResponse"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/AppDisabled"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
         "500":
           $ref: "#/components/responses/InternalErrorEither"
   /api/v1/orders:
@@ -23767,6 +23860,26 @@ components:
             last_checked_at:
               type: [string, "null"]
               format: date-time
+    ConfiguredConfiguration:
+      type: object
+      required: [selections]
+      description: >-
+        A configured item's configuration: the choices the dealer made, in the canonical form the server wrote it. The category names are the option catalog's own (snake_case); the values are the option names the catalog stores. A configured line carries this so the server can price it again and the documents can show it as a short description.
+      properties:
+        product_type:
+          type: string
+          description: The product type the configuration is for (Door, Lumber).
+        selections:
+          type: object
+          description: The chosen option for each attribute category.
+          additionalProperties:
+            type: string
+        width:
+          type: integer
+          description: The door's width in inches, when the configuration carries one.
+        height:
+          type: integer
+          description: The door's height in inches, when the configuration carries one.
     A2aInboundPOWebhook:
       type: object
       description: >-
@@ -25583,14 +25696,39 @@ components:
           type: object
           additionalProperties:
             type: string
+          description: >-
+            The choices, one per attribute. The names are the configurator's own (Species, Grade, Treatment, Dimensions); the option catalog folds them into its own categories (species, grade, treatment, dimensions) on the way in.
+        width:
+          type: integer
+          description: The item's width in inches, when it has one.
+        height:
+          type: integer
+          description: The item's height in inches, when it has one.
     ConfiguratorBuildSKUResponse:
       type: object
-      required: [sku, description]
+      required: [sku, description, product_id, unit_price_ten_thousandths, unit_cost_ten_thousandths, configuration_json]
+      description: >-
+        The configured item: its SKU, the description the documents carry, the product row it became, the server's price and cost and the canonical configuration they came from.
       properties:
         sku:
           type: string
+          description: >-
+            The deterministic NS- SKU: NS-, the product type's short name and the first twelve hex characters of the hash of the configuration's canonical form.
         description:
           type: string
+        product_id:
+          type: string
+          format: uuid
+          description: The product row the configured item became.
+        unit_price_ten_thousandths:
+          type: integer
+          format: int64
+        unit_cost_ten_thousandths:
+          type: integer
+          format: int64
+        configuration_json:
+          $ref: "#/components/schemas/ConfiguredConfiguration"
+          description: The canonical configuration the price came from.
     TermsKind:
       type: string
       enum: [net_days, day_of_month, due_on_receipt]
@@ -30348,7 +30486,14 @@ components:
         - order_line_id
         - unit_cost_ten_thousandths
         - cost_cents
+        - configuration_json
       properties:
+        configuration_json:
+          oneOf:
+            - $ref: "#/components/schemas/ConfiguredConfiguration"
+            - type: "null"
+          description: >-
+            A configured item's configuration: the choices the dealer made, in the canonical form the configurator wrote. Null on an ordinary product line. The line's price was computed from it and the documents show it as a short description.
         id:
           type: string
           format: uuid
@@ -30960,7 +31105,14 @@ components:
         - restock
         - unit_cost_ten_thousandths
         - cost_cents
+        - configuration_json
       properties:
+        configuration_json:
+          oneOf:
+            - $ref: "#/components/schemas/ConfiguredConfiguration"
+            - type: "null"
+          description: >-
+            A configured item's configuration: the choices the dealer made, in the canonical form the configurator wrote. Null on an ordinary product line. The line's price was computed from it and the documents show it as a short description.
         id:
           type: string
           format: uuid
@@ -32004,7 +32156,7 @@ components:
     MillworkOption:
       type: object
       description: One catalog option. The price adjustment is integer cents; attributes is whatever JSON the create carried, null when it carried none.
-      required: [id, category, name, price_adjustment_cents, attributes, revision, created_at, updated_at]
+      required: [id, category, name, price_adjustment_cents, base_price_cents, base_cost_cents, cost_adjustment_cents, attributes, revision, created_at, updated_at]
       properties:
         id:
           type: string
@@ -32017,6 +32169,20 @@ components:
           type: integer
           format: int64
           description: A positive option adds to the configured price, a negative one discounts it.
+        base_price_cents:
+          type: integer
+          format: int64
+          description: >-
+            What the option contributes to a configured item's price when it is the one naming the item (a door's door type, a board's species). Zero on an option that only adjusts.
+        base_cost_cents:
+          type: integer
+          format: int64
+          description: The same contribution to the item's cost.
+        cost_adjustment_cents:
+          type: integer
+          format: int64
+          description: >-
+            What the option adds to the configured item's cost on top of the base. Zero on an option that carries no cost of its own.
         attributes:
           type: [object, array, string, number, boolean, "null"]
           description: Any JSON value stored as sent (an object in practice).
@@ -32043,9 +32209,122 @@ components:
         price_adjustment_cents:
           type: integer
           format: int64
+        base_price_cents:
+          type: integer
+          format: int64
+          description: Optional; the option's base price, zero when absent.
+        base_cost_cents:
+          type: integer
+          format: int64
+          description: Optional; the option's base cost, zero when absent.
+        cost_adjustment_cents:
+          type: integer
+          format: int64
+          description: Optional; the option's cost adjustment, zero when absent.
         attributes:
           type: [object, array, string, number, boolean]
           description: Optional; stored as sent, null when absent.
+    MillworkUpdateOptionRequest:
+      type: object
+      required: [category, name]
+      description: >-
+        The same body as the create. category and name are the option's own and are taken as they stand; the money fields and attributes are the ones that move. Every field problem is collected into one 400 with a details entry per field; an unknown field is refused.
+      properties:
+        category:
+          type: string
+          description: 1 to 50 characters.
+        name:
+          type: string
+          description: 1 to 100 characters.
+        price_adjustment_cents:
+          type: integer
+          format: int64
+        base_price_cents:
+          type: integer
+          format: int64
+          description: The option's base price, zero when absent.
+        base_cost_cents:
+          type: integer
+          format: int64
+          description: The option's base cost, zero when absent.
+        cost_adjustment_cents:
+          type: integer
+          format: int64
+          description: The option's cost adjustment, zero when absent.
+        attributes:
+          type: [object, array, string, number, boolean]
+          description: Optional; stored as sent, null when absent.
+        revision:
+          type: integer
+          format: int64
+          description: The revision the caller read, when the body carries it.
+    MillworkEstimateRequest:
+      type: object
+      required: [product_type, selections]
+      description: >-
+        The configuration to price. The category names are the option catalog's own (snake_case); the configurator's attribute names ("Species", "Grade") are folded into that shape on the way in.
+      properties:
+        product_type:
+          type: string
+          description: The product type, one of Lumber, Door, Trim or Panel.
+        selections:
+          type: object
+          additionalProperties:
+            type: string
+          description: The choices, one per category.
+        width:
+          type: integer
+          description: The door's width in inches, when it has one.
+        height:
+          type: integer
+          description: The door's height in inches, when it has one.
+    MillworkPriceLine:
+      type: object
+      required: [category, name, price_cents, cost_cents]
+      description: One option's contribution to a configured item's price.
+      properties:
+        category:
+          type: string
+        name:
+          type: string
+        price_cents:
+          type: integer
+          format: int64
+          description: The option's base plus its adjustment, in cents.
+        cost_cents:
+          type: integer
+          format: int64
+          description: The option's base cost plus its cost adjustment, in cents.
+    MillworkEstimateResponse:
+      type: object
+      required: [sku, description, product_id, unit_price_ten_thousandths, unit_cost_ten_thousandths, configuration_json, breakdown]
+      description: >-
+        The priced configured item. The money is in ten-thousandths of the major unit, the scale the documents carry their prices in.
+      properties:
+        sku:
+          type: string
+          description: >-
+            The deterministic NS- SKU: NS-, the product type's short name and the first twelve hex characters of the hash of the configuration's canonical form.
+        description:
+          type: string
+          description: The short description the documents carry.
+        product_id:
+          type: string
+          format: uuid
+          description: The product row the configured item became.
+        unit_price_ten_thousandths:
+          type: integer
+          format: int64
+        unit_cost_ten_thousandths:
+          type: integer
+          format: int64
+        configuration_json:
+          $ref: "#/components/schemas/ConfiguredConfiguration"
+          description: The canonical configuration the price came from.
+        breakdown:
+          type: array
+          items:
+            $ref: "#/components/schemas/MillworkPriceLine"
     MillworkOptionPage:
       type: object
       required: [items, next_cursor, limit]
@@ -32156,7 +32435,14 @@ components:
         - weight_captured_by
         - weight_captured_at
         - created_at
+        - configuration_json
       properties:
+        configuration_json:
+          oneOf:
+            - $ref: "#/components/schemas/ConfiguredConfiguration"
+            - type: "null"
+          description: >-
+            A configured item's configuration: the choices the dealer made, in the canonical form the configurator wrote. Null on an ordinary product line. The line's price was computed from it and the documents show it as a short description.
         id:
           type: string
           format: uuid
@@ -32425,7 +32711,14 @@ components:
         - quantity_allocated
         - quantity_backordered
         - quantity_fulfilled
+        - configuration_json
       properties:
+        configuration_json:
+          oneOf:
+            - $ref: "#/components/schemas/ConfiguredConfiguration"
+            - type: "null"
+          description: >-
+            A configured item's configuration: the choices the dealer made, in the canonical form the configurator wrote. Null on an ordinary product line. The line's price was computed from it and the documents show it as a short description.
         id:
           type: string
           format: uuid
@@ -33181,6 +33474,10 @@ components:
           type: integer
           format: int64
           description: Absent on a stocked product line means the engine prices it; present it is an override naming override_reason, and on a non stock or charge line the manual price.
+        configuration_json:
+          $ref: "#/components/schemas/ConfiguredConfiguration"
+          description: >-
+            A configured item's configuration. The line's price is the engine's, read from the configured product row, which the configurator priced from the stored options.
         override_reason:
           type: string
           maxLength: 500
@@ -35987,8 +36284,13 @@ components:
       type: object
       description: >-
         A sale line in the shared shape of ADR 0005 section 2.2: product, kit (with its component lines), charge and text lines, the priced fields null on a text line, the extension rounded once.
-      required: [id, position, line_type, parent_line_id, product_id, charge_code_id, charge_code, sku, description, quantity, uom, price_uom, uom_qty, price_uom_qty, stock_uom, stock_quantity, tally, tint, unit_price_ten_thousandths, priced_unit_price_ten_thousandths, price_source, price_basis, override_reason, discount_percent, discount_cents, discount_reason, price_adjusted_by, line_total_cents, taxable, revenue_account_code, is_special_order, vendor_id, special_order_unit_cost_ten_thousandths, weight_source, weight_gross_lb, weight_tare_lb, weight_net_lb, weight_net_basis, scale_device_id, scale_ticket_id, scale_ticket_number, manual_weight_reason, weight_captured_by, weight_captured_at, created_at]
+      required: [id, position, line_type, parent_line_id, product_id, charge_code_id, charge_code, sku, description, quantity, uom, price_uom, uom_qty, price_uom_qty, stock_uom, stock_quantity, tally, tint, unit_price_ten_thousandths, priced_unit_price_ten_thousandths, price_source, price_basis, override_reason, discount_percent, discount_cents, discount_reason, price_adjusted_by, line_total_cents, taxable, revenue_account_code, is_special_order, vendor_id, special_order_unit_cost_ten_thousandths, weight_source, weight_gross_lb, weight_tare_lb, weight_net_lb, weight_net_basis, scale_device_id, scale_ticket_id, scale_ticket_number, manual_weight_reason, weight_captured_by, weight_captured_at, created_at, configuration_json]
       properties:
+        configuration_json:
+          oneOf:
+            - $ref: "#/components/schemas/ConfiguredConfiguration"
+            - type: "null"
+          description: A configured item's configuration; null on an ordinary product line.
         id: {type: string, format: uuid}
         position: {type: integer}
         line_type: {type: string, enum: [product, kit, component, charge, text]}
@@ -38024,8 +38326,12 @@ components:
       type: object
       description: >-
         The product on the wire (ADR 0006 sections 6 and 7.1): stock_uom, the scaled base price, quantities as decimal strings, and the stock totals in the stocking unit.
-      required: [id, sku, description, stock_uom, base_price_ten_thousandths, average_unit_cost_ten_thousandths, target_margin, commission_rate, vendor, vendor_id, upc, weight_lbs, length_in, width_in, height_in, stackable, geometry_source, lead_time_days, consumer_durable, reorder_point, reorder_qty, on_hand, allocated, available, revision, created_at, updated_at, sale_uom, price_uom, purchase_uom, board_thickness_in, board_width_in, board_length_ft, random_length, units, image_url, density_lb_per_cy, density_volume_state]
+      required: [id, sku, description, stock_uom, base_price_ten_thousandths, average_unit_cost_ten_thousandths, target_margin, commission_rate, vendor, vendor_id, upc, weight_lbs, length_in, width_in, height_in, stackable, geometry_source, lead_time_days, consumer_durable, reorder_point, reorder_qty, on_hand, allocated, available, revision, created_at, updated_at, sale_uom, price_uom, purchase_uom, board_thickness_in, board_width_in, board_length_ft, random_length, units, image_url, density_lb_per_cy, density_volume_state, is_non_stock]
       properties:
+        is_non_stock:
+          type: boolean
+          description: >-
+            True on a product the dealer never holds: a configured item, a door or a millwork piece the dealer configures and prices on the server. Such a row is kept out of the stock reads.
         id:
           type: string
           format: uuid
@@ -39097,7 +39403,7 @@ components:
       type: object
       description: >-
         One priced line. Every priced line carries the same fields: the quantity as a decimal string with its unit, the scaled unit price with its price unit, the conversion pair, and the extension in cents (quantity x unit price x price_uom_qty / uom_qty, rounded once, half away from zero).
-      required: [id, quote_id, product_id, sku, description, customer_note, quantity, uom, price_uom, uom_qty, price_uom_qty, unit_price_ten_thousandths, line_total_cents, stock_uom, stock_quantity, tally, unit_cost_ten_thousandths, created_at]
+      required: [id, quote_id, product_id, sku, description, customer_note, quantity, uom, price_uom, uom_qty, price_uom_qty, unit_price_ten_thousandths, line_total_cents, stock_uom, stock_quantity, tally, unit_cost_ten_thousandths, created_at, configuration_json]
       properties:
         id:
           type: string
@@ -39147,6 +39453,12 @@ components:
           type: integer
           format: int64
           description: The unit price per price_uom, times 10,000 (13725 is 1.3725).
+        configuration_json:
+          oneOf:
+            - $ref: "#/components/schemas/ConfiguredConfiguration"
+            - type: "null"
+          description: >-
+            A configured item's configuration: the choices the dealer made, in the canonical form the configurator wrote. Null on an ordinary product line. The line's price was computed from it and the documents show it as a short description.
         line_total_cents:
           type: integer
           format: int64
@@ -39300,6 +39612,10 @@ components:
           type: integer
           format: int64
           minimum: 0
+        configuration_json:
+          $ref: "#/components/schemas/ConfiguredConfiguration"
+          description: >-
+            A configured item's configuration. A line that carries one is priced by the server from the stored options, so the price is not required on the wire for it and a price sent on it is read and ignored.
         tally:
           $ref: "#/components/schemas/TallyRequest"
     QuoteTransitionRequest:

@@ -688,7 +688,17 @@ components:
       - weight_captured_by
       - weight_captured_at
       - created_at
+      - configuration_json
       properties:
+        configuration_json:
+          oneOf:
+            - $ref: "#/components/schemas/ConfiguredConfiguration"
+            - type: "null"
+          description: >-
+            A configured item's configuration: the choices the dealer made, in
+            the canonical form the configurator wrote. Null on an ordinary
+            product line. The line's price was computed from it and the
+            documents show it as a short description.
         id:
           type: string
           format: uuid
@@ -962,7 +972,17 @@ components:
       - quantity_allocated
       - quantity_backordered
       - quantity_fulfilled
+      - configuration_json
       properties:
+        configuration_json:
+          oneOf:
+            - $ref: "#/components/schemas/ConfiguredConfiguration"
+            - type: "null"
+          description: >-
+            A configured item's configuration: the choices the dealer made, in
+            the canonical form the configurator wrote. Null on an ordinary
+            product line. The line's price was computed from it and the
+            documents show it as a short description.
         id:
           type: string
           format: uuid
@@ -1743,6 +1763,12 @@ components:
           format: int64
           description: Absent on a stocked product line means the engine prices it; present it is an override
             naming override_reason, and on a non stock or charge line the manual price.
+        configuration_json:
+          $ref: "#/components/schemas/ConfiguredConfiguration"
+          description: >-
+            A configured item's configuration. The line's price is the
+            engine's, read from the configured product row, which the
+            configurator priced from the stored options.
         override_reason:
           type: string
           maxLength: 500

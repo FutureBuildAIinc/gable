@@ -6,6 +6,7 @@ import '../components/ui/gable-select.ts';
 import { customElement, property, state } from 'lit/decorators.js';
 import { icon } from '../lib/icons.ts';
 import { router } from '../lib/router.ts';
+import { ConfiguredItemHandoff, type ConfiguredItem } from '../lib/configured-item.ts';
 import { ToastService } from '../lib/toast-service.ts';
 import { QuoteService, QuoteApiError, quoteErrorMessage } from '../services/QuoteService.ts';
 import { ProductService } from '../services/product.service.ts';
@@ -14,6 +15,7 @@ import { LocationService } from '../services/LocationService.ts';
 import { deliveryService } from '../services/deliveryService.ts';
 import type { Customer } from '../types/customer.ts';
 import type { Product } from '../types/product.ts';
+import type { ConfiguredConfiguration } from '../types/configurator.ts';
 import { QUOTE_UOM_CODES } from '../types/quote.ts';
 import type { QuoteRequest, QuoteLineRequest, QuoteDeliveryType } from '../types/quote.ts';
 import { formatCents, formatPrice4 } from '../lib/utils.ts';
@@ -64,6 +66,11 @@ interface LineWithEscalator {
     price_uom_qty?: string;
     unit_price_ten_thousandths: number;
     escalator: QuoteLineEscalator;
+    /**
+     * A configured item's configuration. The line's price is the server's,
+     * computed from this; the documents show it as a short description.
+     */
+    configuration_json?: ConfiguredConfiguration;
 }
 
 /** The local calendar day of a stored instant, so a Valid until set to a day shows that day west of UTC. */
@@ -115,6 +122,9 @@ export class GableQuoteBuilder extends LitElement {
     @state() private revision: number | null = null;
     @state() private formError: string | null = null;
     @state() private lineErrors: Record<number, string> = {};
+    /** The configurator the dealer opened, null when none is open. */
+    @state() private configuring = false;
+    @state() private configuratorKind: 'door' | 'lumber' | null = null;
     private jobId: string | null = null;
     private expiresAt: string | null = null;
 
@@ -125,7 +135,22 @@ export class GableQuoteBuilder extends LitElement {
         if (this.routeId) this.initialLoading = true;
         this.loadProducts();
         this.loadVehicles();
-        if (this.routeId) this.loadExistingQuote(this.routeId);
+        if (this.routeId) {
+            // On an edited quote the item waits for the quote's own lines:
+            // they are the quote's, and the item joins them.
+            this.loadExistingQuote(this.routeId).then(() => this.takePendingItem());
+        } else {
+            this.takePendingItem();
+        }
+    }
+
+    /**
+     * A configured item the dealer made in the configurator and sent here
+     * waits for this page: it is taken once, so it is added once.
+     */
+    private takePendingItem() {
+        const pending = ConfiguredItemHandoff.take();
+        if (pending) this.handleConfiguredItem(pending);
     }
 
     private async loadProducts() {
@@ -196,6 +221,39 @@ export class GableQuoteBuilder extends LitElement {
             router.navigate('/quotes');
         } finally {
             this.initialLoading = false;
+        }
+    }
+
+    /**
+     * Adds the configured item the configurator produced. The price on the
+     * line is the server's price, computed from the configuration, and the
+     * configuration rides the line so the documents show what the item is.
+     */
+    private handleConfiguredItem(item: ConfiguredItem) {
+        this.lines = [...this.lines, {
+            product_id: item.product_id,
+            sku: item.sku,
+            description: item.description,
+            uom: 'EA',
+            quantity: '1',
+            unit_price_ten_thousandths: item.unit_price_ten_thousandths,
+            escalator: defaultEscalator(),
+            configuration_json: item.configuration_json,
+        }];
+        this.configuring = false;
+        this.configuratorKind = null;
+    }
+
+    /** Opens the configurator the dealer asked for. */
+    private async openConfigurator(kind: 'door' | 'lumber') {
+        this.configuratorKind = kind;
+        this.configuring = true;
+        // The configurators are two routes of their own; they are loaded when
+        // the dealer opens one, not with the quote builder.
+        if (kind === 'door') {
+            await import('./millwork/DoorConfigurator.ts');
+        } else {
+            await import('./millwork/ProductConfigurator.ts');
         }
     }
 
@@ -346,6 +404,7 @@ export class GableQuoteBuilder extends LitElement {
         if (l.id) line.id = l.id;
         if (l.product_id) line.product_id = l.product_id;
         if (l.customer_note) line.customer_note = l.customer_note;
+        if (l.configuration_json) line.configuration_json = l.configuration_json;
         if (l.price_uom && l.price_uom !== l.uom) {
             line.price_uom = l.price_uom;
             line.uom_qty = l.uom_qty;
@@ -675,7 +734,32 @@ export class GableQuoteBuilder extends LitElement {
                     <!-- Products -->
                     <section data-pane="products" aria-label="Products" class="xl:col-span-8 space-y-4">
                         <div class="${card} p-5">
-                            <h2 class="text-lg font-medium text-white mb-4">Products</h2>
+                            <div class="flex items-center justify-between mb-4">
+                                <h2 class="text-lg font-medium text-white">Products</h2>
+                                <!--
+                                    The configured item: a door or a piece of
+                                    millwork the dealer configures and the
+                                    server prices. The dialog hosts the
+                                    configurator, so the quote keeps its
+                                    customer and its lines.
+                                -->
+                                <div class="flex gap-2">
+                                    <button
+                                        @click=${() => this.openConfigurator('door')}
+                                        data-testid="configure-door"
+                                        class="rounded-lg border border-gable-green/40 px-3 py-1.5 text-xs font-medium text-gable-green hover:bg-gable-green/10"
+                                    >
+                                        Configure a door
+                                    </button>
+                                    <button
+                                        @click=${() => this.openConfigurator('lumber')}
+                                        data-testid="configure-item"
+                                        class="rounded-lg border border-white/15 px-3 py-1.5 text-xs font-medium text-zinc-300 hover:bg-white/5"
+                                    >
+                                        Configure item
+                                    </button>
+                                </div>
+                            </div>
                             <gable-line-item-editor
                                 .products=${this.products}
                                 .customerId=${this.customer?.id}
@@ -785,6 +869,52 @@ export class GableQuoteBuilder extends LitElement {
                     </section>
                 </div>
             </div>
+
+            <!--
+                The configurator, hosted here: the dealer configures an item
+                beside the quote, so the quote keeps its customer and its
+                lines, and the item arrives priced by the server.
+            -->
+            ${this.configuring ? html`
+                <div
+                    class="fixed inset-0 z-50 flex items-center justify-center bg-backdrop/80 backdrop-blur-sm p-4"
+                    data-testid="configurator-dialog"
+                    @click=${(e: Event) => {
+                        if (e.target === e.currentTarget) {
+                            this.configuring = false;
+                            this.configuratorKind = null;
+                        }
+                    }}
+                >
+                    <div class="w-full max-w-5xl max-h-[90vh] overflow-auto rounded-xl border border-white/10 bg-deep-space shadow-2xl">
+                        <div class="flex items-center justify-between border-b border-white/10 px-4 py-3">
+                            <h2 class="text-sm font-medium text-white">
+                                ${this.configuratorKind === 'door' ? 'Configure a door' : 'Configure an item'}
+                            </h2>
+                            <button
+                                @click=${() => { this.configuring = false; this.configuratorKind = null; }}
+                                data-testid="close-configurator"
+                                class="rounded px-2 py-1 text-xs text-zinc-400 hover:bg-white/5 hover:text-white"
+                            >
+                                Close
+                            </button>
+                        </div>
+                        <div class="p-4">
+                            ${this.configuratorKind === 'door' ? html`
+                                <gable-door-configurator
+                                    inline
+                                    @configured-item=${(e: CustomEvent<ConfiguredItem>) => this.handleConfiguredItem(e.detail)}
+                                ></gable-door-configurator>
+                            ` : html`
+                                <gable-product-configurator
+                                    inline
+                                    @configured-item=${(e: CustomEvent<ConfiguredItem>) => this.handleConfiguredItem(e.detail)}
+                                ></gable-product-configurator>
+                            `}
+                        </div>
+                    </div>
+                </div>
+            ` : nothing}
         `;
     }
 }

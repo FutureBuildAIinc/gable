@@ -5,6 +5,7 @@ package quote
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -277,6 +278,15 @@ func (r *PostgresRepository) StoreOriginalFile(ctx context.Context, id uuid.UUID
 }
 
 // nullIfEmpty renders an empty string as a SQL NULL.
+// jsonArg renders an optional JSON column for a parameterised write: a line
+// without a configuration writes null, not an empty object.
+func jsonArg(raw json.RawMessage) any {
+	if len(raw) == 0 {
+		return nil
+	}
+	return []byte(raw)
+}
+
 func nullIfEmpty(s string) any {
 	if s == "" {
 		return nil
@@ -394,14 +404,15 @@ func (r *PostgresRepository) insertLines(ctx context.Context, q *Quote, priorNot
 			INSERT INTO quote_lines (
 				id, quote_id, product_id, sku, description, customer_note,
 				quantity, uom, price_uom, uom_qty, price_uom_qty, unit_price, line_total, position, created_at,
-				stock_uom, stock_quantity, board_thickness_in, board_width_in
+				stock_uom, stock_quantity, board_thickness_in, board_width_in, configuration_json
 			) VALUES ($1, $2, $3, $4, $5, $6,
 				$7::numeric / 10000, $8, $9, $10::numeric / 10000, $11::numeric / 10000, $12::numeric / 10000, $13::numeric / 100, $14, $15,
-				$16, $17::numeric / 10000, $18::numeric / 10000, $19::numeric / 10000)`,
+				$16, $17::numeric / 10000, $18::numeric / 10000, $19::numeric / 10000, $20)`,
 			line.ID, line.QuoteID, lineProductID(line), line.SKU, line.Description, nullIfEmpty(note),
 			int64(line.Quantity), string(line.UOM), line.PriceUOM, int64(line.UOMQty), int64(line.PriceUOMQty),
 			int64(line.UnitPrice), int64(line.LineTotal), i, line.CreatedAt.Time,
 			line.StockUOM, qtyPtrArg(line.StockQuantity), qtyPtrArg(line.TallyThickness()), qtyPtrArg(line.TallyWidth()),
+			jsonArg(line.Configuration),
 		)
 		if err != nil {
 			return mapWriteError(err, "failed to insert quote line")
@@ -503,7 +514,8 @@ func (r *PostgresRepository) GetQuote(ctx context.Context, id uuid.UUID) (*Quote
 		       ROUND(ql.unit_price * 10000)::bigint, ROUND(COALESCE(p.average_unit_cost, 0) * 10000)::bigint,
 		       ROUND(ql.line_total * 100)::bigint, ql.created_at,
 		       ql.stock_uom, ROUND(ql.stock_quantity * 10000)::bigint,
-		       ql.board_thickness_in::text, ql.board_width_in::text
+		       ql.board_thickness_in::text, ql.board_width_in::text,
+		       ql.configuration_json
 		FROM quote_lines ql
 		LEFT JOIN products p ON p.id = ql.product_id
 		WHERE ql.quote_id = $1
@@ -526,7 +538,7 @@ func (r *PostgresRepository) GetQuote(ctx context.Context, id uuid.UUID) (*Quote
 		)
 		if err := rows.Scan(&l.ID, &l.QuoteID, &l.ProductID, &l.SKU, &l.Description, &l.CustomerNote,
 			&qty, &uom, &l.PriceUOM, &uomQty, &priceUomQty, &price, &cost, &total, &created,
-			&l.StockUOM, &stockQty, &thick, &width); err != nil {
+			&l.StockUOM, &stockQty, &thick, &width, &l.Configuration); err != nil {
 			return nil, fmt.Errorf("failed to scan quote line: %w", err)
 		}
 		l.UOM = productUOM(uom)

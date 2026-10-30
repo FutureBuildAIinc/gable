@@ -24,11 +24,24 @@ export const ConfiguratorService = {
         return response.json();
     },
 
-    async buildSKU(productType: string, selections: Record<string, string>): Promise<BuildSKUResponse> {
+    /**
+     * Builds the configured item: the server prices the configuration from
+     * the stored options, builds the deterministic NS- SKU and finds or
+     * creates the product row. The client sends the choices and reads the
+     * money; it never sends a price.
+     */
+    async buildSKU(
+        productType: string,
+        selections: Record<string, string>,
+        size?: { width?: number; height?: number },
+    ): Promise<BuildSKUResponse> {
+        const body: Record<string, unknown> = { product_type: productType, selections };
+        if (size?.width !== undefined) body.width = size.width;
+        if (size?.height !== undefined) body.height = size.height;
         const response = await fetchWithAuth(`${API_URL}/api/v1/configurator/build-sku`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ product_type: productType, selections }),
+            body: JSON.stringify(body),
         });
         if (!response.ok) throw await parseApiError(response, 'Failed to build SKU');
         return response.json();

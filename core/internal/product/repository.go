@@ -30,6 +30,9 @@ var ErrStaleRevision = errors.New("stale revision")
 // Repository defines the interface for product data access
 type Repository interface {
 	CreateProduct(ctx context.Context, p *Product) error
+	// FindOrCreateNonStock finds the product row a configured item becomes,
+	// or creates it (QE-06).
+	FindOrCreateNonStock(ctx context.Context, sku, description string, price, cost httpx.Price) (uuid.UUID, error)
 	GetProduct(ctx context.Context, id uuid.UUID) (*Product, error)
 	ListProducts(ctx context.Context) ([]Product, error)
 	ListProductsPage(ctx context.Context, after *time.Time, afterID *uuid.UUID, limit int) ([]Product, error)
@@ -90,6 +93,7 @@ var productColumns = `p.id, p.sku, p.description, p.uom_primary, p.base_price::t
 		       p.sale_uom, p.price_uom, p.purchase_uom,
 		       p.board_thickness_in::text, p.board_width_in::text, p.board_length_ft::text, p.random_length,
 		       p.density_lb_per_cy::text, p.density_volume_state,
+		       p.is_non_stock,
 		       ` + pictures.ImageSQL("p")
 
 // stockColumns and stockJoin read a product's stock totals in the same
@@ -140,6 +144,7 @@ func scanProductWith(scanner interface{ Scan(dest ...any) error }, withStock boo
 		&p.SaleUOM, &p.PriceUOM, &p.PurchaseUOM,
 		&boardThick, &boardWidth, &boardLength, &p.RandomLength,
 		&density, &p.DensityVolumeState,
+		&p.IsNonStock,
 		&p.ImageURL,
 	}
 	if withStock {
@@ -248,6 +253,34 @@ func (r *PostgresRepository) CreateProduct(ctx context.Context, p *Product) erro
 	p.AverageUnitCost = float64(p.AverageUnitCostScaled) / 10_000
 	p.CreatedAt, p.UpdatedAt = httpx.TimestampOf(created), httpx.TimestampOf(updated)
 	return nil
+}
+
+// FindOrCreateNonStock finds the product row a configured item becomes, or
+// creates it.
+//
+// The SKU is unique, so two concurrent creates of one configuration make one
+// row: the loser of the race reads the row the winner wrote. The price and
+// the cost are the server's, computed from the stored options, and the row
+// carries them so the configured item reads as a priced catalog entry. An
+// existing row's price moves to the price the options carry now, because a
+// configured item's price is the server's and never the dealer's stale copy.
+func (r *PostgresRepository) FindOrCreateNonStock(ctx context.Context, sku, description string, price, cost httpx.Price) (uuid.UUID, error) {
+	exec := r.db.GetExecutor(ctx)
+	if _, err := exec.Exec(ctx, `
+		INSERT INTO products (sku, description, uom_primary, base_price, average_unit_cost, is_non_stock)
+		VALUES ($1, $2, 'EA', $3::numeric, $4::numeric, TRUE)
+		ON CONFLICT (sku) DO UPDATE
+		SET base_price = EXCLUDED.base_price,
+		    average_unit_cost = EXCLUDED.average_unit_cost,
+		    updated_at = NOW()`,
+		sku, description, price.DecimalString(), cost.DecimalString()); err != nil {
+		return uuid.Nil, fmt.Errorf("failed to write the configured product: %w", err)
+	}
+	var id uuid.UUID
+	if err := exec.QueryRow(ctx, `SELECT id FROM products WHERE sku = $1`, sku).Scan(&id); err != nil {
+		return uuid.Nil, fmt.Errorf("failed to read the configured product: %w", err)
+	}
+	return id, nil
 }
 
 // qtyArg renders an optional quantity column for a parameterised write.
@@ -385,6 +418,7 @@ func (r *PostgresRepository) ListBelowReorder(ctx context.Context) ([]ReorderAle
 		JOIN ` + yardstock.Rows + ` ON i.product_id = p.id
 		LEFT JOIN locations y ON y.id = l.branch_id
 		WHERE p.reorder_point > 0
+		  AND p.is_non_stock = false
 		  AND ` + middleware.Wall("l", 1, 2) + `
 		GROUP BY l.branch_id, y.name, y.code, p.id
 		HAVING ` + yardstock.AtOrBelow("COALESCE(SUM(i.quantity), 0)", "p.reorder_point") + `

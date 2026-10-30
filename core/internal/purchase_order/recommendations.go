@@ -262,6 +262,11 @@ func (rs *RecommendationService) GenerateRecommendations(ctx context.Context) (*
 	totalEstCost := 0.0
 
 	for _, p := range products {
+		// A configured item is never reordered: the dealer does not hold it,
+		// so it never reaches the recommendation list.
+		if p.IsNonStock {
+			continue
+		}
 		for _, ys := range stockByProduct[p.ID] {
 			currentStock := ys.Available
 			vel := velByProduct
