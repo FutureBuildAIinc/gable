@@ -200,3 +200,97 @@ test('the counter: a tinted paint line, its receipt and its mis tint return', as
   await expect(page.getByText(/Return RTN-\d+ complete/)).toBeVisible({ timeout: 15000 });
   await page.screenshot({ path: path.join(SHOTS_DIR, 'pos-tint-return.png'), fullPage: true });
 });
+
+/**
+ * The tint catalogue screen (row CP-16, items 341 and 366): the walk makes
+ * its own system and an unlinked base through the API, links the base to the
+ * paint product on the Tint Catalogue screen, then rings a charged tinted sale
+ * at the counter. It never relies on the seed's tint rows. Shots in light and
+ * charcoal at 1440 and 390.
+ */
+test('the tint catalogue screen links a base and a tinted sale rings', async ({ page, request }) => {
+  await signIn(page, 'Alex Rivera');
+  const product = await paintProduct(request);
+  await tintChargeRule(request);
+  const run = Date.now().toString(36).slice(-5).toUpperCase();
+  const system = (await (await request.post('/api/v1/tint/systems', {
+    data: { code: `CAT-${run}`, name: `Catalogue walk ${run}`, manufacturer: 'Harbor Coatings', unit_denominator: 384 },
+  })).json()) as { id: string };
+
+  // Before the link the base answers no product, and the screen says so.
+  await page.goto('/admin/tint-catalogue');
+  await expect(page.getByRole('heading', { name: 'Tint catalogue' })).toBeVisible();
+  await page.getByTestId('tint-system-pick').getByRole('button').first().click();
+  await page.getByRole('option', { name: new RegExp(`CAT-${run}`) }).click();
+  await page.getByTestId('tint-new-base-code').fill('DEEP');
+  await page.getByTestId('tint-new-base-name').fill('Deep base');
+  await page.getByTestId('tint-add-base').click();
+  await expect(page.getByTestId('tint-base-link-DEEP')).toContainText('Not linked to a product');
+
+  // The screen adds the colorant and the colour.
+  await page.getByTestId('tint-new-colorant-code').fill('B1');
+  await page.getByTestId('tint-new-colorant-name').fill('Lamp Black');
+  await page.getByTestId('tint-add-colorant').click();
+  await expect(page.getByTestId('tint-colorant-list')).toContainText('Lamp Black');
+  await page.getByTestId('tint-new-color-code').fill('HC-188');
+  await page.getByTestId('tint-new-color-name').fill('Essex Green');
+  await page.getByTestId('tint-add-color').click();
+  await expect(page.getByTestId('tint-color-list')).toContainText('Essex Green');
+
+  // The formula: Essex Green on the deep base, one colorant.
+  await page.getByTestId('tint-formula-color').getByRole('button').first().click();
+  await page.getByRole('option', { name: /Essex Green/ }).click();
+  await page.getByTestId('tint-formula-base').getByRole('button').first().click();
+  await page.getByRole('option', { name: /Deep base/ }).click();
+  await page.getByTestId('tint-formula-add-colorant').click();
+  await page.getByTestId('tint-formula-colorant-0').getByRole('button').first().click();
+  await page.getByRole('option', { name: /Lamp Black/ }).click();
+  await page.getByTestId('tint-formula-whole-0').fill('1');
+  await page.getByTestId('tint-formula-coarse-0').fill('12');
+  await page.getByTestId('tint-add-formula').click();
+  await expect(page.getByTestId('tint-success')).toContainText('Formula added');
+
+  // The link: find the paint product and pick it.
+  await page.getByTestId('tint-base-find-DEEP').fill(product.sku);
+  await page.getByTestId(`tint-base-pick-DEEP-${product.sku}`).click();
+  await expect(page.getByTestId('tint-base-link-DEEP')).toContainText(product.sku);
+  const bases = (await (await request.get(`/api/v1/tint/bases?tint_system_id=${system.id}`)).json()) as {
+    items: { code: string; product_id: string | null }[];
+  };
+  expect(bases.items.find((b) => b.code === 'DEEP')?.product_id, 'the link is stored').toBe(product.id);
+
+  // Shots: the screen in light and charcoal at 1440 and 390.
+  const shots = path.join(SHOTS_DIR, 'cp16');
+  fs.mkdirSync(shots, { recursive: true });
+  for (const [size, w, h] of [['1440', 1440, 900], ['390', 390, 844]] as const) {
+    await page.setViewportSize({ width: w, height: h });
+    for (const mode of ['light', 'charcoal'] as const) {
+      const stored = await page.evaluate(() => localStorage.getItem('gable_theme'));
+      const isLight = stored === 'light';
+      if ((mode === 'light') !== isLight) await page.locator('gable-theme-toggle button').first().click();
+      await page.screenshot({ path: path.join(shots, `tint-catalogue-${mode}-${size}.png`), fullPage: true });
+    }
+  }
+  await page.setViewportSize({ width: 1440, height: 900 });
+
+  // The counter rings a tinted sale on the linked base.
+  await openCounter(page);
+  await page.getByTestId('catalog-search').fill(product.sku);
+  await page.getByTestId('catalog-search').press('Enter');
+  await expect(page.locator('[data-testid="pos-lines"] li')).toHaveCount(1, { timeout: 10000 });
+  await page.getByTestId('pos-line-tint-button').click();
+  await page.getByTestId('tint-color-search').fill('Essex');
+  await page.getByTestId('tint-color-results').getByRole('option', { name: /Essex Green/ }).click();
+  await expect(page.getByTestId('tint-components')).toContainText('B1 Lamp Black');
+  await expect(page.getByTestId('tint-price')).toContainText('includes the $2.50 tint charge');
+  await page.getByTestId('tint-add').click();
+  await expect(page.getByTestId('pos-line-tint')).toContainText('1 OZ + 12/32');
+  const total = Number(((await page.getByTestId('summary-total').textContent()) ?? '').replace(/[$,\s]/g, ''));
+  const head = page.getByTestId('panel-payment-toggle');
+  if ((await head.getAttribute('aria-expanded')) !== 'true') await head.click();
+  await page.getByTestId('tender-cash').click();
+  await page.getByLabel('Tender amount').fill(total.toFixed(2));
+  await page.getByRole('button', { name: 'Add as split tender' }).click();
+  await page.getByTestId('pos-pay').click();
+  await expect(page.getByTestId('pos-complete')).toContainText('Sale complete', { timeout: 15000 });
+});
