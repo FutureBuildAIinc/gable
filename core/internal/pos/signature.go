@@ -294,6 +294,8 @@ func (s *Service) ThermalReceipt(ctx context.Context, invoiceID uuid.UUID, print
 			Method:      string(t.Method),
 			AmountCents: t.AmountCents,
 			LastFour:    derefString(t.CardLast4),
+			// the card fee (CP-15) is its own line under the tender
+			SurchargeCents: t.SurchargeCents,
 		}
 		if t.Method == TenderCash && changeLeft > 0 {
 			if t.PaymentID != nil {

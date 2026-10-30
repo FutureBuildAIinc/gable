@@ -35319,12 +35319,13 @@ components:
       type: object
       description: >-
         One payment taken at the counter, stored net: the tendered amount less any change given from it, so the payment it became is the money kept.
-      required: [id, sale_id, method, amount_cents, payment_id, reference, card_last4, card_brand, gateway_tx_id, auth_code, id_checked, id_type, created_at]
+      required: [id, sale_id, method, amount_cents, surcharge_cents, payment_id, reference, card_last4, card_brand, gateway_tx_id, auth_code, id_checked, id_type, created_at]
       properties:
         id: {type: string, format: uuid}
         sale_id: {type: string, format: uuid}
         method: {$ref: "#/components/schemas/PosTenderMethod"}
         amount_cents: {type: integer, format: int64, description: "Net of change."}
+        surcharge_cents: {type: integer, format: int64, minimum: 0, description: "The card fee the processor added on top of the tender (CP-15): the device's figure, stored, never part of the sale's total or tax. Zero when none."}
         payment_id: {type: [string, "null"], format: uuid, description: "The payment the completion recorded (none for an account or store credit leg)."}
         id_checked: {type: boolean, description: "The cashier looked at the payer's ID."}
         id_type: {type: [string, "null"], description: "The kind of ID looked at, never its number."}
@@ -35612,7 +35613,7 @@ components:
         revision: {type: integer, format: int64, minimum: 1, description: "The settings resource's revision; a write names it (If-Match and/or the body's revision)."}
         rules:
           type: object
-          required: [check_limit_cents, check_id_required, restocking_fees, restocking_fee_defaults, tint_charge, tinted_no_return]
+          required: [check_limit_cents, check_id_required, restocking_fees, restocking_fee_defaults, tint_charge, tinted_no_return, card_surcharge]
           properties:
             check_limit_cents: {type: [integer, "null"], format: int64, minimum: 0, description: "The database wide check limit; null is no limit. A customer's own limit wins over it."}
             check_id_required:
@@ -35636,6 +35637,19 @@ components:
             tinted_no_return:
               type: boolean
               description: "The dealer's tinted no return policy: a tinted can is not taken back. Off unless the dealer says so, because the rule is a dealer policy and not a law."
+            card_surcharge:
+              oneOf:
+                - $ref: '#/components/schemas/PosCardSurcharge'
+                - type: "null"
+              description: "The card fee rule of the branch the caller works in (CP-15), or of the default branch in a single branch deployment; null when no branch is known. Off by default."
+    PosCardSurcharge:
+      type: object
+      description: "One branch's card fee rule (CP-15). It records the dealer's intent and the disclosure the clerk and customer see; the processor's enrolment decides the charge, and its answer's figure is what books."
+      required: [branch_id, enabled, rate_bps]
+      properties:
+        branch_id: {type: string, format: uuid}
+        enabled: {type: boolean, description: "Off by default."}
+        rate_bps: {type: integer, minimum: 0, maximum: 300, description: "The rate shown, in basis points (300 is 3 percent)."}
     PosSettingsRequest:
       type: object
       required: [rules]
@@ -35661,6 +35675,13 @@ components:
             tinted_no_return:
               type: boolean
               description: "The dealer's tinted no return policy. Absent is off (the rule is a dealer policy and not a law)."
+            card_surcharge:
+              type: object
+              description: "The card fee rule of the branch the caller works in (CP-15). Absent leaves it as it is. A rate above 300 basis points (the card brands' 3 percent cap) is a 400 naming the field; a write with no branch known is a 409 branch_required."
+              required: [enabled, rate_bps]
+              properties:
+                enabled: {type: boolean}
+                rate_bps: {type: integer, minimum: 0, maximum: 300}
         revision: {type: integer, format: int64, minimum: 1, description: "The revision this write rides; If-Match serves the same role."}
     PosEndOfDayCloseRequest:
       type: object

@@ -15,6 +15,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/gablelbm/gable/internal/payment"
 	"github.com/gablelbm/gable/internal/testutil"
 )
 
@@ -272,5 +273,28 @@ func TestCP15_TwoReturnsOfOneSurchargedSaleRefundTheFeeOnce(t *testing.T) {
 	}
 	if got := f.accountBalance(surchargeIncomeCode); got != 0 {
 		t.Fatalf("surcharge income %d, wanted 0", got)
+	}
+}
+
+// TestCP15_TheDemoSimulatorSurchargesOnlyWhileTheSwitchIsOn: the demo stack's
+// simulated processor adds the branch's rate to an approved card answer while
+// the switch is on and nothing once it is off, so the counter shows a fee on a
+// demo stack with no real processor.
+func TestCP15_TheDemoSimulatorSurchargesOnlyWhileTheSwitchIsOn(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	f := newFixture(t, testutil.RequireDB(t), func(f *fixture) {
+		ledger := payment.NewTerminalLedger(f.db)
+		f.terminal = payment.NewSimulatedTerminal(payment.SimApprove, payment.NewSimulatedSurchargeSink(ledger))
+		f.service.WithTerminal(f.terminal, ledger)
+	})
+	f.setBranchSurcharge(true, 300)
+	onSale, total := f.cardSale(t)
+	if got, want := f.cardTenderSurcharge(onSale), (total*300+5000)/10000; got != want {
+		t.Fatalf("with the switch on the demo fee is %d, wanted %d", got, want)
+	}
+	f.setBranchSurcharge(false, 300)
+	offSale, _ := f.cardSale(t)
+	if got := f.cardTenderSurcharge(offSale); got != 0 {
+		t.Fatalf("with the switch off the demo fee is %d, wanted 0", got)
 	}
 }

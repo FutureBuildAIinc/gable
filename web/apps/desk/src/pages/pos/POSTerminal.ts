@@ -10,7 +10,7 @@ import '../../pages/pos/PayerDialog.ts';
 import { apiErrorMessage, ApiError } from '../../services/apiError';
 import type {
   Sale, QuickSearchResult, SaleLine, TillSession, TillReport, TillMovement, TenderMethod, ExchangeTenderMethod, RefundMethod, CounterCustomer, CounterRegister,
-  CounterStanding, ReturnReason, ReturnReasonCode, ExchangeFigures, ReturnFigures, IdType, SaleSummary,
+  CounterStanding, ReturnReason, ReturnReasonCode, ExchangeFigures, ReturnFigures, IdType, SaleSummary, CardSurcharge,
 } from '../../types/pos';
 import { ID_TYPES } from '../../types/pos';
 import { branchContext } from '../../services/BranchContext';
@@ -33,6 +33,7 @@ import { roundCashFor, type CashRoundingMode } from '../../lib/cashRounding';
 import './PosOrderDeposit';
 import { intentIdOfRefusal, cardWaitWords, CARD_DECLINED_WORDS, CARD_CANCEL_WORDS } from './terminal';
 import { receiptEmailAnswer, type ReceiptTone } from './receiptEmail';
+import { cardFeeNotice } from './cardFee';
 import { EmailDeliveryService } from '../../services/EmailDeliveryService';
 
 /**
@@ -146,6 +147,8 @@ export class POSTerminal extends LitElement {
   // The dealer's check ID rule (never by default; a read failure reads as
   // never: the server holds the rule itself at the completion).
   @state() private _idRule: CheckIDRule | null = null;
+  /** The active branch's card fee rule (CP-15); null while none is known. */
+  @state() private _cardFee: CardSurcharge | null = null;
   // The dealer's database wide check limit from the same read, so a walk-in
   // (no standing of its own) is warned at entry, not first at the server.
   @state() private _dealerCheckLimitCents: number | null = null;
@@ -284,9 +287,11 @@ export class POSTerminal extends LitElement {
       const s = await posService.settings();
       this._idRule = s.rules.check_id_required;
       this._dealerCheckLimitCents = s.rules.check_limit_cents;
+      this._cardFee = s.rules.card_surcharge ?? null;
     } catch {
       this._idRule = null;
       this._dealerCheckLimitCents = null;
+      this._cardFee = null;
     }
   }
 
@@ -300,6 +305,7 @@ export class POSTerminal extends LitElement {
     if (!this._saleHasLines) {
       this._yardId = branchContext.currentId;
       void this._loadRegisters();
+      void this._loadIDRule();
       return;
     }
     const askedYard = branchContext.currentId;
@@ -317,6 +323,7 @@ export class POSTerminal extends LitElement {
       }
       this._yardId = askedYard;
       void this._loadRegisters();
+      void this._loadIDRule();
     });
   };
 
@@ -3003,6 +3010,8 @@ export class POSTerminal extends LitElement {
     // the change due is the plan's: the tendered amount above the total, given from the cash
     const change = payPlanNow.ok ? payPlanNow.changeCents : 0;
     const tendersOver = !payPlanNow.ok && payPlanNow.over !== undefined;
+    // the card fee notice (CP-15): only while a card is the chosen way to pay and the branch charges one
+    const cardFee = this._tenderMethod === 'card' ? cardFeeNotice(this._cardFee, entry?.amount_cents ?? owed) : null;
     const overWords = !payPlanNow.ok && payPlanNow.over === 'typed'
       ? `A card, check or account charge cannot be more than ${fmt(payPlanNow.limitCents ?? total)} here`
       : 'The added tenders are more than the sale now: clear them and choose again';
@@ -3079,6 +3088,11 @@ export class POSTerminal extends LitElement {
             @blur=${() => this._formatTenderAmount()}
             class="mt-1 w-full rounded border border-white/10 bg-deep-space px-3 py-2 text-right font-mono text-xl font-bold text-white outline-none focus:border-gable-green"
             aria-label="Tender amount" />
+          ${cardFee !== null ? html`
+            <div class="mt-2 rounded-lg border border-white/10 bg-deep-space/60 p-3 text-sm text-slate-300" role="status" data-testid="pos-card-fee">
+              <div data-testid="pos-card-fee-notice">${cardFee.fee}</div>
+              <div class="mt-1 text-slate-400" data-testid="pos-card-fee-cash">${cardFee.cash}</div>
+            </div>` : nothing}
           ${tendersOver ? html`
             <div class="mt-2 rounded-lg border border-amber-400/40 bg-amber-400/10 p-3 text-sm text-amber-300" role="status" data-testid="pos-tenders-over">
               ${overWords}
@@ -3273,7 +3287,10 @@ export class POSTerminal extends LitElement {
           ${completed ? html`
             ${(sale?.tenders ?? []).map((t) => html`
               <div class="flex justify-between py-1 text-slate-300"><dt>${t.method === 'account' ? 'Charged to account' : t.method === 'store_credit' ? 'Paid with store credit' : `Paid by ${t.method}`}</dt>
-                <dd class="font-mono">${fmt(t.amount_cents)}</dd></div>`)}
+                <dd class="font-mono">${fmt(t.amount_cents)}</dd></div>
+              ${(t.surcharge_cents ?? 0) > 0 ? html`
+              <div class="flex justify-between py-1 text-slate-300" data-testid="summary-card-fee"><dt>Card fee</dt>
+                <dd class="font-mono">${fmt(t.surcharge_cents)}</dd></div>` : nothing}`)}
             ${(sale?.change_cents ?? 0) > 0 ? html`
               <div class="flex justify-between py-1 font-semibold text-gable-green"><dt>Change given</dt>
                 <dd class="font-mono">${fmt(sale?.change_cents ?? 0)}</dd></div>` : nothing}` : this._pendingTenders.length > 0 ? html`
