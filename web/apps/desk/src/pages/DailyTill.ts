@@ -66,7 +66,7 @@ export class GableDailyTill extends LitElement {
                             <h2 class="text-xl font-bold text-emerald-400 flex items-center gap-2">
                                 ${icon(DollarSign, 24)} Collected (${formatDay(till.date)})
                             </h2>
-                            <span class="text-3xl font-mono font-bold text-white">
+                            <span class="text-3xl font-mono font-bold text-white" data-testid="till-collected">
                                 ${formatDollars(till.net_collected)}
                             </span>
                         </div>
@@ -86,7 +86,7 @@ export class GableDailyTill extends LitElement {
                                         </div>
                                         <span class="font-bold text-zinc-200">${method}</span>
                                     </div>
-                                    <span class="font-mono text-xl text-white">$${(amount as number).toFixed(2)}</span>
+                                    <span class="font-mono text-xl text-white" data-testid="till-method">${formatDollars(amount as number)}</span>
                                 </div>
                             `)}
                         </div>
@@ -107,16 +107,16 @@ export class GableDailyTill extends LitElement {
                         <div class="grid grid-cols-2 gap-4">
                             <div class="p-4 bg-black/20 rounded border border-white/5">
                                 <span class="block text-zinc-400 text-sm uppercase font-bold mb-1">Total Invoiced</span>
-                                <span class="block text-2xl font-mono text-white">$${summary.total_invoiced.toFixed(2)}</span>
+                                <span class="block text-2xl font-mono text-white" data-testid="summary-invoiced">${formatDollars(summary.total_invoiced)}</span>
                             </div>
                             <div class="p-4 bg-black/20 rounded border border-white/5">
                                 <span class="block text-zinc-400 text-sm uppercase font-bold mb-1">Total Collected</span>
-                                <span class="block text-2xl font-mono text-emerald-400">${formatDollars(summary.total_collected)}</span>
+                                <span class="block text-2xl font-mono text-emerald-400" data-testid="summary-collected">${formatDollars(summary.total_collected)}</span>
                             </div>
                             <div class="p-4 bg-black/20 rounded border border-white/5 col-span-2">
                                 <div class="flex justify-between items-center">
                                     <span class="block text-zinc-400 text-sm uppercase font-bold">Outstanding AR (Period)</span>
-                                    <span class="block text-2xl font-mono text-amber-500">$${summary.outstanding_ar.toFixed(2)}</span>
+                                    <span class="block text-2xl font-mono text-amber-500" data-testid="summary-ar">${formatDollars(summary.outstanding_ar)}</span>
                                 </div>
                                 <div class="w-full bg-zinc-800 h-2 mt-3 rounded-full overflow-hidden">
                                     <div
