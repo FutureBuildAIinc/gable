@@ -68,6 +68,12 @@ describe('offlineCounter.signIn during a drop', () => {
     expect(invoke).not.toHaveBeenCalled();
   });
 
+  it('opens the form when email and password is the dealer\'s only method', async () => {
+    fetchFn.mockResolvedValue(new Response(JSON.stringify({ ...config, methods: [config.methods[1]] }), { status: 200 }));
+    await expect(offlineCounter.signIn()).resolves.toBe('form');
+    expect(invoke).not.toHaveBeenCalled();
+  });
+
   it('starts the first redirect method when a redirect method comes first', async () => {
     fetchFn.mockResolvedValue(new Response(JSON.stringify(config), { status: 200 }));
     await expect(offlineCounter.signIn()).resolves.toBe('started');
@@ -99,6 +105,16 @@ describe('offlineCounter.signInWithPassword', () => {
     expect(e).toBeInstanceOf(OfflineCounterError);
     expect((e as OfflineCounterError).code).toBe(code);
     expect((e as OfflineCounterError).message).toContain(words);
+  });
+
+  it('answers sign_in_failed with the generic words for a code it does not know', async () => {
+    for (const raw of ['something_new', { code: 'something_new' }, 42, null]) {
+      invoke.mockRejectedValue(raw);
+      const e = await offlineCounter.signInWithPassword('a@b.example', 'hunter2').then(() => null, (x: unknown) => x);
+      expect(e).toBeInstanceOf(OfflineCounterError);
+      expect((e as OfflineCounterError).code).toBe('sign_in_failed');
+      expect((e as OfflineCounterError).message).toBe('The register could not be signed in. Ask a manager.');
+    }
   });
 
   it('never puts the password in an error, whatever the shell answers', async () => {
