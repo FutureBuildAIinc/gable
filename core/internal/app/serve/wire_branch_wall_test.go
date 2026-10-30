@@ -1806,6 +1806,11 @@ func TestBranchWall_FormsAndDeliveries(t *testing.T) {
 		{"finance emails the statement of a customer branch A shares", "POST", "/api/v1/ar/customers/" + shared.String() + "/statement/email", "finance", "u-a", A, http.StatusAccepted},
 		{"finance does not find a customer only branch B holds", "GET", "/api/v1/documents/print/statement/" + onlyB.String(), "finance", "u-a", A, http.StatusNotFound},
 		{"warehouse may not read deliveries", "GET", "/api/v1/email-deliveries", "warehouse", "u-a", A, http.StatusForbidden},
+		{"warehouse may not follow a send either", "GET", "/api/v1/email-deliveries?document_id=" + quoteA.String(), "warehouse", "u-a", A, http.StatusForbidden},
+		{"cashier follows the send of a document", "GET", "/api/v1/email-deliveries?document_id=" + quoteA.String(), "cashier", "u-a", A, ok},
+		{"sales follows the send of a document", "GET", "/api/v1/email-deliveries?document_id=" + quoteA.String(), "sales", "u-a", A, ok},
+		{"cashier may not read the whole delivery list", "GET", "/api/v1/email-deliveries", "cashier", "u-a", A, http.StatusForbidden},
+		{"sales may not read the whole delivery list", "GET", "/api/v1/email-deliveries?status=failed", "sales", "u-a", A, http.StatusForbidden},
 	} {
 		if got := f.call(t, c.method, c.path, "", c.role, c.sub, c.header); got != c.want {
 			t.Errorf("%s: %d, want %d", c.name, got, c.want)

@@ -403,8 +403,24 @@ func (w *branchWall) documents(mux *http.ServeMux, h *document.Handler) {
 // emailDeliveries mounts the delivery record behind the branch middleware:
 // each row carries the branch of the document it sent, and the list is held
 // to the caller's branches.
+//
+// The whole list stays the finance roles' read. A read that names one
+// document (document_id) is also open to the roles that send a document (sales
+// emails an invoice, the cashier a receipt), so the desk can follow the send
+// it just made; the wall still holds every row to the caller's branches.
 func (w *branchWall) emailDeliveries(mux *http.ServeMux, h *emaildelivery.Handler) {
-	h.RegisterRoutes(mux, w.scoped("admin", "owner", "finance"))
+	listAll := w.scoped("admin", "owner", "finance")
+	followSend := w.scoped("admin", "owner", "finance", "sales", "cashier")
+	h.RegisterRoutes(mux, func(next http.Handler) http.Handler {
+		all, one := listAll(next), followSend(next)
+		return http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
+			if r.URL.Query().Get("document_id") != "" {
+				one.ServeHTTP(rw, r)
+				return
+			}
+			all.ServeHTTP(rw, r)
+		})
+	})
 }
 
 // dealerProfile mounts the dealer profile: every role that prints reads it
