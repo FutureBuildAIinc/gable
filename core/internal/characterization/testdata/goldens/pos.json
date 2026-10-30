@@ -332,9 +332,25 @@
           "uom": "BAG"
         },
         {
+          "description": "10 ft Deck Section Kit (joists, decking, hardware)",
+          "in_stock": "0",
+          "product_id": "<id-33>",
+          "sku": "KIT-DECK-10",
+          "unit_price_cents": 12900,
+          "uom": "EA"
+        },
+        {
+          "description": "8 ft Wall Section Framing Kit (12 studs, 2 sheets)",
+          "in_stock": "0",
+          "product_id": "<id-34>",
+          "sku": "KIT-FRAME-8",
+          "unit_price_cents": 8900,
+          "uom": "EA"
+        },
+        {
           "description": "1x6x6 Cedar Fence Board",
           "in_stock": "739",
-          "product_id": "<id-33>",
+          "product_id": "<id-35>",
           "sku": "LUM-166-WRC",
           "unit_price_cents": 510,
           "uom": "PCS"
@@ -342,7 +358,7 @@
         {
           "description": "2x10x12 Hem-Fir No.2",
           "in_stock": "543",
-          "product_id": "<id-34>",
+          "product_id": "<id-36>",
           "sku": "LUM-21012-NO2",
           "unit_price_cents": 2450,
           "uom": "PCS"
@@ -350,7 +366,7 @@
         {
           "description": "2x12x16 Hem-Fir No.2",
           "in_stock": "586",
-          "product_id": "<id-35>",
+          "product_id": "<id-37>",
           "sku": "LUM-21216-NO2",
           "unit_price_cents": 4500,
           "uom": "PCS"
@@ -358,7 +374,7 @@
         {
           "description": "2x4x10 SPF Premium",
           "in_stock": "488",
-          "product_id": "<id-36>",
+          "product_id": "<id-38>",
           "sku": "LUM-2410-PREM",
           "unit_price_cents": 725,
           "uom": "PCS"
@@ -366,7 +382,7 @@
         {
           "description": "2x4x12 SPF Premium",
           "in_stock": "631",
-          "product_id": "<id-37>",
+          "product_id": "<id-39>",
           "sku": "LUM-2412-PREM",
           "unit_price_cents": 875,
           "uom": "PCS"
@@ -374,7 +390,7 @@
         {
           "description": "2x4x8 SPF Premium",
           "in_stock": "279",
-          "product_id": "<id-38>",
+          "product_id": "<id-40>",
           "sku": "LUM-248-PREM",
           "unit_price_cents": 550,
           "uom": "PCS"
@@ -382,7 +398,7 @@
         {
           "description": "2x4x92-5/8 SPF Stud",
           "in_stock": "635",
-          "product_id": "<id-39>",
+          "product_id": "<id-41>",
           "sku": "LUM-2492-STUD",
           "unit_price_cents": 510,
           "uom": "PCS"
@@ -390,7 +406,7 @@
         {
           "description": "2x6x10 SPF Premium",
           "in_stock": "869",
-          "product_id": "<id-40>",
+          "product_id": "<id-42>",
           "sku": "LUM-2610-PREM",
           "unit_price_cents": 980,
           "uom": "PCS"
@@ -398,7 +414,7 @@
         {
           "description": "2x6x12 SPF Premium",
           "in_stock": "200",
-          "product_id": "<id-41>",
+          "product_id": "<id-43>",
           "sku": "LUM-2612-PREM",
           "unit_price_cents": 1175,
           "uom": "PCS"
@@ -406,7 +422,7 @@
         {
           "description": "2x6x16 SPF Premium",
           "in_stock": "868",
-          "product_id": "<id-42>",
+          "product_id": "<id-44>",
           "sku": "LUM-2616-PREM",
           "unit_price_cents": 1560,
           "uom": "PCS"
@@ -414,7 +430,7 @@
         {
           "description": "2x8x10 Hem-Fir No.2",
           "in_stock": "622",
-          "product_id": "<id-43>",
+          "product_id": "<id-45>",
           "sku": "LUM-2810-NO2",
           "unit_price_cents": 1390,
           "uom": "PCS"
@@ -422,7 +438,7 @@
         {
           "description": "2x8x16 Hem-Fir No.2",
           "in_stock": "851",
-          "product_id": "<id-44>",
+          "product_id": "<id-46>",
           "sku": "LUM-2816-NO2",
           "unit_price_cents": 2225,
           "uom": "PCS"
@@ -430,7 +446,7 @@
         {
           "description": "4x4x10 Pressure Treated",
           "in_stock": "823",
-          "product_id": "<id-45>",
+          "product_id": "<id-47>",
           "sku": "LUM-4410-PT",
           "unit_price_cents": 1575,
           "uom": "PCS"
@@ -438,7 +454,7 @@
         {
           "description": "4x4x8 Pressure Treated",
           "in_stock": "646",
-          "product_id": "<id-46>",
+          "product_id": "<id-48>",
           "sku": "LUM-448-PT",
           "unit_price_cents": 1250,
           "uom": "PCS"
@@ -446,7 +462,7 @@
         {
           "description": "4x4x8 Western Red Cedar",
           "in_stock": "674",
-          "product_id": "<id-47>",
+          "product_id": "<id-49>",
           "sku": "LUM-448-WRC",
           "unit_price_cents": 3400,
           "uom": "PCS"
@@ -454,7 +470,7 @@
         {
           "description": "6x6x12 Pressure Treated",
           "in_stock": "406",
-          "product_id": "<id-48>",
+          "product_id": "<id-50>",
           "sku": "LUM-6612-PT",
           "unit_price_cents": 5500,
           "uom": "PCS"
@@ -462,7 +478,7 @@
         {
           "description": "1 X 4 RL #3 SPF",
           "in_stock": "787",
-          "product_id": "<id-49>",
+          "product_id": "<id-51>",
           "sku": "LUMB14RLN3+",
           "unit_price_cents": 52,
           "uom": "LF"
@@ -470,7 +486,7 @@
         {
           "description": "2 X 4 RL #3 SPF",
           "in_stock": "535",
-          "product_id": "<id-50>",
+          "product_id": "<id-52>",
           "sku": "LUMB24RLN3",
           "unit_price_cents": 46,
           "uom": "LF"
@@ -478,7 +494,7 @@
         {
           "description": "2 X 4 RL Utility",
           "in_stock": "590",
-          "product_id": "<id-51>",
+          "product_id": "<id-53>",
           "sku": "LUMBUT24RL",
           "unit_price_cents": 44,
           "uom": "LF"
@@ -486,7 +502,7 @@
         {
           "description": "Baseboard 3-1/4 MDF 16'",
           "in_stock": "645",
-          "product_id": "<id-52>",
+          "product_id": "<id-54>",
           "sku": "MLD-BASE-MDF",
           "unit_price_cents": 1950,
           "uom": "PCS"
@@ -494,7 +510,7 @@
         {
           "description": "Casing 2-1/4 MDF 14'",
           "in_stock": "542",
-          "product_id": "<id-53>",
+          "product_id": "<id-55>",
           "sku": "MLD-CASE-MDF",
           "unit_price_cents": 1350,
           "uom": "PCS"
@@ -502,7 +518,7 @@
         {
           "description": "3\" Common Nails (25kg)",
           "in_stock": "975",
-          "product_id": "<id-54>",
+          "product_id": "<id-56>",
           "sku": "NAIL-10D-50",
           "unit_price_cents": 6500,
           "uom": "BOX"
@@ -510,7 +526,7 @@
         {
           "description": "3-1/4\" Common Nails (25kg)",
           "in_stock": "336",
-          "product_id": "<id-55>",
+          "product_id": "<id-57>",
           "sku": "NAIL-16D-50",
           "unit_price_cents": 6500,
           "uom": "BOX"
@@ -518,7 +534,7 @@
         {
           "description": "7/16 OSB 4x8",
           "in_stock": "326",
-          "product_id": "<id-56>",
+          "product_id": "<id-58>",
           "sku": "OSB-12",
           "unit_price_cents": 1950,
           "uom": "PCS"
@@ -526,7 +542,7 @@
         {
           "description": "3/4 OSB T&G 4x8",
           "in_stock": "623",
-          "product_id": "<id-57>",
+          "product_id": "<id-59>",
           "sku": "OSB-34-TG",
           "unit_price_cents": 3400,
           "uom": "PCS"
@@ -534,7 +550,7 @@
         {
           "description": "1/2 Plywood G1S 4x8 (Fir)",
           "in_stock": "359",
-          "product_id": "<id-58>",
+          "product_id": "<id-60>",
           "sku": "PLY-12-CDX",
           "unit_price_cents": 2850,
           "uom": "PCS"
@@ -542,7 +558,7 @@
         {
           "description": "3/4 Plywood G1S 4x8 (Fir)",
           "in_stock": "859",
-          "product_id": "<id-59>",
+          "product_id": "<id-61>",
           "sku": "PLY-34-CDX",
           "unit_price_cents": 3800,
           "uom": "PCS"
@@ -550,7 +566,7 @@
         {
           "description": "Architectural Shingles 30yr",
           "in_stock": "990",
-          "product_id": "<id-60>",
+          "product_id": "<id-62>",
           "sku": "RF-ARCH-30",
           "unit_price_cents": 4200,
           "uom": "BUNDLE"
@@ -558,7 +574,7 @@
         {
           "description": "Roof Edge Drip 10'",
           "in_stock": "135",
-          "product_id": "<id-61>",
+          "product_id": "<id-63>",
           "sku": "RF-DRIP-10",
           "unit_price_cents": 750,
           "uom": "PCS"
@@ -566,7 +582,7 @@
         {
           "description": "Roof Edge Drip White 10'",
           "in_stock": "548",
-          "product_id": "<id-62>",
+          "product_id": "<id-64>",
           "sku": "RF-EDGE-WHT",
           "unit_price_cents": 750,
           "uom": "PCS"
@@ -574,7 +590,7 @@
         {
           "description": "Roofing Felt #15",
           "in_stock": "404",
-          "product_id": "<id-63>",
+          "product_id": "<id-65>",
           "sku": "RF-FELT-15",
           "unit_price_cents": 2250,
           "uom": "RL"
@@ -582,7 +598,7 @@
         {
           "description": "Pipe Boot Flashing",
           "in_stock": "399",
-          "product_id": "<id-64>",
+          "product_id": "<id-66>",
           "sku": "RF-FLASH-PIPE",
           "unit_price_cents": 1400,
           "uom": "PCS"
@@ -590,7 +606,7 @@
         {
           "description": "Step Flashing",
           "in_stock": "272",
-          "product_id": "<id-65>",
+          "product_id": "<id-67>",
           "sku": "RF-FLASH-STEP",
           "unit_price_cents": 450,
           "uom": "PCS"
@@ -598,7 +614,7 @@
         {
           "description": "Ice and Water Barrier 65'",
           "in_stock": "489",
-          "product_id": "<id-66>",
+          "product_id": "<id-68>",
           "sku": "RF-ICE-65",
           "unit_price_cents": 9800,
           "uom": "RL"
@@ -606,7 +622,7 @@
         {
           "description": "Ice and Water Barrier",
           "in_stock": "359",
-          "product_id": "<id-67>",
+          "product_id": "<id-69>",
           "sku": "RF-ICE-WTR",
           "unit_price_cents": 9800,
           "uom": "RL"
@@ -614,7 +630,7 @@
         {
           "description": "1.25\" Roofing Nails 2.5kg",
           "in_stock": "958",
-          "product_id": "<id-68>",
+          "product_id": "<id-70>",
           "sku": "RF-NAIL-125",
           "unit_price_cents": 1900,
           "uom": "BOX"
@@ -622,7 +638,7 @@
         {
           "description": "Ridge Vent 4'",
           "in_stock": "690",
-          "product_id": "<id-69>",
+          "product_id": "<id-71>",
           "sku": "RF-RIDGE-4",
           "unit_price_cents": 1350,
           "uom": "PCS"
@@ -630,7 +646,7 @@
         {
           "description": "Architectural Shingles (Black)",
           "in_stock": "880",
-          "product_id": "<id-70>",
+          "product_id": "<id-72>",
           "sku": "RF-SH-BLK",
           "unit_price_cents": 4200,
           "uom": "BUNDLE"
@@ -638,7 +654,7 @@
         {
           "description": "Architectural Shingles (Weathered Wood)",
           "in_stock": "750",
-          "product_id": "<id-71>",
+          "product_id": "<id-73>",
           "sku": "RF-SH-WW",
           "unit_price_cents": 4200,
           "uom": "BUNDLE"
@@ -646,7 +662,7 @@
         {
           "description": "Starter Strip",
           "in_stock": "876",
-          "product_id": "<id-72>",
+          "product_id": "<id-74>",
           "sku": "RF-START",
           "unit_price_cents": 1000,
           "uom": "PCS"
@@ -654,7 +670,7 @@
         {
           "description": "3\" Deck Screws (2.5kg)",
           "in_stock": "537",
-          "product_id": "<id-73>",
+          "product_id": "<id-75>",
           "sku": "SCR-DECK-3-5",
           "unit_price_cents": 2999,
           "uom": "BOX"
@@ -662,7 +678,7 @@
         {
           "description": "Hurricane Tie Light",
           "in_stock": "583",
-          "product_id": "<id-74>",
+          "product_id": "<id-76>",
           "sku": "TIE-LT",
           "unit_price_cents": 115,
           "uom": "PCS"

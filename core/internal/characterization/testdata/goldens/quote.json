@@ -44,6 +44,8 @@
             "description": "2x4x8 SPF Premium",
             "id": "<id-5>",
             "line_total_cents": 5500,
+            "line_type": "product",
+            "parent_line_id": null,
             "price_uom": "PCS",
             "price_uom_qty": "1",
             "product_id": "<id-3>",
@@ -59,7 +61,7 @@
             "uom_qty": "1"
           }
         ],
-        "margin_total_cents": 0,
+        "margin_total_cents": 2000,
         "number": "Q-000024",
         "original_content_type": null,
         "original_filename": null,
@@ -106,6 +108,8 @@
             "description": "2x4x8 SPF Premium",
             "id": "<id-5>",
             "line_total_cents": 5500,
+            "line_type": "product",
+            "parent_line_id": null,
             "price_uom": "PCS",
             "price_uom_qty": "1",
             "product_id": "<id-3>",
@@ -121,7 +125,7 @@
             "uom_qty": "1"
           }
         ],
-        "margin_total_cents": 0,
+        "margin_total_cents": 2000,
         "number": "Q-000024",
         "original_content_type": null,
         "original_filename": null,
@@ -439,6 +443,8 @@
             "description": "2x4x8 SPF Premium",
             "id": "<id-16>",
             "line_total_cents": 11000,
+            "line_type": "product",
+            "parent_line_id": null,
             "price_uom": "PCS",
             "price_uom_qty": "1",
             "product_id": "<id-3>",
@@ -454,7 +460,7 @@
             "uom_qty": "1"
           }
         ],
-        "margin_total_cents": 0,
+        "margin_total_cents": 4000,
         "number": "Q-000024",
         "original_content_type": null,
         "original_filename": null,
@@ -586,6 +592,8 @@
             "description": "2x4x8 SPF Premium",
             "id": "<id-16>",
             "line_total_cents": 11000,
+            "line_type": "product",
+            "parent_line_id": null,
             "price_uom": "PCS",
             "price_uom_qty": "1",
             "product_id": "<id-3>",
@@ -601,7 +609,7 @@
             "uom_qty": "1"
           }
         ],
-        "margin_total_cents": 0,
+        "margin_total_cents": 4000,
         "number": "Q-000024",
         "original_content_type": null,
         "original_filename": null,
@@ -828,6 +836,8 @@
             "description": "2x4x8 SPF Premium",
             "id": "<id-25>",
             "line_total_cents": 2750,
+            "line_type": "product",
+            "parent_line_id": null,
             "price_uom": "PCS",
             "price_uom_qty": "1",
             "product_id": "<id-3>",
@@ -843,7 +853,7 @@
             "uom_qty": "1"
           }
         ],
-        "margin_total_cents": 0,
+        "margin_total_cents": 1000,
         "number": "Q-000025",
         "original_content_type": null,
         "original_filename": null,
@@ -896,6 +906,8 @@
             "description": "2x4x8 SPF Premium",
             "id": "<id-25>",
             "line_total_cents": 2750,
+            "line_type": "product",
+            "parent_line_id": null,
             "price_uom": "PCS",
             "price_uom_qty": "1",
             "product_id": "<id-3>",
@@ -911,7 +923,7 @@
             "uom_qty": "1"
           }
         ],
-        "margin_total_cents": 0,
+        "margin_total_cents": 1000,
         "number": "Q-000025",
         "original_content_type": null,
         "original_filename": null,
@@ -973,6 +985,8 @@
             "description": "2x4x8 SPF Premium",
             "id": "<id-27>",
             "line_total_cents": 2750,
+            "line_type": "product",
+            "parent_line_id": null,
             "price_uom": "PCS",
             "price_uom_qty": "1",
             "product_id": "<id-3>",
@@ -988,7 +1002,7 @@
             "uom_qty": "1"
           }
         ],
-        "margin_total_cents": 0,
+        "margin_total_cents": 1000,
         "number": "Q-000026",
         "original_content_type": null,
         "original_filename": null,
@@ -1041,6 +1055,8 @@
             "description": "2x4x8 SPF Premium",
             "id": "<id-27>",
             "line_total_cents": 2750,
+            "line_type": "product",
+            "parent_line_id": null,
             "price_uom": "PCS",
             "price_uom_qty": "1",
             "product_id": "<id-3>",
@@ -1056,7 +1072,7 @@
             "uom_qty": "1"
           }
         ],
-        "margin_total_cents": 0,
+        "margin_total_cents": 1000,
         "number": "Q-000026",
         "original_content_type": null,
         "original_filename": null,
@@ -1109,6 +1125,8 @@
             "description": "2x4x8 SPF Premium",
             "id": "<id-27>",
             "line_total_cents": 2750,
+            "line_type": "product",
+            "parent_line_id": null,
             "price_uom": "PCS",
             "price_uom_qty": "1",
             "product_id": "<id-3>",
@@ -1124,7 +1142,7 @@
             "uom_qty": "1"
           }
         ],
-        "margin_total_cents": 0,
+        "margin_total_cents": 1000,
         "number": "Q-000026",
         "original_content_type": null,
         "original_filename": null,
@@ -1186,6 +1204,8 @@
             "description": "2x4x8 SPF Premium",
             "id": "<id-29>",
             "line_total_cents": 2750,
+            "line_type": "product",
+            "parent_line_id": null,
             "price_uom": "PCS",
             "price_uom_qty": "1",
             "product_id": "<id-3>",
@@ -1201,7 +1221,7 @@
             "uom_qty": "1"
           }
         ],
-        "margin_total_cents": 0,
+        "margin_total_cents": 1000,
         "number": "Q-000027",
         "original_content_type": null,
         "original_filename": null,
@@ -1254,6 +1274,8 @@
             "description": "2x4x8 SPF Premium",
             "id": "<id-29>",
             "line_total_cents": 2750,
+            "line_type": "product",
+            "parent_line_id": null,
             "price_uom": "PCS",
             "price_uom_qty": "1",
             "product_id": "<id-3>",
@@ -1269,7 +1291,7 @@
             "uom_qty": "1"
           }
         ],
-        "margin_total_cents": 0,
+        "margin_total_cents": 1000,
         "number": "Q-000027",
         "original_content_type": null,
         "original_filename": null,
@@ -1322,6 +1344,8 @@
             "description": "2x4x8 SPF Premium",
             "id": "<id-29>",
             "line_total_cents": 2750,
+            "line_type": "product",
+            "parent_line_id": null,
             "price_uom": "PCS",
             "price_uom_qty": "1",
             "product_id": "<id-3>",
@@ -1337,7 +1361,7 @@
             "uom_qty": "1"
           }
         ],
-        "margin_total_cents": 0,
+        "margin_total_cents": 1000,
         "number": "Q-000027",
         "original_content_type": null,
         "original_filename": null,
@@ -1399,6 +1423,8 @@
             "description": "2x4x8 SPF Premium",
             "id": "<id-31>",
             "line_total_cents": 2750,
+            "line_type": "product",
+            "parent_line_id": null,
             "price_uom": "PCS",
             "price_uom_qty": "1",
             "product_id": "<id-3>",
@@ -1414,7 +1440,7 @@
             "uom_qty": "1"
           }
         ],
-        "margin_total_cents": 0,
+        "margin_total_cents": 1000,
         "number": "Q-000028",
         "original_content_type": null,
         "original_filename": null,
@@ -1467,6 +1493,8 @@
             "description": "2x4x8 SPF Premium",
             "id": "<id-31>",
             "line_total_cents": 2750,
+            "line_type": "product",
+            "parent_line_id": null,
             "price_uom": "PCS",
             "price_uom_qty": "1",
             "product_id": "<id-3>",
@@ -1482,7 +1510,7 @@
             "uom_qty": "1"
           }
         ],
-        "margin_total_cents": 0,
+        "margin_total_cents": 1000,
         "number": "Q-000028",
         "original_content_type": null,
         "original_filename": null,
@@ -1535,6 +1563,8 @@
             "description": "2x4x8 SPF Premium",
             "id": "<id-31>",
             "line_total_cents": 2750,
+            "line_type": "product",
+            "parent_line_id": null,
             "price_uom": "PCS",
             "price_uom_qty": "1",
             "product_id": "<id-3>",
@@ -1550,7 +1580,7 @@
             "uom_qty": "1"
           }
         ],
-        "margin_total_cents": 0,
+        "margin_total_cents": 1000,
         "number": "Q-000028",
         "original_content_type": null,
         "original_filename": null,
@@ -1612,6 +1642,8 @@
             "description": "2x4x8 SPF Premium",
             "id": "<id-33>",
             "line_total_cents": 2750,
+            "line_type": "product",
+            "parent_line_id": null,
             "price_uom": "PCS",
             "price_uom_qty": "1",
             "product_id": "<id-3>",
@@ -1627,7 +1659,7 @@
             "uom_qty": "1"
           }
         ],
-        "margin_total_cents": 0,
+        "margin_total_cents": 1000,
         "number": "Q-000029",
         "original_content_type": null,
         "original_filename": null,
@@ -1680,6 +1712,8 @@
             "description": "2x4x8 SPF Premium",
             "id": "<id-33>",
             "line_total_cents": 2750,
+            "line_type": "product",
+            "parent_line_id": null,
             "price_uom": "PCS",
             "price_uom_qty": "1",
             "product_id": "<id-3>",
@@ -1695,7 +1729,7 @@
             "uom_qty": "1"
           }
         ],
-        "margin_total_cents": 0,
+        "margin_total_cents": 1000,
         "number": "Q-000029",
         "original_content_type": null,
         "original_filename": null,
@@ -1748,6 +1782,8 @@
             "description": "2x4x8 SPF Premium",
             "id": "<id-33>",
             "line_total_cents": 2750,
+            "line_type": "product",
+            "parent_line_id": null,
             "price_uom": "PCS",
             "price_uom_qty": "1",
             "product_id": "<id-3>",
@@ -1763,7 +1799,7 @@
             "uom_qty": "1"
           }
         ],
-        "margin_total_cents": 0,
+        "margin_total_cents": 1000,
         "number": "Q-000029",
         "original_content_type": null,
         "original_filename": null,
@@ -1825,6 +1861,8 @@
             "description": "2x4x8 SPF Premium",
             "id": "<id-35>",
             "line_total_cents": 2750,
+            "line_type": "product",
+            "parent_line_id": null,
             "price_uom": "PCS",
             "price_uom_qty": "1",
             "product_id": "<id-3>",
@@ -1840,7 +1878,7 @@
             "uom_qty": "1"
           }
         ],
-        "margin_total_cents": 0,
+        "margin_total_cents": 1000,
         "number": "Q-000030",
         "original_content_type": null,
         "original_filename": null,
@@ -1893,6 +1931,8 @@
             "description": "2x4x8 SPF Premium",
             "id": "<id-35>",
             "line_total_cents": 2750,
+            "line_type": "product",
+            "parent_line_id": null,
             "price_uom": "PCS",
             "price_uom_qty": "1",
             "product_id": "<id-3>",
@@ -1908,7 +1948,7 @@
             "uom_qty": "1"
           }
         ],
-        "margin_total_cents": 0,
+        "margin_total_cents": 1000,
         "number": "Q-000030",
         "original_content_type": null,
         "original_filename": null,
@@ -1961,6 +2001,8 @@
             "description": "2x4x8 SPF Premium",
             "id": "<id-35>",
             "line_total_cents": 2750,
+            "line_type": "product",
+            "parent_line_id": null,
             "price_uom": "PCS",
             "price_uom_qty": "1",
             "product_id": "<id-3>",
@@ -1976,7 +2018,7 @@
             "uom_qty": "1"
           }
         ],
-        "margin_total_cents": 0,
+        "margin_total_cents": 1000,
         "number": "Q-000030",
         "original_content_type": null,
         "original_filename": null,

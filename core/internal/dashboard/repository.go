@@ -157,6 +157,10 @@ func (r *PostgresRepository) GetDashboardSummary(ctx context.Context, branchID *
 // (and reported) is that sum, the rule the counter's search already follows.
 // The row's location_id is the yard and yard_name its name. A row with no
 // yard (a legacy row with no location) stays its own alert.
+//
+// A kit is never stocked: its stock and cost move on its components alone
+// (ADR 0005 section 2.6), so a kit has no stock of its own to be low and
+// never raises an alert of its own.
 func (r *PostgresRepository) GetInventoryAlerts(ctx context.Context, branchID *uuid.UUID, grantsSub *string, limit int) ([]InventoryAlert, error) {
 	query := `
 		SELECT
@@ -174,6 +178,7 @@ func (r *PostgresRepository) GetInventoryAlerts(ctx context.Context, branchID *u
 		LEFT JOIN locations l ON l.id = i.location_id
 		LEFT JOIN locations y ON y.id = l.branch_id
 		WHERE ` + middleware.Wall("l", 2, 3) + `
+		  AND NOT COALESCE(p.is_kit, FALSE)
 		GROUP BY p.id, p.sku, p.description, p.reorder_point, l.branch_id, y.name, y.code
 		HAVING ` + yardstock.AtOrBelow("COALESCE(SUM(i.quantity), 0)", "COALESCE(p.reorder_point, 10)") + `
 		ORDER BY COALESCE(SUM(i.quantity), 0) ASC, p.sku ASC, l.branch_id ASC

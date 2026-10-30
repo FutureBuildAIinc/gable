@@ -374,6 +374,9 @@ func (r *PostgresRepository) CountProducts(ctx context.Context) (int64, error) {
 // branch context the one yard; with none, every yard in the caller's reach
 // (the grants, or every yard for an unwalled caller and the cron engine), each
 // row naming its yard.
+//
+// A kit never appears: its stock and cost move on its components alone (ADR
+// 0005 section 2.6), so there is no kit stock to reorder.
 func (r *PostgresRepository) ListBelowReorder(ctx context.Context) ([]ReorderAlert, error) {
 	query := `
 		SELECT l.branch_id, COALESCE(y.name, y.code, ''),
@@ -385,6 +388,7 @@ func (r *PostgresRepository) ListBelowReorder(ctx context.Context) ([]ReorderAle
 		JOIN ` + yardstock.Rows + ` ON i.product_id = p.id
 		LEFT JOIN locations y ON y.id = l.branch_id
 		WHERE p.reorder_point > 0
+		  AND NOT COALESCE(p.is_kit, FALSE)
 		  AND ` + middleware.Wall("l", 1, 2) + `
 		GROUP BY l.branch_id, y.name, y.code, p.id
 		HAVING ` + yardstock.AtOrBelow("COALESCE(SUM(i.quantity), 0)", "p.reorder_point") + `

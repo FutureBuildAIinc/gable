@@ -12,7 +12,7 @@ import { normalizeQuantity } from '../../../lib/money.ts';
 import '../../../components/products/ProductSelect.ts';
 
 /**
- * <gable-product-kit-tab> — the editor for a kit's definition (ADR 0005
+ * <gable-product-kit-tab> is the editor for a kit's definition (ADR 0005
  * section 2.6): what the kit holds, per one kit, in each part's own stocking
  * unit.
  *

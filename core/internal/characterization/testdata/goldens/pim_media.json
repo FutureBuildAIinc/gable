@@ -46,6 +46,7 @@
           "height_in": 1.5,
           "id": "<id-1>",
           "image_url": null,
+          "is_kit": false,
           "lead_time_days": null,
           "length_in": 96,
           "on_hand": "428",
