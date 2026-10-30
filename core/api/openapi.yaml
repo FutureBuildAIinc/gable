@@ -14967,9 +14967,9 @@ paths:
     post:
       operationId: posSyncOffline
       tags: [pos]
-      summary: Refuse the offline sale replay by rule (money never queues)
+      summary: Sync a register's signed offline sales (ADR 0011)
       description: >-
-        Offline sale replay is refused by rule: money never queues offline, so a sale is completed online at the counter, never captured, queued and replayed later. A batch that parses answers 409 money_never_queues before anything of it is written: no sale, no invoice, no payment, no sync log row. A malformed body, a missing batch_id or an empty items array keeps its 400, and the branch and customer wall refusals run ahead of the handler as on every route.
+        The register's shell sends the sales it signed while offline, each as the device signed it. Each item is processed in device sequence order and posted once through the completion's own body at the figures recorded, or written to the offline exception queue for a manager (refused or held), never dropped; a replay is a duplicate. The sync is a person's act at the register, never a machine key (403), held to the register's branch. A branch whose dealer has not set an offline policy answers 409 money_never_queues before anything of the batch is written. The answer carries every item's outcome, the mark the server confirms to the device, and the register's count of exception rows waiting on a manager.
       parameters:
         - $ref: "#/components/parameters/XBranchId"
         - $ref: "#/components/parameters/IdempotencyKey"
@@ -14980,6 +14980,12 @@ paths:
             schema:
               $ref: "#/components/schemas/PosSyncRequest"
       responses:
+        "200":
+          description: Every item's outcome and the confirmed mark.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PosSyncResult"
         "400":
           $ref: "#/components/responses/BadRequestEither"
         "401":
@@ -14988,7 +14994,7 @@ paths:
           $ref: "#/components/responses/ForbiddenEither"
         "409":
           description: >-
-            The rule's refusal (the ADR 0001 envelope, code money_never_queues): money never queues offline; complete the sale online.
+            The branch's refusal (the ADR 0001 envelope, code money_never_queues): the dealer has not opted the branch in to offline selling; complete the sale online.
           content:
             application/json:
               schema:
@@ -35553,30 +35559,87 @@ components:
         notes: {type: [string, "null"]}
     PosSyncRequest:
       type: object
-      required: [batch_id, items]
+      required: [batch_id, register_id, device_epoch, reported_seq, items]
       properties:
         batch_id: {type: string}
-        register_id: {type: string, description: "Defaults REG-01."}
+        register_id: {type: string}
+        device_epoch: {type: integer, format: int64, minimum: 1, description: "The register's enrolment epoch the device signs under."}
+        reported_seq: {type: integer, format: int64, minimum: 0, description: "The last sequence the device assigned under its epoch (the keychain's mark, ADR 0011 5.1)."}
         items:
           type: array
+          minItems: 1
           items:
-            $ref: "#/components/schemas/PosSyncSale"
-    PosSyncSale:
+            $ref: "#/components/schemas/PosOfflineSignedSale"
+    PosOfflineSignedSale:
       type: object
-      required: [client_id, items, tenders]
+      description: >-
+        One sale the register's core signed offline (ADR 0011 sections 2 and 6.1), sent exactly as signed: the signature covers the canonical bytes of every field but device_sig, so a field present is a field signed.
+      required: [client_id, register_id, device_epoch, device_seq, prev_digest, offline_ref, snapshot_id, till_session_id, cashier_id, business_date, sold_at, currency, subtotal_cents, tax_cents, total_cents, change_cents, tax_rate, tax_exempt, queue_count, queue_total_cents, confirmed_mark, lines, tenders, device_sig]
       properties:
-        client_id: {type: string, format: uuid, description: "The offline client's id for the sale; a replay is a duplicate, not an error."}
-        cashier_id: {type: [string, "null"], format: uuid}
+        client_id: {type: string, format: uuid}
+        register_id: {type: string}
+        device_epoch: {type: integer, format: int64}
+        device_seq: {type: integer, format: int64}
+        prev_digest: {type: string}
+        offline_ref: {type: string, description: "The receipt's number while the sale waits, register, epoch and sequence."}
+        snapshot_id: {type: string, format: uuid}
+        till_session_id: {type: string, format: uuid}
+        cashier_id: {type: string, format: uuid}
         customer_id: {type: [string, "null"], format: uuid}
-        items:
+        buyer_contact_id: {type: [string, "null"], format: uuid}
+        customer_po: {type: [string, "null"]}
+        job_id: {type: [string, "null"], format: uuid}
+        picked_up_by: {type: [string, "null"]}
+        business_date: {type: string, format: date}
+        sold_at: {type: string, format: date-time}
+        currency: {type: string}
+        subtotal_cents: {type: integer, format: int64}
+        tax_cents: {type: integer, format: int64}
+        total_cents: {type: integer, format: int64}
+        change_cents: {type: integer, format: int64}
+        tax_rate: {type: string}
+        tax_exempt: {type: boolean}
+        queue_count: {type: integer, format: int64}
+        queue_total_cents: {type: integer, format: int64}
+        confirmed_mark: {type: integer, format: int64}
+        replaces_sale_id: {type: string, format: uuid, description: "The open server cart the sale replaces, or the result unknown cart it defaults to (ADR 0011 5.3)."}
+        different_customer: {type: boolean, description: "The clerk declared the sale is for another customer than the result unknown cart's."}
+        unknown_cart_id: {type: string, format: uuid, description: "The result unknown cart the declaration names."}
+        lines:
           type: array
-          items:
-            $ref: "#/components/schemas/PosLineRequest"
+          items: {type: object}
         tenders:
           type: array
+          items: {type: object}
+        device_sig: {type: string}
+    PosSyncResult:
+      type: object
+      required: [batch_id, register_id, device_epoch, confirmed_seq, items, open_exception_count]
+      properties:
+        batch_id: {type: string}
+        register_id: {type: string}
+        device_epoch: {type: integer, format: int64}
+        confirmed_seq: {type: integer, format: int64, description: "The highest sequence the server has recorded for the epoch, the mark the device's next sales carry."}
+        open_exception_count: {type: integer, format: int64, description: "The register's offline exception rows waiting on a manager with nothing posted (the counter's count)."}
+        items:
+          type: array
           items:
-            $ref: "#/components/schemas/PosTenderRequest"
-        client_created_at: {type: [string, "null"], format: date-time, description: "When the register made the sale offline."}
+            $ref: "#/components/schemas/PosSyncItemOutcome"
+    PosSyncItemOutcome:
+      type: object
+      required: [client_id, device_epoch, device_seq, outcome, sale_id, number, invoice_id, invoice_number, exception_id, reason_code, reason_message]
+      properties:
+        client_id: {type: string}
+        device_epoch: {type: integer, format: int64}
+        device_seq: {type: integer, format: int64}
+        outcome: {type: string, enum: [posted, duplicate, refused, held, error], description: "error: the server could not judge the item; it is sent again at the next sync."}
+        sale_id: {type: [string, "null"], format: uuid}
+        number: {type: [string, "null"]}
+        invoice_id: {type: [string, "null"], format: uuid}
+        invoice_number: {type: [string, "null"]}
+        exception_id: {type: [string, "null"], format: uuid}
+        reason_code: {type: [string, "null"]}
+        reason_message: {type: [string, "null"]}
     PosLineRequest:
       type: object
       description: >-
@@ -36626,6 +36689,10 @@ components:
           type: object
           additionalProperties: {type: integer, format: int64}
           description: "The signed variance cents per lowercase method; present once the drawer is counted."
+        offline_held_by_method:
+          type: object
+          additionalProperties: {type: integer, format: int64}
+          description: "The money of the session's offline sales waiting on a manager (refused or held, nothing posted), already inside expected_by_method so the drawer balances; absent when none waits (CP-13 OW)."
     PosRegister:
       type: object
       required: [id, name, branch_id, branch_code, branch_name]

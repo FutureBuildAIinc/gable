@@ -54,7 +54,7 @@ func TestNoHeader_CounterNamesACustomerUnderRulingA(t *testing.T) {
 	// return below.
 	sync := func(customer uuid.UUID) (string, string) {
 		client := uuid.NewString()
-		return client, fmt.Sprintf(`{"batch_id":"cw-%s","register_id":%q,"items":[{"client_id":%q,"cashier_id":%q,`+
+		return client, fmt.Sprintf(`{"batch_id":"cw-%s","register_id":%q,"device_epoch":1,"reported_seq":0,"items":[{"client_id":%q,"cashier_id":%q,`+
 			`"customer_id":%q,"items":[{"product_id":%q,"quantity":"1"}],`+
 			`"tenders":[{"method":"account","amount_cents":105}],"client_created_at":%q}]}`,
 			uuid.NewString()[:8], regNA, client, uuid.NewString(), customer.String(),
@@ -198,7 +198,7 @@ func TestNoHeader_CounterCompletesAnotherYardsCustomerAtTheSellingYard(t *testin
 		t.Errorf("key bound to B, create naming A's customer: %d %s, want refused", keyStatus, keyBuf)
 	}
 	client := uuid.NewString()
-	keyStatus, keyBuf = f.key(t, boundB, "POST", "/api/v1/pos/sync", fmt.Sprintf(`{"batch_id":"cw-%s","register_id":%q,"items":[{"client_id":%q,"cashier_id":%q,`+
+	keyStatus, keyBuf = f.key(t, boundB, "POST", "/api/v1/pos/sync", fmt.Sprintf(`{"batch_id":"cw-%s","register_id":%q,"device_epoch":1,"reported_seq":0,"items":[{"client_id":%q,"cashier_id":%q,`+
 		`"customer_id":%q,"items":[{"product_id":%q,"quantity":"1"}],`+
 		`"tenders":[{"method":"account","amount_cents":105}],"client_created_at":%q}]}`,
 		uuid.NewString()[:8], regNB, client, uuid.NewString(), lone.String(),

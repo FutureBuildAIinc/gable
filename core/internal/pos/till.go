@@ -42,6 +42,23 @@ func expectedFromPayments(openingFloat httpx.Cents, tendered map[string]int64, c
 	return expected
 }
 
+// withHeldOffline adds the money of the session's offline sales that wait on
+// a manager to the drawer's expected figures (CP-13 OW): the clerk took it,
+// so the count balances while the sale waits.
+func withHeldOffline(expected, held map[string]int64) map[string]int64 {
+	for m, v := range held {
+		expected[m] += v
+	}
+	return expected
+}
+
+func heldOrNil(held map[string]int64) map[string]int64 {
+	if len(held) == 0 {
+		return nil
+	}
+	return held
+}
+
 // overShortTotal is the drawer's variance: counted less expected over the
 // methods that are money in the drawer, CASH and CHECK, as the signed net the
 // per-method lines post on the ledger. CARD never joins the sum (cards are
@@ -229,7 +246,8 @@ func (s *Service) TillReport(ctx context.Context, sessionID uuid.UUID) (*TillRep
 		TaxTotalCents:        httpx.Cents(agg.TaxTotalCents),
 		ChangeCents:          httpx.Cents(agg.ChangeCents),
 		TenderedByMethod:     agg.TenderedByMethod,
-		ExpectedByMethod:     expectedFromPayments(session.OpeningFloat, agg.TenderedByMethod, agg.CashRefundsCents, agg.CardRefundsCents, movementNetCash(agg.MovementTotals)),
+		ExpectedByMethod:     withHeldOffline(expectedFromPayments(session.OpeningFloat, agg.TenderedByMethod, agg.CashRefundsCents, agg.CardRefundsCents, movementNetCash(agg.MovementTotals)), agg.OfflineHeldByMethod),
+		OfflineHeldByMethod:  heldOrNil(agg.OfflineHeldByMethod),
 		OverShortByMethod:    session.OverShortByMethod,
 		RefundsByMethod:      refundsByMethod(agg),
 		Movements:            movements,

@@ -149,6 +149,19 @@ func (r *PostgresRepository) ConfirmDeviceMark(ctx context.Context, register str
 	return confirmed, nil
 }
 
+// OpenOfflineExceptionCount answers how many of the register's offline
+// exception rows wait on a manager with nothing posted (open or held), the
+// count the counter shows (ADR 0011 section 3.4, item 660). A sold past
+// warning row whose sale posted is on the manager's list but holds nothing.
+func (r *PostgresRepository) OpenOfflineExceptionCount(ctx context.Context, register string) (int64, error) {
+	var n int64
+	if err := r.ex(ctx).QueryRow(ctx, `SELECT count(*) FROM pos_offline_exceptions
+		WHERE register_id = $1 AND status IN ('open', 'held') AND posted_sale_id IS NULL`, register).Scan(&n); err != nil {
+		return 0, fmt.Errorf("failed to count the register's open offline exceptions: %w", err)
+	}
+	return n, nil
+}
+
 // OfflinePostedRecord reads a posted sale by id for the duplicate check.
 func (r *PostgresRepository) OfflinePostedRecord(ctx context.Context, id uuid.UUID) (*offlinePosted, error) {
 	p := &offlinePosted{}

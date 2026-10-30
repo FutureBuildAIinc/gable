@@ -6,26 +6,49 @@
       "path": "/api/v1/pos/sync",
       "body": {
         "batch_id": "r1c-batch-1",
+        "device_epoch": 1,
         "items": [
           {
+            "business_date": "<day+0>",
             "cashier_id": "<id-1>",
-            "client_created_at": "<ts+0d>",
+            "change_cents": 0,
             "client_id": "<id-2>",
-            "items": [
+            "confirmed_mark": 0,
+            "currency": "USD",
+            "customer_id": null,
+            "device_epoch": 1,
+            "device_seq": 1,
+            "device_sig": "00",
+            "lines": [
               {
-                "product_id": "<id-3>",
+                "id": "<id-3>",
+                "product_id": "<id-4>",
                 "quantity": "1"
               }
             ],
+            "offline_ref": "REG-01-1-000001",
+            "prev_digest": "GENESIS",
+            "queue_count": 1,
+            "queue_total_cents": 2000,
+            "register_id": "REG-01",
+            "snapshot_id": "<id-5>",
+            "sold_at": "<ts+0d>",
+            "subtotal_cents": 2000,
+            "tax_cents": 0,
+            "tax_exempt": false,
+            "tax_rate": "0.000000",
             "tenders": [
               {
                 "amount_cents": 20000,
                 "method": "cash"
               }
-            ]
+            ],
+            "till_session_id": "<id-6>",
+            "total_cents": 2000
           }
         ],
-        "register_id": "REG-01"
+        "register_id": "REG-01",
+        "reported_seq": 1
       }
     },
     "response": {
@@ -34,10 +57,10 @@
       "body": {
         "error": {
           "code": "money_never_queues",
-          "message": "money never queues offline: complete the sale online"
+          "message": "money never queues offline at this branch: complete the sale online"
         },
         "meta": {
-          "request_id": "<id-4>"
+          "request_id": "<id-7>"
         }
       }
     }
@@ -49,26 +72,49 @@
       "path": "/api/v1/pos/sync",
       "body": {
         "batch_id": "r1c-batch-1",
+        "device_epoch": 1,
         "items": [
           {
+            "business_date": "<day+0>",
             "cashier_id": "<id-1>",
-            "client_created_at": "<ts+0d>",
+            "change_cents": 0,
             "client_id": "<id-2>",
-            "items": [
+            "confirmed_mark": 0,
+            "currency": "USD",
+            "customer_id": null,
+            "device_epoch": 1,
+            "device_seq": 1,
+            "device_sig": "00",
+            "lines": [
               {
-                "product_id": "<id-3>",
+                "id": "<id-3>",
+                "product_id": "<id-4>",
                 "quantity": "1"
               }
             ],
+            "offline_ref": "REG-01-1-000001",
+            "prev_digest": "GENESIS",
+            "queue_count": 1,
+            "queue_total_cents": 2000,
+            "register_id": "REG-01",
+            "snapshot_id": "<id-5>",
+            "sold_at": "<ts+0d>",
+            "subtotal_cents": 2000,
+            "tax_cents": 0,
+            "tax_exempt": false,
+            "tax_rate": "0.000000",
             "tenders": [
               {
                 "amount_cents": 20000,
                 "method": "cash"
               }
-            ]
+            ],
+            "till_session_id": "<id-6>",
+            "total_cents": 2000
           }
         ],
-        "register_id": "REG-01"
+        "register_id": "REG-01",
+        "reported_seq": 1
       }
     },
     "response": {
@@ -77,10 +123,10 @@
       "body": {
         "error": {
           "code": "money_never_queues",
-          "message": "money never queues offline: complete the sale online"
+          "message": "money never queues offline at this branch: complete the sale online"
         },
         "meta": {
-          "request_id": "<id-5>"
+          "request_id": "<id-8>"
         }
       }
     }
@@ -92,26 +138,49 @@
       "path": "/api/v1/pos/sync",
       "body": {
         "batch_id": "r1c-batch-2",
+        "device_epoch": 1,
         "items": [
           {
+            "business_date": "<day+0>",
             "cashier_id": "<id-1>",
-            "client_created_at": "<ts+0d>",
-            "client_id": "<id-6>",
-            "items": [
+            "change_cents": 0,
+            "client_id": "<id-9>",
+            "confirmed_mark": 0,
+            "currency": "USD",
+            "customer_id": null,
+            "device_epoch": 1,
+            "device_seq": 2,
+            "device_sig": "00",
+            "lines": [
               {
-                "product_id": "<id-3>",
+                "id": "<id-3>",
+                "product_id": "<id-4>",
                 "quantity": "1"
               }
             ],
+            "offline_ref": "REG-01-1-000002",
+            "prev_digest": "GENESIS",
+            "queue_count": 1,
+            "queue_total_cents": 2000,
+            "register_id": "REG-01",
+            "snapshot_id": "<id-5>",
+            "sold_at": "<ts+0d>",
+            "subtotal_cents": 2000,
+            "tax_cents": 0,
+            "tax_exempt": false,
+            "tax_rate": "0.000000",
             "tenders": [
               {
                 "amount_cents": 1,
                 "method": "cash"
               }
-            ]
+            ],
+            "till_session_id": "<id-6>",
+            "total_cents": 2000
           }
         ],
-        "register_id": "REG-01"
+        "register_id": "REG-01",
+        "reported_seq": 2
       }
     },
     "response": {
@@ -120,10 +189,10 @@
       "body": {
         "error": {
           "code": "money_never_queues",
-          "message": "money never queues offline: complete the sale online"
+          "message": "money never queues offline at this branch: complete the sale online"
         },
         "meta": {
-          "request_id": "<id-7>"
+          "request_id": "<id-10>"
         }
       }
     }
@@ -134,12 +203,14 @@
       "method": "POST",
       "path": "/api/v1/pos/sync",
       "body": {
+        "device_epoch": 1,
         "items": [
           {
-            "client_id": "<id-8>"
+            "client_id": "<id-11>"
           }
         ],
-        "register_id": "REG-01"
+        "register_id": "REG-01",
+        "reported_seq": 0
       }
     },
     "response": {
@@ -152,16 +223,12 @@
             {
               "field": "batch_id",
               "message": "is required"
-            },
-            {
-              "field": "items[0].tenders",
-              "message": "name at least one tender"
             }
           ],
           "message": "one or more fields failed validation"
         },
         "meta": {
-          "request_id": "<id-9>"
+          "request_id": "<id-12>"
         }
       }
     }
@@ -173,7 +240,10 @@
       "path": "/api/v1/pos/sync",
       "body": {
         "batch_id": "r1c-batch-3",
-        "items": []
+        "device_epoch": 1,
+        "items": [],
+        "register_id": "REG-01",
+        "reported_seq": 0
       }
     },
     "response": {
@@ -191,7 +261,46 @@
           "message": "one or more fields failed validation"
         },
         "meta": {
-          "request_id": "<id-10>"
+          "request_id": "<id-13>"
+        }
+      }
+    }
+  },
+  {
+    "name": "pos.sync.no_epoch",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/pos/sync",
+      "body": {
+        "batch_id": "r1c-batch-4",
+        "items": [
+          {
+            "client_id": "<id-11>"
+          }
+        ],
+        "register_id": "REG-01"
+      }
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "validation_failed",
+          "details": [
+            {
+              "field": "device_epoch",
+              "message": "is required: the register's enrolment epoch, one or more"
+            },
+            {
+              "field": "reported_seq",
+              "message": "is required: the last sequence the device assigned under its epoch, zero or more"
+            }
+          ],
+          "message": "one or more fields failed validation"
+        },
+        "meta": {
+          "request_id": "<id-14>"
         }
       }
     }
@@ -212,7 +321,7 @@
           "message": "request body must be a JSON object"
         },
         "meta": {
-          "request_id": "<id-11>"
+          "request_id": "<id-15>"
         }
       }
     }
@@ -231,16 +340,16 @@
       "body": {
         "items": [
           {
-            "branch_id": "<id-12>",
+            "branch_id": "<id-16>",
             "business_day": "<day+0>",
-            "cashier_id": "<id-13>",
+            "cashier_id": "<id-17>",
             "completed_at": "<ts+0d>",
             "created_at": "<ts+0d>",
             "currency": "USD",
-            "customer_id": "<id-14>",
+            "customer_id": "<id-18>",
             "customer_name": "Golden Harness Co",
-            "id": "<id-15>",
-            "invoice_id": "<id-16>",
+            "id": "<id-19>",
+            "invoice_id": "<id-20>",
             "invoice_number": "IN-000054",
             "item_count": 1,
             "number": "POS-000002",
@@ -250,16 +359,16 @@
             "total_cents": 1568
           },
           {
-            "branch_id": "<id-12>",
+            "branch_id": "<id-16>",
             "business_day": "<day+0>",
-            "cashier_id": "<id-13>",
+            "cashier_id": "<id-17>",
             "completed_at": "<ts+0d>",
             "created_at": "<ts+0d>",
             "currency": "USD",
             "customer_id": null,
             "customer_name": null,
-            "id": "<id-17>",
-            "invoice_id": "<id-18>",
+            "id": "<id-21>",
+            "invoice_id": "<id-22>",
             "invoice_number": "IN-000055",
             "item_count": 1,
             "number": "POS-000004",
@@ -269,15 +378,15 @@
             "total_cents": 586
           },
           {
-            "branch_id": "<id-12>",
+            "branch_id": "<id-16>",
             "business_day": "<day+0>",
-            "cashier_id": "<id-13>",
+            "cashier_id": "<id-17>",
             "completed_at": null,
             "created_at": "<ts+0d>",
             "currency": "USD",
-            "customer_id": "<id-14>",
+            "customer_id": "<id-18>",
             "customer_name": "Golden Harness Co",
-            "id": "<id-19>",
+            "id": "<id-23>",
             "invoice_id": null,
             "invoice_number": null,
             "item_count": 0,
@@ -288,15 +397,15 @@
             "total_cents": 0
           },
           {
-            "branch_id": "<id-12>",
+            "branch_id": "<id-16>",
             "business_day": "<day+0>",
-            "cashier_id": "<id-13>",
+            "cashier_id": "<id-17>",
             "completed_at": null,
             "created_at": "<ts+0d>",
             "currency": "USD",
             "customer_id": null,
             "customer_name": null,
-            "id": "<id-20>",
+            "id": "<id-24>",
             "invoice_id": null,
             "invoice_number": null,
             "item_count": 1,

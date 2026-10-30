@@ -437,7 +437,7 @@ func TestKeyBranchPin_WalledRowsHoldThePin(t *testing.T) {
 			regOf(row), f.custID.String(), f.posProd.String())
 	}
 	posSync := func(row uuid.UUID) string {
-		return fmt.Sprintf(`{"batch_id":"pin-%s","register_id":%q,"items":[{"client_id":%q,"cashier_id":%q,`+
+		return fmt.Sprintf(`{"batch_id":"pin-%s","register_id":%q,"device_epoch":1,"reported_seq":0,"items":[{"client_id":%q,"cashier_id":%q,`+
 			`"customer_id":%q,"items":[{"product_id":%q,"quantity":"1"}],`+
 			`"tenders":[{"method":"cash","amount_cents":105}],"client_created_at":%q}]}`,
 			uuid.NewString()[:8], regOf(row), uuid.NewString(), uuid.NewString(), custOf(row).String(),
@@ -610,7 +610,8 @@ func TestKeyBranchPin_WalledRowsHoldThePin(t *testing.T) {
 			body: func(txn uuid.UUID) string {
 				return fmt.Sprintf(`{"transaction_id":%q,"tenders":[{"method":"cash","amount_cents":500}]}`, txn.String())
 			}},
-		{method: "POST", path: "/api/v1/pos/sync", body: posSync, twin: f.txnB, own: f.txnA, first: true},
+		{method: "POST", path: "/api/v1/pos/sync", body: posSync, twin: f.txnB, own: f.txnA, first: true, controlUser: true,
+			noControl: "a machine key is refused the offline sync outright (a person's act, ADR 0011 6.3), so the control is the admin user"},
 		// The creates that take the branch they land on from the body.
 		{method: "POST", path: "/api/v1/customers", twin: f.branchB, own: f.branchA,
 			body: inBranch(`{"account_number":"PINNEW-%s","name":"pin new","primary_branch_id":%q}`)},
