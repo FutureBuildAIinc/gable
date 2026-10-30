@@ -202,6 +202,25 @@ test('the counter: a tinted paint line, its receipt and its mis tint return', as
 });
 
 /**
+ * Shoots the page in light and charcoal at 1440 and 390 into the lane's shot
+ * folder, under one state name, and leaves the viewport at 1440 by 900.
+ */
+async function shootBoth(page: Page, state: string): Promise<void> {
+  const shots = path.join(SHOTS_DIR, 'cp16');
+  fs.mkdirSync(shots, { recursive: true });
+  for (const [size, w, h] of [['1440', 1440, 900], ['390', 390, 844]] as const) {
+    await page.setViewportSize({ width: w, height: h });
+    for (const mode of ['light', 'charcoal'] as const) {
+      const stored = await page.evaluate(() => localStorage.getItem('gable_theme'));
+      const isLight = stored === 'light';
+      if ((mode === 'light') !== isLight) await page.locator('gable-theme-toggle button').first().click();
+      await page.screenshot({ path: path.join(shots, `tint-catalogue-${state}-${mode}-${size}.png`), fullPage: true });
+    }
+  }
+  await page.setViewportSize({ width: 1440, height: 900 });
+}
+
+/**
  * The tint catalogue screen (row CP-16, items 341 and 366): the walk makes
  * its own system and an unlinked base through the API, links the base to the
  * paint product on the Tint Catalogue screen, then rings a charged tinted sale
@@ -222,10 +241,27 @@ test('the tint catalogue screen links a base and a tinted sale rings', async ({ 
   await expect(page.getByRole('heading', { name: 'Tint catalogue' })).toBeVisible();
   await pickOption(page.getByTestId('tint-system-pick'), `Catalogue walk ${run} (CAT-${run})`);
   await expect(page.getByTestId('tint-system-pick')).toContainText(`CAT-${run}`);
+  // The empty state: a fresh system has no bases, colorants, colours or formulas, and a disabled button says what it needs.
+  await expect(page.getByTestId('tint-bases')).toContainText('No bases yet.');
+  await expect(page.getByTestId('tint-colorant-list')).toContainText('No colorants yet.');
+  await expect(page.getByTestId('tint-color-list')).toContainText('No colours yet.');
+  await expect(page.getByTestId('tint-formula-list')).toContainText('No formulas yet.');
+  await expect(page.getByTestId('tint-add-base-needs')).toHaveText('Needs a code and a name.');
+  await shootBoth(page, 'empty');
   await page.getByTestId('tint-new-base-code').fill('DEEP');
   await page.getByTestId('tint-new-base-name').fill('Deep base');
   await page.getByTestId('tint-add-base').click();
   await expect(page.getByTestId('tint-base-link-DEEP')).toContainText('Not linked to a product');
+  await shootBoth(page, 'unlinked');
+
+  // A refused add shows its message in the card that asked, not at the top of the page.
+  await page.getByTestId('tint-new-base-code').fill('DEEP');
+  await page.getByTestId('tint-new-base-name').fill('Deep base again');
+  await page.getByTestId('tint-add-base').click();
+  await expect(page.getByTestId('tint-bases').getByTestId('tint-error')).toBeVisible();
+  await shootBoth(page, 'error');
+  await page.getByTestId('tint-new-base-code').fill('');
+  await page.getByTestId('tint-new-base-name').fill('');
 
   // The screen adds the colorant and the colour.
   await page.getByTestId('tint-new-colorant-code').fill('B1');
@@ -245,10 +281,13 @@ test('the tint catalogue screen links a base and a tinted sale rings', async ({ 
   await page.getByTestId('tint-formula-whole-0').fill('1');
   await page.getByTestId('tint-formula-coarse-0').fill('12');
   await page.getByTestId('tint-add-formula').click();
-  await expect(page.getByTestId('tint-success')).toContainText('Formula added');
+  await expect(page.getByTestId('tint-formulas').getByTestId('tint-success')).toContainText('Formula added');
+  await expect(page.getByTestId('tint-formula-list')).toContainText('Essex Green on Deep base');
 
   // The link: find the paint product and pick it.
   await page.getByTestId('tint-base-find-DEEP').fill(product.sku);
+  await expect(page.getByTestId(`tint-base-pick-DEEP-${product.sku}`)).toBeVisible();
+  await shootBoth(page, 'search');
   await page.getByTestId(`tint-base-pick-DEEP-${product.sku}`).click();
   await expect(page.getByTestId('tint-base-link-DEEP')).toContainText(product.sku);
   const bases = (await (await request.get(`/api/v1/tint/bases?tint_system_id=${system.id}`)).json()) as {
@@ -256,7 +295,7 @@ test('the tint catalogue screen links a base and a tinted sale rings', async ({ 
   };
   expect(bases.items.find((b) => b.code === 'DEEP')?.product_id, 'the link is stored').toBe(product.id);
 
-  // Shots: the screen in light and charcoal at 1440 and 390.
+  // Shots: the finished screen in light and charcoal at 1440 and 390 (names kept from the first round).
   const shots = path.join(SHOTS_DIR, 'cp16');
   fs.mkdirSync(shots, { recursive: true });
   for (const [size, w, h] of [['1440', 1440, 900], ['390', 390, 844]] as const) {
