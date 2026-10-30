@@ -175,8 +175,7 @@ export class LargeCashWorklist extends LitElement {
         <div>
           <h1 class="text-xl font-bold" style=${INK}>Large cash worklist</h1>
           <p class="mt-1 text-sm" style=${MUTED}>
-            Cash receipts over the threshold the dealer owes a filing on. Work them from the top:
-            the nearest deadline first.
+            Cash receipts at or over the threshold, with what each one needs. Work them from the top.
           </p>
         </div>
         ${this._error ? html`

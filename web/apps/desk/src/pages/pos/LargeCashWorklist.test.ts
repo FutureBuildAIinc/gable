@@ -181,7 +181,7 @@ describe("the manager's large cash worklist", () => {
         expect(q(rows[0], 'large-cash-form')).toBeNull();
         // and the whole queue speaks the branch's regime: no IRS, no Form 8300, no BSA, no USD
         const page = el.textContent ?? '';
-        for (const wrong of ['IRS', 'Internal Revenue', '8300', 'BSA', 'USD', 'cents']) {
+        for (const wrong of ['IRS', 'Internal Revenue', '8300', 'BSA', 'USD', 'cents', 'owe', 'filing on']) {
             expect(page).not.toContain(wrong);
         }
         el.remove();
