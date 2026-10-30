@@ -52,6 +52,26 @@ You don't install anything. You don't configure anything. It's already there.
 
 ---
 
+## First run: see Gable running
+
+Right after the clone and `claude` above, type:
+
+> /start-gable
+
+(or say "start Gable locally with demo data"). Claude checks the prerequisites, builds
+and starts the whole stack in Docker with the demo data loaded (Gable Building Supply,
+an invented three yard dealer), proves it is up, and hands you the URL, the sign-in
+personas and Mailpit's inbox. Try Jordan Pike at the counter first; `/stop-gable`
+removes it all.
+
+It works the same on macOS, Linux, and Windows through WSL2. The prerequisites in one
+list: Claude Code; Docker running with compose v2; about 10 GB of disk and roughly
+4 GB of memory free; and the local ports 8080, 5434, 8025 and 1025 free (each has an
+override when one is taken). The stack runs in dev mode with authentication off and
+binds 127.0.0.1 only: your machine, never a server ([`SECURITY.md`](./SECURITY.md)).
+
+---
+
 ## The skills
 
 A **skill** is a set of instructions Claude follows for a particular kind of job. You never
@@ -60,6 +80,7 @@ have to name one — describe what you want and the right skill activates. Each 
 
 | Skill | Shortcut | Use it when |
 |---|---|---|
+| **run-gable-locally** | `/start-gable` | You want the whole ERP running on your machine with demo data. Checks the prerequisites, starts the stack, proves it, and tells you who to sign in as. `/stop-gable` takes it down. |
 | **report-an-issue** | `/file-issue` | Something in Gable behaved wrong and you want it fixed. Works even if all you can say is "the delivery screen showed the wrong total." |
 | **describe-a-workflow** | `/describe-workflow` | You know how a yard job really works — will-call, dispatch, quoting, picking, POs — and Gable doesn't do it, or does it wrong. **This is the highest-value non-technical contribution in the project.** |
 | **improve-docs** | `/fix-doc` | The documentation is wrong, out of date, or missing. Including "I followed the setup steps and they didn't work." |

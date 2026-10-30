@@ -12,6 +12,37 @@ It's a **commons**: the code is open, the data model is documented, and the
 platform is built to be forked, self-hosted, and extended. Contributions flow
 back so every dealer benefits.
 
+## First run: the whole ERP in one command
+
+Clone the repository, open [Claude Code](https://docs.claude.com/en/docs/claude-code/overview)
+in it, and type `/start-gable` (or just say "start Gable locally with demo
+data"). Claude checks the prerequisites, builds and starts the whole stack in
+Docker with the demo data loaded, proves it is up through the API, and hands
+you the URL, the sign-in personas and how to stop it.
+
+```bash
+git clone https://github.com/FutureBuildAIinc/gable.git
+cd gable
+claude
+```
+
+Then type `/start-gable`. Prerequisites, one list (macOS, Linux, and Windows
+through WSL2):
+
+- Claude Code installed, and a Claude account.
+- Docker running, with compose v2 (Docker Desktop on macOS and on Windows with
+  the WSL2 integration on; Docker Engine with the compose plugin on Linux).
+- About 10 GB of free disk (the first run builds two images and pulls Postgres
+  and Mailpit) and roughly 4 GB of memory free for the builds.
+- The local ports 8080, 5434, 8025 and 1025 free; each has an override when
+  one is taken (`GABLE_WEB_PORT` and friends, see the skill).
+
+The stack runs in dev mode: authentication is off, it binds 127.0.0.1 only, and
+it is for your own machine with invented demo data, never for a server
+([SECURITY.md](./SECURITY.md)). `/stop-gable` removes it all. No Claude Code?
+The same stack is [`make up`](#the-whole-stack-in-docker) (`make up-mail` adds
+the Mailpit inbox), and the [Quickstart](#quickstart) runs it from source.
+
 ## What's here
 
 - **Modular monolith backend** — a single Go binary with 47 domain modules,
@@ -96,7 +127,10 @@ step, `core serve`, `core worker` and the web image (the front door at `/`, the
 desk everywhere else, `/api` proxied to core), then waits until each is healthy.
 Open <http://127.0.0.1:8080>. `make smoke` checks the running stack end to end
 (`scripts/smoke.sh`), and `make down` removes the containers **and** their
-volumes. The stack runs with `AUTH_MODE=dev` and publishes on `127.0.0.1` only:
+volumes. `make up-mail` starts the same stack with Mailpit (compose profile
+`mail`) and the core's outgoing mail routed into it, so mail the demo sends is
+read at <http://127.0.0.1:8025>. The stack runs with `AUTH_MODE=dev` and
+publishes on `127.0.0.1` only:
 local use, never a reachable host. The stack has its own Docker volume
 (compose project `gable-stack`), so `make up`, its seed and `make down` never
 touch the data of a Postgres started with `make db`. If 8080 or 5434 is taken, set `GABLE_WEB_PORT`
