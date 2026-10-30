@@ -58,7 +58,8 @@ func (h *Handler) StartRedirect(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, r, httpx.NotFound("the sign in method "+method+" is not started by navigation"))
 		return
 	}
-	if _, err := httpx.StrictQuery(r); err != nil {
+	shell, err := shellStartOf(r)
+	if err != nil {
 		httpx.WriteError(w, r, err)
 		return
 	}
@@ -70,7 +71,7 @@ func (h *Handler) StartRedirect(w http.ResponseWriter, r *http.Request) {
 		h.limited(w, r, d)
 		return
 	}
-	state, location, err := h.svc.StartRedirect(r.Context(), method)
+	state, location, err := h.svc.StartRedirect(r.Context(), method, shell)
 	switch {
 	case errors.Is(err, ErrUnavailable):
 		httpx.WriteError(w, r, httpx.Unavailable("sign in is unavailable"))
@@ -96,11 +97,16 @@ func (h *Handler) StartMagicLink(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body struct {
-		Email string `json:"email"`
+		Email  string `json:"email"`
+		Client string `json:"client"`
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, 8<<10)
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		httpx.WriteError(w, r, httpx.BadRequest("request body must be {email}"))
+		return
+	}
+	if body.Client != "" {
+		httpx.WriteError(w, r, httpx.BadRequest("the magic link is a web sign in method"))
 		return
 	}
 	if ok, d := h.startByAddress.allow(h.cfg.Trusted.Of(r)); !ok {
@@ -141,16 +147,48 @@ func (h *Handler) Callback(w http.ResponseWriter, r *http.Request) {
 		h.limited(w, r, d)
 		return
 	}
-	id, _, err := h.svc.Callback(r.Context(), cookieState, q.Get("state"), q.Get("userId"), q.Get("secret"), q.Get("failure") != "")
+	res, err := h.svc.Callback(r.Context(), cookieState, q.Get("state"), q.Get("userId"), q.Get("secret"), q.Get("failure") != "")
 	switch {
 	case errors.Is(err, ErrRefused):
+		if res.ShellRedirect != "" {
+			http.Redirect(w, r, res.ShellRedirect, http.StatusSeeOther)
+			return
+		}
 		http.Redirect(w, r, refusedLocation, http.StatusSeeOther)
 	case errors.Is(err, ErrUnavailable):
 		httpx.WriteError(w, r, httpx.Unavailable("sign in is unavailable"))
 	case err != nil:
 		httpx.WriteError(w, r, err)
+	case res.ShellRedirect != "":
+		// A shell never gets a cookie: it gets its one time code at its own
+		// return target.
+		http.Redirect(w, r, res.ShellRedirect, http.StatusSeeOther)
 	default:
-		h.setCookie(w, id, int(h.svc.set.AbsoluteLimit.Seconds()))
+		h.setCookie(w, res.SessionID, int(h.svc.set.AbsoluteLimit.Seconds()))
 		http.Redirect(w, r, "/", http.StatusSeeOther)
 	}
+}
+
+// shellStartOf reads a shell's extra start parameters. With no `client`
+// parameter the start is a web start and takes no query at all.
+func shellStartOf(r *http.Request) (*ShellStart, error) {
+	q := r.URL.Query()
+	if len(q) == 0 {
+		return nil, nil
+	}
+	if q.Get("client") != "shell" {
+		return nil, httpx.BadRequest("unknown query parameter")
+	}
+	for k := range q {
+		switch k {
+		case "client", "code_challenge", "code_challenge_method", "return_to":
+		default:
+			return nil, httpx.BadRequest("unknown query parameter " + k)
+		}
+	}
+	st, err := NewShellStart(q.Get("code_challenge"), q.Get("code_challenge_method"), q.Get("return_to"))
+	if err != nil {
+		return nil, httpx.BadRequest("the shell start needs an S256 code_challenge and a registered return_to")
+	}
+	return st, nil
 }

@@ -27,6 +27,10 @@ type Session struct {
 	AbsoluteExpiresAt time.Time
 	RevokedAt         *time.Time
 	RevokedReason     string
+	// A shell's session also holds the hash of its current refresh token and
+	// its token family (nil for a web session).
+	RefreshHash []byte
+	TokenFamily *uuid.UUID
 }
 
 // Store is the session table. Every write is a single conditional statement,
@@ -46,9 +50,11 @@ const sessionCols = `id_hash, sub, appwrite_user_id, client_kind, roles, roles_r
 func (s *Store) Create(ctx context.Context, x Session) error {
 	_, err := s.db.GetExecutor(ctx).Exec(ctx,
 		`INSERT INTO staff_sessions (id_hash, sub, appwrite_user_id, client_kind, roles, roles_read_at,
-		                             created_at, last_used_at, idle_seconds, absolute_expires_at)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $7, $8, $9)`,
-		x.IDHash, x.Sub, x.AppwriteUserID, x.ClientKind, x.Roles, x.RolesReadAt, x.CreatedAt, x.IdleSeconds, x.AbsoluteExpiresAt)
+		                             created_at, last_used_at, idle_seconds, absolute_expires_at,
+		                             refresh_token_hash, token_family)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $7, $8, $9, $10, $11)`,
+		x.IDHash, x.Sub, x.AppwriteUserID, x.ClientKind, x.Roles, x.RolesReadAt, x.CreatedAt, x.IdleSeconds, x.AbsoluteExpiresAt,
+		x.RefreshHash, x.TokenFamily)
 	return err
 }
 
@@ -118,4 +124,34 @@ func (s *Store) Sweep(ctx context.Context, now, revokedBefore time.Time) (int64,
 		return tag.RowsAffected(), err
 	}
 	return tag.RowsAffected(), nil
+}
+
+// RotateShell swaps a shell session's access token and refresh token for new
+// ones in one conditional update, only when the presented refresh token is the
+// family's current one and the row is live. It reports whether it rotated.
+func (s *Store) RotateShell(ctx context.Context, family uuid.UUID, oldRefresh, newIDHash, newRefresh []byte, now time.Time) (Session, bool, error) {
+	var x Session
+	err := s.db.GetExecutor(ctx).QueryRow(ctx,
+		`UPDATE staff_sessions SET id_hash = $3, refresh_token_hash = $4, last_used_at = $5
+		  WHERE token_family = $1 AND refresh_token_hash = $2 AND client_kind = 'shell'
+		    AND revoked_at IS NULL AND absolute_expires_at > $5
+		  RETURNING `+sessionCols, family, oldRefresh, newIDHash, newRefresh, now).
+		Scan(&x.IDHash, &x.Sub, &x.AppwriteUserID, &x.ClientKind, &x.Roles, &x.RolesReadAt, &x.CreatedAt,
+			&x.LastUsedAt, &x.IdleSeconds, &x.AbsoluteExpiresAt, &x.RevokedAt, &x.RevokedReason)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Session{}, false, nil
+	}
+	if err != nil {
+		return Session{}, false, err
+	}
+	return x, true, nil
+}
+
+// RevokeFamily revokes every live session of a token family and reports how
+// many it revoked.
+func (s *Store) RevokeFamily(ctx context.Context, family uuid.UUID, reason string, now time.Time) (int64, error) {
+	tag, err := s.db.GetExecutor(ctx).Exec(ctx,
+		`UPDATE staff_sessions SET revoked_at = $2, revoked_reason = $3
+		  WHERE token_family = $1 AND revoked_at IS NULL`, family, now, reason)
+	return tag.RowsAffected(), err
 }

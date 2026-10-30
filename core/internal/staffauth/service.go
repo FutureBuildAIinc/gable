@@ -275,13 +275,19 @@ func (s *Service) admitSession(ctx context.Context, aws appwrite.Session, client
 	if err := appwrite.Admit(user, m, found); err != nil {
 		return refuse(refusalReason(err), ErrRefused)
 	}
+	roles := sortRoles(appwrite.MapRoles(m.Roles))
+	sub := Subject(s.set.ProjectID, aws.UserID)
+	if clientKind == "shell" {
+		// A shell's session is issued at the redemption of its one time code
+		// (shell.go), after a fresh membership read; the callback only
+		// admits.
+		return "", Identity{Sub: sub, Roles: roles}, nil
+	}
 	id, err := newSessionID()
 	if err != nil {
 		return "", Identity{}, err
 	}
 	now := s.now().UTC().Truncate(time.Microsecond)
-	roles := sortRoles(appwrite.MapRoles(m.Roles))
-	sub := Subject(s.set.ProjectID, aws.UserID)
 	row := Session{
 		IDHash: hashID(id), Sub: sub, AppwriteUserID: aws.UserID, ClientKind: clientKind, Roles: roles,
 		RolesReadAt: now, CreatedAt: now, IdleSeconds: int(s.set.IdleLimit.Seconds()),
@@ -319,6 +325,17 @@ func (s *Service) SignOut(ctx context.Context, id string) {
 // ErrNoSession: an unknown, revoked, idle expired or absolutely expired
 // session, a person removed at refresh, or a snapshot too old to trust.
 func (s *Service) Resolve(ctx context.Context, id string) (*middleware.UserClaims, error) {
+	return s.resolve(ctx, id, "web")
+}
+
+// ResolveShell is Resolve for a shell access token. A cookie id never
+// resolves here and a shell token never resolves in Resolve: the kinds are
+// held apart by the row.
+func (s *Service) ResolveShell(ctx context.Context, token string) (*middleware.UserClaims, error) {
+	return s.resolve(ctx, token, "shell")
+}
+
+func (s *Service) resolve(ctx context.Context, id, kind string) (*middleware.UserClaims, error) {
 	if id == "" {
 		return nil, ErrNoSession
 	}
@@ -328,6 +345,9 @@ func (s *Service) Resolve(ctx context.Context, id string) (*middleware.UserClaim
 			return nil, ErrNoSession
 		}
 		return nil, err
+	}
+	if row.ClientKind != kind {
+		return nil, ErrNoSession
 	}
 	now := s.now().UTC()
 	if row.RevokedAt != nil || !now.Before(row.AbsoluteExpiresAt) ||
@@ -357,6 +377,9 @@ func (s *Service) Refresh(ctx context.Context, id string) (Identity, error) {
 			return Identity{}, ErrNoSession
 		}
 		return Identity{}, err
+	}
+	if row.ClientKind != "web" {
+		return Identity{}, ErrNoSession
 	}
 	now := s.now().UTC()
 	if row.RevokedAt != nil || !now.Before(row.AbsoluteExpiresAt) {

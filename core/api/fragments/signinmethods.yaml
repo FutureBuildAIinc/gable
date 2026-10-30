@@ -99,7 +99,40 @@ paths:
           schema:
             type: string
             enum: [google, microsoft, oidc]
+        - name: client
+          in: query
+          required: false
+          description: >-
+            Set to shell by a Tauri shell. A shell start must also carry
+            code_challenge, code_challenge_method and return_to; a web start
+            takes no query at all.
+          schema:
+            type: string
+            enum: [shell]
+        - name: code_challenge
+          in: query
+          required: false
+          description: The PKCE S256 challenge, 43 base64url characters.
+          schema:
+            type: string
+        - name: code_challenge_method
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [S256]
+        - name: return_to
+          in: query
+          required: false
+          description: >-
+            Where the callback sends the shell's browser with its one time
+            code: gable://auth/callback, or http://127.0.0.1:{port}/auth/callback
+            or http://[::1]:{port}/auth/callback. Any other target is a 400.
+          schema:
+            type: string
       responses:
+        "400":
+          $ref: "#/components/responses/WireBadRequest"
         "302":
           description: To Appwrite's provider redirect; the state cookie is set.
           headers:

@@ -36,6 +36,21 @@ const SessionCookieName = "gable_session"
 // by the session cookie must carry; a cross site form cannot set it.
 const CSRFHeaderName = "X-Gable-CSRF"
 
+// ShellTokenPrefix is the fixed prefix of a shell access token (ADR 0012
+// section 3), distinct from the machine key shape (sk_live_).
+const ShellTokenPrefix = "gst_"
+
+// IsShellToken reports whether a bearer value has the shell access token shape.
+func IsShellToken(v string) bool { return strings.HasPrefix(v, ShellTokenPrefix) }
+
+// ShellResolver resolves a shell access token to claims. A session resolver
+// that also implements it makes the auth layer accept shell bearers; the
+// cookie path never accepts a shell token and this path never accepts a
+// cookie id.
+type ShellResolver interface {
+	ResolveShell(ctx context.Context, token string) (*UserClaims, error)
+}
+
 // ErrSessionInvalid is a resolver's answer for a session id that is unknown,
 // revoked or expired.
 var ErrSessionInvalid = errors.New("middleware: session invalid")
@@ -150,6 +165,31 @@ func (m *AuthMiddleware) Handler(next http.Handler) http.Handler {
 			return
 		}
 		tokenString := parts[1]
+
+		// 1a. A shell access token, by its own fixed prefix. It is resolved
+		// to the shell's row in staff_sessions; there is no CSRF header on
+		// this path because it is not a cookie request. A shell token that
+		// does not resolve is refused here, never passed to another check.
+		if IsShellToken(tokenString) {
+			shells, ok := m.sessions.(ShellResolver)
+			if !ok || m.sessions == nil {
+				respondAuthError(w, r, http.StatusUnauthorized, "unauthorized", "invalid token")
+				return
+			}
+			claims, rerr := shells.ResolveShell(r.Context(), tokenString)
+			if rerr != nil {
+				if errors.Is(rerr, ErrSessionInvalid) {
+					respondAuthError(w, r, http.StatusUnauthorized, "unauthorized", "invalid session")
+				} else {
+					m.logger.Error("Shell session resolve failed", "error", rerr)
+					respondAuthError(w, r, http.StatusServiceUnavailable, "unavailable", "sign in is unavailable")
+				}
+				return
+			}
+			ctx := context.WithValue(r.Context(), UserContextKey, claims)
+			next.ServeHTTP(w, r.WithContext(ctx))
+			return
+		}
 
 		// 1b. A Bearer machine key is not a JWT: dispatch by shape before
 		// the JWT parser sees it. With no machine-key core wired the token
