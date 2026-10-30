@@ -108,6 +108,10 @@ type offlineVerdict struct {
 	businessDate time.Time
 	item         *offlineItem
 	warnings     []uuid.UUID
+	// latePost is a manager's late post (ADR 0011 3.4, slice O4): the sale
+	// attaches to no till session, so the body skips the session check and
+	// the drawer attach, and books on businessDate, the earliest open date
+	latePost bool
 }
 
 // offlineRefusal is a coded reason an item goes to the exception queue.
@@ -536,25 +540,8 @@ func (s *Service) insertOfflineSale(ctx context.Context, it *offlineItem, v *off
 		r := uuid.MustParse(*it.Sale.ReplacesSaleID)
 		replaced = &r
 	}
-	// ADR 0005 section 11 before any write: the replaced cart's row (step
-	// 1, whatever its id: the new sale row is not yet visible, so no other
-	// act can wait on it), the session FOR SHARE (1b) and the customer's
-	// credit lock (1a), all before the sale row's insert, whose customer
-	// foreign key takes the customer row FOR KEY SHARE; a live completion of
-	// the cart or the customer holds the cart and 1a, then the customer row
-	// FOR UPDATE (step 7)
-	if replaced != nil {
-		if err := s.settleReplacedCart(ctx, it, *replaced); err != nil {
-			return nil, err
-		}
-	}
-	if err := s.repo.LockTillSession(ctx, session, false); err != nil {
+	if err := s.lockBeforeOfflineInsert(ctx, it, replaced, &session, sale.CustomerID); err != nil {
 		return nil, err
-	}
-	if sale.CustomerID != nil {
-		if err := s.repo.LockCustomerCredit(ctx, *sale.CustomerID); err != nil {
-			return nil, err
-		}
 	}
 	if err := s.repo.CreateSale(ctx, sale); err != nil {
 		return nil, err
@@ -570,6 +557,31 @@ func (s *Service) insertOfflineSale(ctx context.Context, it *offlineItem, v *off
 		return nil, err
 	}
 	return sale, nil
+}
+
+// lockBeforeOfflineInsert takes ADR 0005 section 11's locks before an
+// offline sale's row is written: the replaced cart's row (step 1, whatever
+// its id: the new sale row is not yet visible, so no other act can wait on
+// it), the session FOR SHARE (1b, when there is one) and the customer's
+// credit lock (1a), all before the sale row's insert, whose customer foreign
+// key takes the customer row FOR KEY SHARE; a live completion of the cart or
+// the customer holds the cart and 1a, then the customer row FOR UPDATE (step
+// 7). The sync and every resolution that posts share it.
+func (s *Service) lockBeforeOfflineInsert(ctx context.Context, it *offlineItem, replaced, session, customer *uuid.UUID) error {
+	if replaced != nil {
+		if err := s.settleReplacedCart(ctx, it, *replaced); err != nil {
+			return err
+		}
+	}
+	if session != nil {
+		if err := s.repo.LockTillSession(ctx, *session, false); err != nil {
+			return err
+		}
+	}
+	if customer != nil {
+		return s.repo.LockCustomerCredit(ctx, *customer)
+	}
+	return nil
 }
 
 // offlineLines builds the sale lines as the device recorded them: the price,

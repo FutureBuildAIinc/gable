@@ -357,6 +357,11 @@ func (s *Service) CloseBranchDay(ctx context.Context, branch uuid.UUID, date, sl
 		if len(blocked) > 0 {
 			return dayBlockedError(blocked)
 		}
+		// an offline sale of the day or earlier still with a manager (ADR
+		// 0011 3.4), read without a row lock under the day lock
+		if err := s.offlineHoldsDay(ctx, branch, date); err != nil {
+			return err
+		}
 		snapshot := *day
 		snapshot.Close = nil
 		totals, err := json.Marshal(snapshot)
