@@ -222,3 +222,90 @@ func (c *Client) DeleteSessionAsUser(ctx context.Context, sessionID, secret stri
 	_, err := c.do(ctx, http.MethodDelete, "/v1/account/sessions/"+sessionID, nil, false, secret)
 	return err
 }
+
+// OAuth2TokenURL builds the address the browser navigates to so Appwrite runs
+// the provider redirect for provider (ADR 0012 section 4). It is navigation
+// only: the URL carries the project id and the two return URLs, never the API
+// key, and nothing is called here. Appwrite appends the user id and the one
+// time secret to success.
+func (c *Client) OAuth2TokenURL(provider, success, failure string) string {
+	q := url.Values{}
+	q.Set("project", c.ProjectID)
+	q.Set("success", success)
+	q.Set("failure", failure)
+	return strings.TrimRight(c.Endpoint, "/") + "/v1/account/tokens/oauth2/" + url.PathEscape(provider) + "?" + q.Encode()
+}
+
+// CreateSessionFromToken spends a user id and one time secret (an OAuth2 or
+// magic URL token) for an Appwrite session, server side with the key.
+func (c *Client) CreateSessionFromToken(ctx context.Context, userID, secret string) (Session, error) {
+	raw, err := c.do(ctx, http.MethodPost, "/v1/account/sessions/token", map[string]string{
+		"userId": userID,
+		"secret": secret,
+	}, true, "")
+	if err != nil {
+		return Session{}, err
+	}
+	var out struct {
+		ID     string `json:"$id"`
+		UserID string `json:"userId"`
+		Secret string `json:"secret"`
+	}
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return Session{}, err
+	}
+	return Session{ID: out.ID, UserID: out.UserID, Secret: out.Secret}, nil
+}
+
+// FindUserByEmail returns the user whose email is exactly email; found is
+// false when Appwrite holds none. More than one match is an error, never a
+// pick.
+func (c *Client) FindUserByEmail(ctx context.Context, email string) (u User, found bool, err error) {
+	// Appwrite 1.5 and later take each query as a JSON object.
+	byEmail, err := json.Marshal(map[string]any{"method": "equal", "attribute": "email", "values": []string{email}})
+	if err != nil {
+		return User{}, false, err
+	}
+	pageSize, err := json.Marshal(map[string]any{"method": "limit", "values": []int{2}})
+	if err != nil {
+		return User{}, false, err
+	}
+	q := url.Values{}
+	q.Add("queries[]", string(byEmail))
+	q.Add("queries[]", string(pageSize))
+	raw, err := c.do(ctx, http.MethodGet, "/v1/users?"+q.Encode(), nil, true, "")
+	if err != nil {
+		return User{}, false, err
+	}
+	var out struct {
+		Users []User `json:"users"`
+	}
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return User{}, false, err
+	}
+	var match []User
+	for _, candidate := range out.Users {
+		if strings.EqualFold(candidate.Email, email) {
+			match = append(match, candidate)
+		}
+	}
+	switch len(match) {
+	case 0:
+		return User{}, false, nil
+	case 1:
+		return match[0], true, nil
+	}
+	return User{}, false, errors.New("appwrite: more than one user holds that email")
+}
+
+// CreateMagicURLToken asks Appwrite to email userID a sign in link whose
+// target is redirectURL. The id must be an existing user's: Appwrite creates
+// a user for an id it has not seen, so the caller never passes a new one.
+func (c *Client) CreateMagicURLToken(ctx context.Context, userID, email, redirectURL string) error {
+	_, err := c.do(ctx, http.MethodPost, "/v1/account/tokens/magic-url", map[string]any{
+		"userId": userID,
+		"email":  email,
+		"url":    redirectURL,
+	}, true, "")
+	return err
+}

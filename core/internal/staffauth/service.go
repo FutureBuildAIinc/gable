@@ -89,6 +89,10 @@ type Service struct {
 	log   *slog.Logger
 
 	floor *floorWatch
+
+	// rdir and origin turn the redirect methods on (WithRedirects).
+	rdir   RedirectDirectory
+	origin string
 }
 
 // VersionReader reads the Appwrite server version; *appwrite.Client does.
@@ -106,6 +110,9 @@ type floorWatch struct {
 	last     time.Time
 	closed   bool
 	inFlight bool
+	// verified is set once a version at or above the floor has been read; the
+	// provider redirect methods stay closed until then.
+	verified bool
 }
 
 // WithFloorWatch makes the service re-check the Appwrite version while it
@@ -158,6 +165,7 @@ func (s *Service) floorClosed(ctx context.Context) bool {
 	if res.err == nil && res.v != "" {
 		wasClosed := f.closed
 		f.closed = appwrite.CheckFloor(res.v) != nil
+		f.verified = !f.closed
 		if f.closed && !wasClosed {
 			s.log.Error("Appwrite is below the 2.0.0 floor; every Appwrite method is closed", "version", res.v)
 		}
@@ -240,13 +248,21 @@ func (s *Service) SignIn(ctx context.Context, email, password, clientKind string
 		s.log.Warn("appwrite sign in unavailable", "error", err)
 		return "", Identity{}, ErrUnavailable
 	}
+	return s.admitSession(ctx, aws, clientKind, refuse)
+}
+
+// admitSession is the end every sign in method shares: read the account and
+// the membership, end the Appwrite session the method opened, and issue the
+// core's own session to an admitted person.
+func (s *Service) admitSession(ctx context.Context, aws appwrite.Session, clientKind string,
+	refuse func(string, error) (string, Identity, error)) (string, Identity, error) {
 	// Nothing Appwrite issued outlives this call.
 	defer func() {
 		if err := s.dir.DeleteSessionAsUser(context.WithoutCancel(ctx), aws.ID, aws.Secret); err != nil {
 			s.log.Warn("ending the appwrite session failed", "error", err)
 		}
 	}()
-	cctx, cancel = context.WithTimeout(ctx, s.set.CallTimeout)
+	cctx, cancel := context.WithTimeout(ctx, s.set.CallTimeout)
 	defer cancel()
 	user, err := s.dir.GetUser(cctx, aws.UserID)
 	if err != nil {
