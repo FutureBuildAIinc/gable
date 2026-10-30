@@ -863,7 +863,7 @@ func Run() {
 	// configuration (an unset value wires no device, so production runs no
 	// simulator). A real terminal provider wires here beside it.
 	terminalLedger := payment.NewTerminalLedger(db).WithAuditLog(auditLog)
-	if sim := payment.NewSimulatedTerminalFromEnv(cfg.POSTerminalSimulator, terminalLedger); sim != nil {
+	if sim := payment.NewSimulatedTerminalFromEnv(cfg.POSTerminalSimulator, payment.NewSimulatedSurchargeSink(terminalLedger)); sim != nil {
 		posSvc.WithTerminal(sim, terminalLedger)
 		logger.Warn("the simulated card terminal is wired: a demo stack only, never a production configuration",
 			"script", cfg.POSTerminalSimulator)

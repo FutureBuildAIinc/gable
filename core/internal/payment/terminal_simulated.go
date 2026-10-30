@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"sync"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 // The simulated terminal (CP-05, IX-01): a TerminalProvider driver with
@@ -47,6 +49,14 @@ const (
 // delivers. The terminal ledger's ApplyDeviceAnswer is the production sink.
 type AnswerSink interface {
 	ApplyDeviceAnswer(ctx context.Context, a TerminalAnswer) (AnswerOutcome, error)
+}
+
+// HeldAnswerSink is the optional half of a sink that keeps what a held
+// approval charged above the leg (CP-15): the leg stays unanswered for the
+// manager item, and the manager's authorized resolution books or puts back
+// that figure as the card fee. The terminal ledger implements it.
+type HeldAnswerSink interface {
+	HoldDeviceAnswer(ctx context.Context, intentID uuid.UUID, feeCents int64) error
 }
 
 // SimulatedTerminal is the scripted TerminalProvider of tests and demo
@@ -195,4 +205,36 @@ func (s *SimulatedTerminal) SettlementBatch(ctx context.Context, deviceID string
 			Verdict: "authorized", AmountCents: d.AmountCents, Brand: "VISA", Last4: "4242"})
 	}
 	return out, nil
+}
+
+// SimulatedSurchargeSink is the answer sink of a demo stack standing in for a
+// processor enrolled in surcharging (CP-15): it adds the branch's rate to an
+// authorized sale answer when the branch's switch is on, rounded half up to
+// the cent, and lands the answer in the ledger. It exists so a demo stack and
+// the Playwright run can show a fee without a real processor; a production
+// configuration never wires it, and the fee on a real answer is the
+// processor's own figure.
+type SimulatedSurchargeSink struct {
+	ledger *TerminalLedger
+}
+
+// NewSimulatedSurchargeSink wraps the ledger the simulated device answers into.
+func NewSimulatedSurchargeSink(ledger *TerminalLedger) SimulatedSurchargeSink {
+	return SimulatedSurchargeSink{ledger: ledger}
+}
+
+// ApplyDeviceAnswer adds the branch's fee to an authorized sale answer and
+// lands it in the ledger.
+func (s SimulatedSurchargeSink) ApplyDeviceAnswer(ctx context.Context, a TerminalAnswer) (AnswerOutcome, error) {
+	if a.Verdict == "authorized" && a.FeeCents == 0 {
+		if in, err := s.ledger.Get(ctx, a.IntentID); err == nil && in.Kind == TerminalKindSale {
+			var enabled bool
+			var bps int64
+			if err := s.ledger.db.GetExecutor(ctx).QueryRow(ctx,
+				`SELECT card_surcharge_enabled, card_surcharge_bps FROM locations WHERE id = $1`, in.BranchID).Scan(&enabled, &bps); err == nil && enabled {
+				a.FeeCents = (in.AmountCents*bps + 5000) / 10000
+			}
+		}
+	}
+	return s.ledger.ApplyDeviceAnswer(ctx, a)
 }

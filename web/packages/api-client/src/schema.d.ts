@@ -18646,6 +18646,11 @@ export interface components {
              */
             amount_cents: number;
             /**
+             * Format: int64
+             * @description The card fee the processor added on top of the tender (CP-15): the device's figure, stored, never part of the sale's total or tax. Zero when none.
+             */
+            surcharge_cents: number;
+            /**
              * Format: uuid
              * @description The payment the completion recorded (none for an account or store credit leg).
              */
@@ -19281,7 +19286,18 @@ export interface components {
                 tint_charge: components["schemas"]["TintChargeRule"];
                 /** @description The dealer's tinted no return policy: a tinted can is not taken back. Off unless the dealer says so, because the rule is a dealer policy and not a law. */
                 tinted_no_return: boolean;
+                /** @description The card fee rule of the branch the caller works in (CP-15), or of the default branch in a single branch deployment; null when no branch is known. Off by default. */
+                card_surcharge: components["schemas"]["PosCardSurcharge"] | null;
             };
+        };
+        /** @description One branch's card fee rule (CP-15). It records the dealer's intent and the disclosure the clerk and customer see; the processor's enrolment decides the charge, and its answer's figure is what books. */
+        PosCardSurcharge: {
+            /** Format: uuid */
+            branch_id: string;
+            /** @description Off by default. */
+            enabled: boolean;
+            /** @description The rate shown, in basis points (300 is 3 percent). */
+            rate_bps: number;
         };
         PosSettingsRequest: {
             rules: {
@@ -19306,6 +19322,11 @@ export interface components {
                 tint_charge?: components["schemas"]["TintChargeRule"];
                 /** @description The dealer's tinted no return policy. Absent is off (the rule is a dealer policy and not a law). */
                 tinted_no_return?: boolean;
+                /** @description The card fee rule of the branch the caller works in (CP-15). Absent leaves it as it is. A rate above 300 basis points (the card brands' 3 percent cap) is a 400 naming the field; a write with no branch known is a 409 branch_required. */
+                card_surcharge?: {
+                    enabled: boolean;
+                    rate_bps: number;
+                };
             };
             /**
              * Format: int64
