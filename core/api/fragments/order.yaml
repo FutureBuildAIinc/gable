@@ -659,6 +659,7 @@ components:
       - stock_uom
       - stock_quantity
       - tally
+      - tint
       - unit_price_ten_thousandths
       - priced_unit_price_ten_thousandths
       - price_source
@@ -769,6 +770,11 @@ components:
           - $ref: '#/components/schemas/Tally'
           - type: 'null'
           description: The pieces by length a random length line carries (ADR 0006 section 4); null on every other line.
+        tint:
+          oneOf:
+          - $ref: '#/components/schemas/LineTint'
+          - type: 'null'
+          description: The paint line's tint record (row CP-16); null on every other line.
         unit_price_ten_thousandths:
           type:
           - integer
@@ -923,6 +929,7 @@ components:
       - stock_uom
       - stock_quantity
       - tally
+      - tint
       - unit_price_ten_thousandths
       - priced_unit_price_ten_thousandths
       - price_source
@@ -1037,6 +1044,11 @@ components:
           - $ref: '#/components/schemas/Tally'
           - type: 'null'
           description: The pieces by length a random length line carries (ADR 0006 section 4); null on every other line.
+        tint:
+          oneOf:
+          - $ref: '#/components/schemas/LineTint'
+          - type: 'null'
+          description: The paint line's tint record (row CP-16); null on every other line.
         unit_price_ten_thousandths:
           type:
           - integer

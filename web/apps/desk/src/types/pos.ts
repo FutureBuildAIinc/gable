@@ -25,6 +25,34 @@ export type LineType = 'product' | 'kit' | 'component' | 'charge' | 'text';
 export type PriceSource = 'price_list' | 'quote' | 'override' | 'manual' | 'none';
 
 /** One line of a counter sale: the shared salesdoc shape (ADR 0005 2.2). */
+
+/** A colorant amount as the manufacturer guides print it: whole ounces, a count of the coarse 1/32 step and a count of the fine 1/denominator step. */
+export interface TintAmount {
+    whole_oz: number;
+    increments_coarse: number;
+    increments_fine: number;
+    unit_denominator: number;
+}
+
+/** One colorant of a tint. */
+export interface TintComponent {
+    colorant_code: string;
+    colorant_name: string;
+    amount: TintAmount;
+}
+
+/** A paint line's tint record (row CP-16): the base, the colour and the formula frozen on the sale. */
+export interface LineTint {
+    formula_id: string | null;
+    color_code: string;
+    color_name: string;
+    base_code: string;
+    container_size_code: string;
+    rescaled: boolean;
+    tint_charge_cents: number | null;
+    components: TintComponent[];
+}
+
 export interface SaleLine {
     id: string;
     position: number;
@@ -66,6 +94,8 @@ export interface SaleLine {
     manual_weight_reason: string | null;
     weight_captured_by: string | null;
     weight_captured_at: string | null;
+    /** The paint line's tint record, null on every other line (row CP-16). */
+    tint: LineTint | null;
     created_at: string;
 }
 
@@ -210,6 +240,24 @@ export interface CheckIDRule {
     over_cents: number | null;
 }
 
+/** One tier of the dealer's tint charge rule: the base tier it covers, the colorant floor it covers and the charge. */
+export interface TintChargeTier {
+    /** The base tier this tier covers: '' is any base, 'flat' the ordinary one, 'deep' the deepest of the system. */
+    base_tier: '' | 'flat' | 'deep';
+    /** The lowest colorant total in fluid ounces this tier covers; '' is any total. */
+    min_colorant_oz: string;
+    /** The charge for a tint this tier covers, in cents. */
+    charge_cents: number;
+}
+
+/** The dealer's tint charge rule: the flat figure per container and the tiers that may cover it. */
+export interface TintChargeRule {
+    /** The charge per container when no tier covers the tint; 0 means the tint is folded into the shelf price. */
+    flat_cents: number;
+    /** The dealer's tiers: the most specific tier that covers the tint wins. */
+    tiers: TintChargeTier[];
+}
+
 /** The counter's named dealer rules (GET/PUT /api/v1/pos/settings). */
 export interface PosRules {
     check_limit_cents: number | null;
@@ -218,6 +266,10 @@ export interface PosRules {
     restocking_fees: Record<string, number>;
     /** The suggested fee for each reason, read only (the read fills it; a write never carries it). */
     restocking_fee_defaults?: Record<string, number>;
+    /** The dealer's tint charge rule (row CP-16). */
+    tint_charge?: TintChargeRule;
+    /** The dealer's tinted no return policy: a tinted can is not taken back. */
+    tinted_no_return?: boolean;
 }
 
 /** The figures of a return before it is taken (POST /api/v1/pos/returns/preview). */
@@ -290,7 +342,7 @@ export interface ReturnLine {
 }
 
 /** The closed lowercase list of return reasons; an absent reason is other. */
-export type ReturnReasonCode = 'defective' | 'damaged' | 'wrong_item' | 'ordered_wrong' | 'changed_mind' | 'overbought' | 'other';
+export type ReturnReasonCode = 'defective' | 'damaged' | 'wrong_item' | 'ordered_wrong' | 'changed_mind' | 'overbought' | 'mis_tint' | 'other';
 
 export interface ReturnReason {
     code: ReturnReasonCode;

@@ -534,4 +534,3 @@ func TestToday_TheDaysEdgesAndSummaryWindowAcrossUTCHours(t *testing.T) {
 		})
 	}
 }
-

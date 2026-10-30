@@ -497,6 +497,41 @@ func exemptionBodyCustomers() func(ctx context.Context, r *http.Request) ([]uuid
 	}
 }
 
+// tintSavedColorBodyCustomer resolves the customer the saved colour create's
+// body names: its customer_id. A body that names no customer names nothing and
+// the handler answers the missing field.
+func tintSavedColorBodyCustomer() func(ctx context.Context, r *http.Request) ([]uuid.UUID, error) {
+	return func(ctx context.Context, r *http.Request) ([]uuid.UUID, error) {
+		var body struct {
+			CustomerID string `json:"customer_id"`
+		}
+		if err := middleware.DecodeOneJSONBody(r, &body); err != nil {
+			return nil, err
+		}
+		if id, err := uuid.Parse(body.CustomerID); err == nil {
+			return []uuid.UUID{id}, nil
+		}
+		return nil, nil
+	}
+}
+
+// tintSavedColorQueryCustomer resolves the customer the saved colours read
+// asks for: its customer_id. A read that names none lists what the caller may
+// see, which the repository's customer predicate decides.
+func tintSavedColorQueryCustomer() func(ctx context.Context, r *http.Request) ([]uuid.UUID, error) {
+	return func(ctx context.Context, r *http.Request) ([]uuid.UUID, error) {
+		raw := r.URL.Query().Get("customer_id")
+		if raw == "" {
+			return nil, nil
+		}
+		id, err := uuid.Parse(raw)
+		if err != nil {
+			return nil, nil // the handler answers the malformed id
+		}
+		return []uuid.UUID{id}, nil
+	}
+}
+
 // exemptionRowCustomers resolves the customer the exemption delete's row
 // belongs to (the exclusive write resolver).
 func exemptionRowCustomers(db *database.DB) func(ctx context.Context, r *http.Request) ([]uuid.UUID, error) {

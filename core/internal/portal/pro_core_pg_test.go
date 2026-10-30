@@ -33,16 +33,16 @@ import (
 // proFixture is two tenants with yards, users in every role, documents and
 // scheduling windows.
 type proFixture struct {
-	db                                    *database.DB
-	aCustomer, bCustomer                  uuid.UUID
-	bUser                                 uuid.UUID
-	aYard, bYard                          uuid.UUID
-	users                                 map[string]uuid.UUID // role -> user id (customer A)
+	db                                     *database.DB
+	aCustomer, bCustomer                   uuid.UUID
+	bUser                                  uuid.UUID
+	aYard, bYard                           uuid.UUID
+	users                                  map[string]uuid.UUID // role -> user id (customer A)
 	aDraft, aConfirmed, aFulfilled, bOrder uuid.UUID
-	aInvoice, aQuote, aDelivery           uuid.UUID
-	product                               uuid.UUID
-	winCap1, winCutoff, winPickup         uuid.UUID
-	winDate                               string // a date >= 2 days out the windows run on
+	aInvoice, aQuote, aDelivery            uuid.UUID
+	product                                uuid.UUID
+	winCap1, winCutoff, winPickup          uuid.UUID
+	winDate                                string // a date >= 2 days out the windows run on
 }
 
 // muxFor builds the handler stack over the repository for one caller.
@@ -90,12 +90,12 @@ func setupPro(t *testing.T) *proFixture {
 	ctx := context.Background()
 
 	f := &proFixture{
-		db:         db,
-		aCustomer:  uuid.New(), bCustomer: uuid.New(),
-		aYard:      uuid.New(), bYard: uuid.New(),
-		aDraft:     uuid.New(), aConfirmed: uuid.New(), aFulfilled: uuid.New(), bOrder: uuid.New(),
-		aInvoice:   uuid.New(), aQuote: uuid.New(), aDelivery: uuid.New(),
-		product:    uuid.New(),
+		db:        db,
+		aCustomer: uuid.New(), bCustomer: uuid.New(),
+		aYard: uuid.New(), bYard: uuid.New(),
+		aDraft: uuid.New(), aConfirmed: uuid.New(), aFulfilled: uuid.New(), bOrder: uuid.New(),
+		aInvoice: uuid.New(), aQuote: uuid.New(), aDelivery: uuid.New(),
+		product: uuid.New(),
 	}
 
 	exec := func(sql string, args ...any) {
@@ -196,14 +196,24 @@ func setupPro(t *testing.T) *proFixture {
 			func() (string, any) { return `DELETE FROM payments WHERE customer_id = ANY($1)`, both },
 			func() (string, any) { return `DELETE FROM portal_schedule_holds WHERE customer_id = ANY($1)`, both },
 			func() (string, any) { return `DELETE FROM yard_schedule_windows WHERE yard_id = ANY($1)`, bothYards },
-			func() (string, any) { return `DELETE FROM deliveries WHERE order_id IN (SELECT id FROM orders WHERE customer_id = ANY($1))`, both },
-			func() (string, any) { return `DELETE FROM delivery_routes WHERE id = ANY($1)`, []uuid.UUID{routeDone, routeToday} },
+			func() (string, any) {
+				return `DELETE FROM deliveries WHERE order_id IN (SELECT id FROM orders WHERE customer_id = ANY($1))`, both
+			},
+			func() (string, any) {
+				return `DELETE FROM delivery_routes WHERE id = ANY($1)`, []uuid.UUID{routeDone, routeToday}
+			},
 			func() (string, any) { return `DELETE FROM invoices WHERE customer_id = ANY($1)`, both },
-			func() (string, any) { return `DELETE FROM quote_lines WHERE quote_id IN (SELECT id FROM quotes WHERE customer_id = ANY($1))`, both },
+			func() (string, any) {
+				return `DELETE FROM quote_lines WHERE quote_id IN (SELECT id FROM quotes WHERE customer_id = ANY($1))`, both
+			},
 			func() (string, any) { return `DELETE FROM quotes WHERE customer_id = ANY($1)`, both },
-			func() (string, any) { return `DELETE FROM portal_cart_items WHERE cart_id IN (SELECT id FROM portal_carts WHERE customer_id = ANY($1))`, both },
+			func() (string, any) {
+				return `DELETE FROM portal_cart_items WHERE cart_id IN (SELECT id FROM portal_carts WHERE customer_id = ANY($1))`, both
+			},
 			func() (string, any) { return `DELETE FROM portal_carts WHERE customer_id = ANY($1)`, both },
-			func() (string, any) { return `DELETE FROM order_lines WHERE order_id IN (SELECT id FROM orders WHERE customer_id = ANY($1))`, both },
+			func() (string, any) {
+				return `DELETE FROM order_lines WHERE order_id IN (SELECT id FROM orders WHERE customer_id = ANY($1))`, both
+			},
 			func() (string, any) { return `DELETE FROM orders WHERE customer_id = ANY($1)`, both },
 			func() (string, any) { return `DELETE FROM projects WHERE customer_id = ANY($1)`, both },
 			func() (string, any) { return `DELETE FROM customer_contracts WHERE customer_id = ANY($1)`, both },

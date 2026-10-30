@@ -764,7 +764,7 @@ func r1bAGLGroups() []groupDef {
 			{name: "gl.fiscal_period.reopen.no_reason", method: "POST", path: "/api/v1/gl/fiscal-periods/{a_period}/reopen", headers: ifMatch("2"),
 				body: map[string]any{}},
 			{name: "gl.fiscal_period.reopen", method: "POST", path: "/api/v1/gl/fiscal-periods/{a_period}/reopen", headers: ifMatch("2"),
-				body:      map[string]any{"reason": "golden correction"},
+				body:       map[string]any{"reason": "golden correction"},
 				maskFields: map[string]any{"name": "<period>", "start_date": "<period-start>", "end_date": "<period-end>"}},
 			{name: "gl.fiscal_period.reopen.not_closed", method: "POST", path: "/api/v1/gl/fiscal-periods/{a_period}/reopen", headers: ifMatch("3"),
 				body: map[string]any{"reason": "golden correction"}},

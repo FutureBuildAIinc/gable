@@ -68,6 +68,7 @@ import (
 	"github.com/gablelbm/gable/internal/tax"
 	"github.com/gablelbm/gable/internal/techadmin"
 	"github.com/gablelbm/gable/internal/testutil"
+	"github.com/gablelbm/gable/internal/tint"
 	"github.com/gablelbm/gable/internal/unit"
 	"github.com/gablelbm/gable/internal/vendor"
 	"github.com/gablelbm/gable/internal/vision"
@@ -186,6 +187,7 @@ var pinKeyScopes = []string{
 	"matching:read", "matching:write", "delivery:read", "delivery:write",
 	"apps:read", "apps:write", "admin:settings", "admin:modules",
 	"parsing:write", "vision:write", "scheduling:read", "scheduling:write",
+	"tint:read", "tint:write",
 }
 
 func newKeyPinFixture(t *testing.T) *keyPinFixture {
@@ -562,6 +564,9 @@ func newKeyPinFixtureSwitched(t *testing.T, switchState string) *keyPinFixture {
 		WithQuotes(quoteSvc).WithPurchaseOrders(poSvc).WithDeliveries(deliverySvc)
 	wall.documents(mux, docHandler)
 	wall.posReceipts(mux, docHandler, posSvc, "admin", "owner", "cashier")
+	// The tint catalogue, as serve mounts it: the saved colours are customer
+	// rows, so their write is held to the customer the body names.
+	wall.tint(mux, tint.NewService(tint.NewRepository(db)).WithTxRunner(db))
 	wall.emailDeliveries(mux, emaildelivery.NewHandler(deliverySvc))
 	wall.dealerProfile(mux, dealerprofile.NewHandler(profileSvc))
 	quoteKind := quote.NewDraftKind(quoteSvc)
@@ -1574,6 +1579,63 @@ func TestKeyBranchPin_CustomerConfinedWrites(t *testing.T) {
 		f.allow(t, who, "DELETE", "/api/v1/pricing/category-rules/bulk",
 			fmt.Sprintf(`{"ids":[%q]}`, id.String()), nil, http.StatusNoContent)
 	}
+
+	// The saved colours (row CP-16): the create's body names the customer, and
+	// the read is walled to the customers that hold the pin.
+	colorID := f.seedTintColor(t)
+	savedBody := func(customer uuid.UUID, name string) string {
+		return fmt.Sprintf(`{"customer_id":%q,"color_id":%q,"name":%q}`, customer, colorID, name)
+	}
+	f.refuseForeign(t, "POST", "/api/v1/tint/saved-colors", savedBody(f.custB, "pin foreign"), nil)
+	if n := f.savedColorsOf(t, f.custB); n != 0 {
+		t.Errorf("refused saved colour create wrote the foreign customer's rows: %d", n)
+	}
+	f.allow(t, "bound", "POST", "/api/v1/tint/saved-colors", savedBody(f.custID, "pin own"), nil, http.StatusCreated)
+	for _, who := range []string{"unbound", "user"} {
+		f.allow(t, who, "POST", "/api/v1/tint/saved-colors", savedBody(f.custB, "pin free "+who), nil, http.StatusCreated)
+	}
+	// The read is walled to the pin: the bound key sees its own customer's
+	// saved colours and not the foreign customer's.
+	body := f.allow(t, "bound", "GET", "/api/v1/tint/saved-colors", "", nil, http.StatusOK)
+	if !strings.Contains(string(body), "pin own") {
+		t.Errorf("the bound key did not read its own customer's saved colour: %s", body)
+	}
+	if strings.Contains(string(body), "pin free") {
+		t.Errorf("the bound key read another customer's saved colour: %s", body)
+	}
+}
+
+// seedTintColor seeds a tint system and one colour, and answers the colour id.
+func (f *keyPinFixture) seedTintColor(t *testing.T) uuid.UUID {
+	t.Helper()
+	ctx := context.Background()
+	sys := uuid.New()
+	color := uuid.New()
+	if _, err := f.db.Pool.Exec(ctx, `INSERT INTO paint_tint_systems (id, code, name, manufacturer, unit_denominator)
+		VALUES ($1, $2, 'Pin tint', 'Pin Paints', 384)`, sys, "PIN"+sys.String()[:8]); err != nil {
+		t.Fatalf("seed tint system: %v", err)
+	}
+	if _, err := f.db.Pool.Exec(ctx, `INSERT INTO paint_colors (id, tint_system_id, manufacturer_code, name)
+		VALUES ($1, $2, 'HC-188', 'Essex Green')`, color, sys); err != nil {
+		t.Fatalf("seed tint colour: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = f.db.Pool.Exec(context.Background(), `DELETE FROM paint_saved_colors WHERE color_id = $1`, color)
+		_, _ = f.db.Pool.Exec(context.Background(), `DELETE FROM paint_colors WHERE id = $1`, color)
+		_, _ = f.db.Pool.Exec(context.Background(), `DELETE FROM paint_tint_systems WHERE id = $1`, sys)
+	})
+	return color
+}
+
+// savedColorsOf counts a customer's saved colours.
+func (f *keyPinFixture) savedColorsOf(t *testing.T, customer uuid.UUID) int {
+	t.Helper()
+	var n int
+	if err := f.db.Pool.QueryRow(context.Background(),
+		`SELECT count(*) FROM paint_saved_colors WHERE customer_id = $1`, customer).Scan(&n); err != nil {
+		t.Fatalf("count the saved colours: %v", err)
+	}
+	return n
 }
 
 // TestKeyBranchPin_SwitchOff pins the wall's independence from the

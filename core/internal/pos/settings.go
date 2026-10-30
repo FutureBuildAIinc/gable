@@ -18,11 +18,13 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"math/big"
 	"net/http"
 	"strconv"
 	"strings"
 
 	"github.com/gablelbm/gable/internal/platform/httpx"
+	"github.com/gablelbm/gable/internal/tint"
 	"github.com/gablelbm/gable/pkg/audit"
 	"github.com/gablelbm/gable/pkg/middleware"
 	"github.com/google/uuid"
@@ -33,6 +35,10 @@ import (
 // never, 0 is every check, a figure is checks over it. The ID's number is
 // never taken, on the screen or on the wire.
 const settingCheckIDRequired = "pos.check_id_required_over_cents"
+
+// settingTintedNoReturn is the dealer's tinted no return policy: absent or
+// false is off, because the rule is a dealer policy and not a law.
+const settingTintedNoReturn = "pos.tinted_no_return"
 
 // posSettingsResource anchors the counter settings' revision.
 const posSettingsResource = "pos.settings"
@@ -67,6 +73,14 @@ type PosRules struct {
 	// RestockingFeeDefaults is the suggested figure for each reason, read
 	// only: what the settings screen offers a dealer who has set nothing.
 	RestockingFeeDefaults map[string]int `json:"restocking_fee_defaults"`
+	// TintCharge is the dealer's tint charge rule (row CP-16): the flat
+	// figure per container and the tiers that may cover it. The rule
+	// follows the tint, not only the container.
+	TintCharge tint.ChargeRule `json:"tint_charge"`
+	// TintedNoReturn is the dealer's policy: a tinted can is not taken
+	// back. Off unless the dealer says so, because the rule is a dealer
+	// policy and not a law.
+	TintedNoReturn bool `json:"tinted_no_return"`
 }
 
 // effectiveRestockingFees states the closed list's fees in force: a reason's
@@ -140,6 +154,36 @@ func (r *PostgresRepository) writeRestockingFees(ctx context.Context, fees map[s
 		}
 	}
 	return nil
+}
+
+// writeTintCharge writes the dealer's tint charge rule (row CP-16) as one
+// act: the flat figure per container and the tier list that may cover it. No
+// figure and no tier clears both rows, which is no charge (the tint folded
+// into the shelf price).
+func (r *PostgresRepository) writeTintCharge(ctx context.Context, rule tint.ChargeRule) error {
+	if rule.FlatCents == 0 && len(rule.Tiers) == 0 {
+		if err := r.deleteSetting(ctx, tint.SettingTintChargeCents); err != nil {
+			return err
+		}
+		return r.deleteSetting(ctx, tint.SettingTintChargeTiers)
+	}
+	if err := r.writeSetting(ctx, tint.SettingTintChargeCents, strconv.FormatInt(rule.FlatCents, 10)); err != nil {
+		return err
+	}
+	tiers, err := json.Marshal(rule.Tiers)
+	if err != nil {
+		return errSettingWrite(err)
+	}
+	return r.writeSetting(ctx, tint.SettingTintChargeTiers, string(tiers))
+}
+
+// writeTintedNoReturn writes the dealer's tinted no return policy: off clears
+// the row, because the rule is a dealer policy and not a law.
+func (r *PostgresRepository) writeTintedNoReturn(ctx context.Context, on bool) error {
+	if !on {
+		return r.deleteSetting(ctx, settingTintedNoReturn)
+	}
+	return r.writeSetting(ctx, settingTintedNoReturn, "true")
 }
 
 // readPosSettingsRevision reads the counter settings' revision without
@@ -277,13 +321,23 @@ func (s *Service) PosSettings(ctx context.Context) (*PosSettings, error) {
 	if err != nil {
 		return nil, err
 	}
+	chargeRule, err := s.repo.TintChargeRule(ctx)
+	if err != nil {
+		return nil, err
+	}
+	noReturn, err := s.repo.TintedNoReturn(ctx)
+	if err != nil {
+		return nil, err
+	}
 	rev, err := s.repo.readPosSettingsRevision(ctx)
 	if err != nil {
 		return nil, err
 	}
 	out := &PosSettings{Revision: rev, Rules: PosRules{CheckIDRequired: idRuleOf(idRule),
 		RestockingFees:        effectiveRestockingFees(feeRows),
-		RestockingFeeDefaults: maps.Clone(defaultRestockingFeeBps)}}
+		RestockingFeeDefaults: maps.Clone(defaultRestockingFeeBps),
+		TintCharge:           chargeRule,
+		TintedNoReturn:       noReturn}}
 	if limit != nil {
 		c := httpx.Cents(*limit)
 		out.Rules.CheckLimitCents = &c
@@ -349,6 +403,17 @@ func (s *Service) SavePosSettings(ctx context.Context, in *SavePosSettingsInput)
 		if err := s.repo.writeRestockingFees(ctx, in.Rules.RestockingFees); err != nil {
 			return err
 		}
+		// the tint charge rule (row CP-16): the flat figure per container and
+		// the tiers that may cover it. No figure and no tier clears the rows,
+		// which is no charge (the tint folded into the shelf price).
+		if err := s.repo.writeTintCharge(ctx, in.Rules.TintCharge); err != nil {
+			return err
+		}
+		// the tinted no return policy: off clears the row, because the rule is
+		// a dealer policy and not a law.
+		if err := s.repo.writeTintedNoReturn(ctx, in.Rules.TintedNoReturn); err != nil {
+			return err
+		}
 		next := rev + 1
 		if err := s.repo.bumpPosSettingsRevision(ctx, next); err != nil {
 			return err
@@ -356,7 +421,10 @@ func (s *Service) SavePosSettings(ctx context.Context, in *SavePosSettingsInput)
 		if s.auditLog != nil {
 			changes := map[string]any{"resource": posSettingsResource, "revision": next,
 				"check_limit_cents": in.Rules.CheckLimitCents, "check_id_required": in.Rules.CheckIDRequired.Mode,
-				"restocking_fees": in.Rules.RestockingFees}
+				"restocking_fees": in.Rules.RestockingFees,
+				"tint_charge_cents": in.Rules.TintCharge.FlatCents,
+				"tint_charge_tiers": in.Rules.TintCharge.Tiers,
+				"tinted_no_return":  in.Rules.TintedNoReturn}
 			if in.Rules.CheckIDRequired.OverCents != nil {
 				changes["check_id_over_cents"] = int64(*in.Rules.CheckIDRequired.OverCents)
 			}
@@ -383,6 +451,8 @@ type posSettingsRequest struct {
 			OverCents json.RawMessage `json:"over_cents"`
 		} `json:"check_id_required"`
 		RestockingFees json.RawMessage `json:"restocking_fees"`
+		TintCharge     json.RawMessage `json:"tint_charge"`
+		TintedNoReturn json.RawMessage `json:"tinted_no_return"`
 	} `json:"rules"`
 	Revision json.RawMessage `json:"revision"`
 }
@@ -422,6 +492,70 @@ func parseRestockingFees(v *httpx.Validator, raw json.RawMessage) map[string]int
 	return fees
 }
 
+// parseTintCharge reads rules.tint_charge into the dealer's rule: the flat
+// figure per container and the tiers that may cover it. Absent is no figure
+// and no tier, which is no charge (the tint folded into the shelf price), so
+// a dealer who has set nothing writes nothing.
+func parseTintCharge(v *httpx.Validator, raw json.RawMessage) tint.ChargeRule {
+	rule := tint.ChargeRule{}
+	if len(bytes.TrimSpace(raw)) == 0 || bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+		return rule
+	}
+	var body struct {
+		FlatCents json.RawMessage `json:"flat_cents"`
+		Tiers     json.RawMessage `json:"tiers"`
+	}
+	if err := json.Unmarshal(raw, &body); err != nil {
+		v.Check(false, "rules.tint_charge", "must be an object with the flat figure and the tiers")
+		return rule
+	}
+	if n, ok := v.Int("rules.tint_charge.flat_cents", body.FlatCents, false); ok {
+		v.Check(n >= 0, "rules.tint_charge.flat_cents", "must not be negative")
+		if n >= 0 {
+			rule.FlatCents = n
+		}
+	}
+	var tiers []struct {
+		BaseTier      string          `json:"base_tier"`
+		MinColorantOZ string          `json:"min_colorant_oz"`
+		ChargeCents   json.RawMessage `json:"charge_cents"`
+	}
+	if len(bytes.TrimSpace(body.Tiers)) > 0 && !bytes.Equal(bytes.TrimSpace(body.Tiers), []byte("null")) {
+		if err := json.Unmarshal(body.Tiers, &tiers); err != nil {
+			v.Check(false, "rules.tint_charge.tiers", "must be a list of tiers")
+			return rule
+		}
+	}
+	for i, t := range tiers {
+		path := fmt.Sprintf("rules.tint_charge.tiers[%d]", i)
+		switch t.BaseTier {
+		case "", tint.BaseTierFlat, tint.BaseTierDeep:
+		default:
+			v.Check(false, path+".base_tier", "must be flat, deep, or empty for any base")
+		}
+		floor := strings.TrimSpace(t.MinColorantOZ)
+		if floor != "" {
+			if _, ok := new(big.Rat).SetString(floor); !ok {
+				v.Check(false, path+".min_colorant_oz", "must be a decimal number of fluid ounces")
+			}
+		}
+		n, ok := v.Int(path+".charge_cents", t.ChargeCents, true)
+		if !ok {
+			continue
+		}
+		v.Check(n >= 0, path+".charge_cents", "must not be negative")
+		if n < 0 {
+			continue
+		}
+		rule.Tiers = append(rule.Tiers, tint.ChargeTier{
+			BaseTier:      t.BaseTier,
+			MinColorantOZ: floor,
+			ChargeCents:   n,
+		})
+	}
+	return rule
+}
+
 func (r *posSettingsRequest) parse() (*SavePosSettingsInput, error) {
 	v := &httpx.Validator{}
 	out := &SavePosSettingsInput{}
@@ -433,6 +567,15 @@ func (r *posSettingsRequest) parse() (*SavePosSettingsInput, error) {
 		}
 	}
 	out.Rules.RestockingFees = parseRestockingFees(v, r.Rules.RestockingFees)
+	out.Rules.TintCharge = parseTintCharge(v, r.Rules.TintCharge)
+	if len(bytes.TrimSpace(r.Rules.TintedNoReturn)) > 0 && !bytes.Equal(bytes.TrimSpace(r.Rules.TintedNoReturn), []byte("null")) {
+		var on bool
+		if err := json.Unmarshal(r.Rules.TintedNoReturn, &on); err != nil {
+			v.Check(false, "rules.tinted_no_return", "must be true or false")
+		} else {
+			out.Rules.TintedNoReturn = on
+		}
+	}
 	v.Enum("rules.check_id_required.mode", r.Rules.CheckIDRequired.Mode,
 		IDRuleNever, IDRuleEveryCheck, IDRuleOverAmount)
 	out.Rules.CheckIDRequired.Mode = r.Rules.CheckIDRequired.Mode

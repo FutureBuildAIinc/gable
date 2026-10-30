@@ -53,7 +53,8 @@ func settingsBody(fees map[string]int64, revision int64) map[string]any {
 // allReasonFees is the closed list's fees as the wire spells them.
 func allReasonFees(changedMind, orderedWrong, overbought int64) map[string]int64 {
 	return map[string]int64{"defective": 0, "damaged": 0, "wrong_item": 0,
-		"ordered_wrong": orderedWrong, "changed_mind": changedMind, "overbought": overbought, "other": 0}
+		"ordered_wrong": orderedWrong, "changed_mind": changedMind, "overbought": overbought,
+		"mis_tint": 0, "other": 0}
 }
 
 // RULE: the settings carry the restocking fee of every reason code: the GET
@@ -84,8 +85,8 @@ func TestCP06_RestockingFeeSettingsRoundTripAndGuard(t *testing.T) {
 	if feesOf(get.body) == nil {
 		t.Fatalf("the settings carry no restocking_fees map: %s", get.raw)
 	}
-	if got := len(feesOf(get.body)); got != 7 {
-		t.Errorf("the fee map names %d codes, want the closed list of 7: %v", got, feesOf(get.body))
+	if got := len(feesOf(get.body)); got != 8 {
+		t.Errorf("the fee map names %d codes, want the closed list of 8 (the mis tint, row CP-16, is one of them): %v", got, feesOf(get.body))
 	}
 	for code, v := range feesOf(get.body) {
 		if n, ok := numOf(v); !ok || n != 0 {

@@ -28,6 +28,7 @@ export function invoiceLine(overrides: Partial<InvoiceLine> = {}): InvoiceLine {
     stock_uom: 'PCS',
     stock_quantity: '24',
     tally: null,
+    tint: null,
     price_basis: null,
     unit_price_ten_thousandths: 324_000,
     priced_unit_price_ten_thousandths: 324_000,

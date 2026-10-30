@@ -67,6 +67,7 @@ const productLine = (id: string, desc: string, qty = '1'): Sale['lines'][0] => (
   price_uom: 'TON',
   uom_qty: qty,
   price_uom_qty: qty,
+  tint: null,
   unit_price_ten_thousandths: 300000,
   priced_unit_price_ten_thousandths: 300000,
   price_source: 'price_list',

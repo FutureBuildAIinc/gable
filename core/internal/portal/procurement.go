@@ -465,4 +465,3 @@ func (s *Service) SubmitProcurementRFQ(ctx context.Context, customerID, projectI
 
 	return updated, nil
 }
-

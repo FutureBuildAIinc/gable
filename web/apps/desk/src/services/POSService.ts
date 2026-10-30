@@ -224,6 +224,34 @@ export const posService = {
         return response.json();
     },
 
+    /** Adds the product with a tint attached (row CP-16), or replaces an open cart line in one act when lineId is given. */
+    async addItemTint(
+        saleId: string,
+        productID: string,
+        tint: Record<string, unknown>,
+        quantity = '1',
+        uom?: string,
+        lineId?: string,
+    ): Promise<Sale> {
+        const response = await expectOk(
+            await fetchWithAuth(`${API_URL}/api/v1/pos/transactions/${saleId}/items`, {
+                method: 'POST',
+                headers: JSON_HEADERS,
+                body: JSON.stringify({
+                    line: {
+                        ...(lineId ? { id: lineId } : {}),
+                        product_id: productID,
+                        quantity,
+                        ...(uom ? { uom } : {}),
+                        tint,
+                    },
+                }),
+            }),
+            'Failed to add the tinted item',
+        );
+        return response.json();
+    },
+
     /** Sets a line's quantity on the sale's revision; the answer is the whole sale, the line repriced. */
     async changeQuantity(saleId: string, itemId: string, quantity: string, revision: number): Promise<Sale> {
         const response = await expectOk(
