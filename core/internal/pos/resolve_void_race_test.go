@@ -82,7 +82,7 @@ func TestTwoConcurrentRefundResolutionsOfAVoidClaimNameTheRace(t *testing.T) {
 	if got := f.accountBalance("1010"); got != 0 {
 		t.Errorf("card balance = %d, want 0 (the terminal's refund booked exactly once)", got)
 	}
-	if got := countOf(t, f.db, `SELECT count(*) FROM payment_refunds`); got != 1 {
+	if got := f.counterRefunds(t); got != 1 {
 		t.Errorf("%d refund rows, want 1", got)
 	}
 	gw.mu.Lock()
@@ -202,7 +202,7 @@ func TestThreeConcurrentResolutionsOfASplitVoidsClaimsSettleEachOnce(t *testing.
 	}
 	// the books moved once: every booked refund names a claim settled DONE
 	done := countOf(t, f.db, `SELECT count(*) FROM pos_refund_intents WHERE sale_id = $1 AND state = 'DONE'`, saleID)
-	refunds := countOf(t, f.db, `SELECT count(*) FROM payment_refunds`)
+	refunds := f.counterRefunds(t)
 	if done != refunds {
 		t.Errorf("%d booked refunds beside %d claims settled DONE: the money follows the winning outcome alone", refunds, done)
 	}

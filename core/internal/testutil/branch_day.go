@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/gablelbm/gable/pkg/database"
+	"github.com/google/uuid"
 )
 
 // branchDayLockKey is the advisory lock key behind the default branch's own
@@ -59,9 +60,10 @@ var zoneHeld atomic.Bool
 // before the fixture is dated, as LockOutboxTables is called.
 func LockBranchDay(t *testing.T) {
 	t.Helper()
-	if zoneHeld.Load() {
+	if !zoneHeld.CompareAndSwap(false, true) {
 		return
 	}
+	t.Cleanup(func() { zoneHeld.Store(false) })
 	lockKeyMode(t, branchDayLockKey, "branch day", true)
 }
 
@@ -99,6 +101,29 @@ func SetBranchDayZone(t *testing.T, db *database.DB, zone string) {
 	if foreignZones[old] {
 		old = "America/New_York"
 		set(old)
+	}
+	t.Cleanup(func() { set(old) })
+	set(zone)
+}
+
+// SetBranchDayZoneOn gives the branch the test owns the IANA zone for the
+// test and puts the old one back at its end.
+//
+// A test whose fixture stands on a branch of its own dates its documents by
+// that branch's zone: the shared default branch's zone is not the branch the
+// fixture's sales are read by, and writing it would move a row every other
+// package's fixture reads.
+func SetBranchDayZoneOn(t *testing.T, db *database.DB, branchID uuid.UUID, zone string) {
+	t.Helper()
+	ctx := context.Background()
+	var old string
+	if err := db.Pool.QueryRow(ctx, `SELECT timezone FROM locations WHERE id = $1`, branchID).Scan(&old); err != nil {
+		t.Fatalf("the branch %s: %v", branchID, err)
+	}
+	set := func(z string) {
+		if _, err := db.Pool.Exec(context.Background(), `UPDATE locations SET timezone = $2 WHERE id = $1`, branchID, z); err != nil {
+			t.Errorf("set the branch zone to %s: %v", z, err)
+		}
 	}
 	t.Cleanup(func() { set(old) })
 	set(zone)

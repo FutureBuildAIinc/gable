@@ -459,7 +459,7 @@ func TestTallySumBeyondTheBoundRefused(t *testing.T) {
 	// The quote was never written.
 	var n int
 	if err := f.db.Pool.QueryRow(context.Background(),
-		`SELECT count(*) FROM line_tally_rows`).Scan(&n); err != nil || n != 0 {
+		`SELECT count(*) FROM line_tally_rows WHERE quote_line_id IN (SELECT id FROM quote_lines WHERE quote_id IN (SELECT id FROM quotes WHERE customer_id = $1))`, f.customerID).Scan(&n); err != nil || n != 0 {
 		t.Errorf("the refused tally left no row behind, got %d (%v)", n, err)
 	}
 }

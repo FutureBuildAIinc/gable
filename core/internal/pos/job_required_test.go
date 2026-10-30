@@ -46,7 +46,10 @@ func TestCP02_JobRequiredRefusesChargeWithoutJob(t *testing.T) {
 		t.Errorf("%d invoices after the refused charge, want none", got)
 	}
 	// the lookup carries the flag so the screen can mark the Job select
-	c := standingOf(t, f.findCustomers("Counter Co"))
+	c := standingOf(t, f.findCustomers(f.customerName))
+	if c["id"] != f.customerID.String() {
+		t.Errorf("the lookup answered another customer: %v", c["id"])
+	}
 	if c["job_required"] != true {
 		t.Errorf("the lookup carries job_required = %v, want true", c["job_required"])
 	}

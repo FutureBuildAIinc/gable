@@ -66,6 +66,7 @@
       "status": 202,
       "content_type": "application/json",
       "body": {
+        "delivery_id": "<id-5>",
         "status": "queued"
       }
     }
@@ -85,7 +86,7 @@
           "message": "Not Found"
         },
         "meta": {
-          "request_id": "<id-5>"
+          "request_id": "<id-6>"
         }
       }
     }
@@ -105,7 +106,7 @@
           "message": "Bad Request"
         },
         "meta": {
-          "request_id": "<id-6>"
+          "request_id": "<id-7>"
         }
       }
     }

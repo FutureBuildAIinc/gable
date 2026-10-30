@@ -204,12 +204,14 @@ export const posService = {
         return response.json();
     },
 
-    /** Sends the completed sale's receipt to the account's contact; a refusal carries the server's words. */
-    async emailReceipt(saleId: string): Promise<void> {
-        await expectOk(
+    /** Sends the completed sale's receipt to the account's contact; a refusal carries the server's words.
+     *  The answer names the queued delivery row, whose status is what actually happened. */
+    async emailReceipt(saleId: string): Promise<{ status: 'queued'; delivery_id?: string }> {
+        const response = await expectOk(
             await fetchWithAuth(`${API_URL}/api/v1/pos/transactions/${saleId}/receipt/email`, { method: 'POST' }),
             'Failed to email the receipt',
         );
+        return response.json();
     },
 
     async addItem(saleId: string, productID: string, quantity: string, uom?: string): Promise<Sale> {

@@ -131,7 +131,7 @@ func TestAVoidResolutionOfOneTenderOfTwoBooksOnlyThatTender(t *testing.T) {
 	if got := countOf(t, f.db, `SELECT count(*) FROM payment_refunds WHERE gateway_refund_id = $1`, refunded["refund_tx_id"]); got != 1 {
 		t.Errorf("%d refund rows naming the terminal's refund, want 1", got)
 	}
-	if got := countOf(t, f.db, `SELECT count(*) FROM payment_refunds`); got != 1 {
+	if got := f.counterRefunds(t); got != 1 {
 		t.Errorf("%d refund rows in all, want 1 (the declined card was never refunded)", got)
 	}
 	// the declined tender's charge is the credit the dealer owes the customer
@@ -209,7 +209,7 @@ func TestTheStrandedVoidOfTwoTendersResolvesOneTenderAtATime(t *testing.T) {
 	if got := f.accountBalance("1010"); got != 0 {
 		t.Errorf("card balance = %d, want 0 (both cards refunded exactly once)", got)
 	}
-	if got := countOf(t, f.db, `SELECT count(*) FROM payment_refunds`); got != 2 {
+	if got := f.counterRefunds(t); got != 2 {
 		t.Errorf("%d refund rows, want 2 (one per card)", got)
 	}
 	gw.mu.Lock()

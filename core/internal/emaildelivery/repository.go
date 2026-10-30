@@ -17,6 +17,7 @@ import (
 
 type Repository interface {
 	Insert(ctx context.Context, e Entry) (*Delivery, error)
+	SetOutcome(ctx context.Context, id uuid.UUID, status, senderAnswer, sendError string) error
 	List(ctx context.Context, f Filter, afterTime *time.Time, afterID *uuid.UUID, limit int) ([]Delivery, error)
 	Count(ctx context.Context, f Filter) (int64, error)
 }
@@ -60,6 +61,19 @@ func (r *PostgresRepository) Insert(ctx context.Context, e Entry) (*Delivery, er
 		return nil, fmt.Errorf("record email delivery: %w", err)
 	}
 	return d, nil
+}
+
+// SetOutcome resolves one queued row with the send's outcome: sent or logged
+// with the sender's own answer, or failed with the error. A row no send
+// resolves (the process died between the 202 and the send) stays queued, which
+// is the truth of it.
+func (r *PostgresRepository) SetOutcome(ctx context.Context, id uuid.UUID, status, senderAnswer, sendError string) error {
+	if _, err := r.db.GetExecutor(ctx).Exec(ctx, `
+		UPDATE email_deliveries SET status = $2, sender_answer = $3, error = $4 WHERE id = $1`,
+		id, status, nullable(senderAnswer), nullable(sendError)); err != nil {
+		return fmt.Errorf("set email delivery outcome: %w", err)
+	}
+	return nil
 }
 
 // The branch wall, as the other lists apply it: a context branch holds the

@@ -23,6 +23,7 @@ import (
 func statementWorld(t *testing.T) *arWorld {
 	t.Helper()
 	w := newARWorld(t)
+	testutil.LockOutboxTables(t)
 	w.svc.WithOutbox(outbox.NewWriter(w.db, "test"))
 	// Opening: posted before the period starts, 15 days past due at day zero.
 	w.invoice(50_000, daysFromNow(-45))
@@ -35,12 +36,15 @@ func statementWorld(t *testing.T) *arWorld {
 
 // TestStatementRunRecordsTheFigures walks one run end to end.
 func TestStatementRunRecordsTheFigures(t *testing.T) {
-	testutil.LockOutboxTables(t)
 	w := statementWorld(t)
 	start, end := daysFromNow(-30), daysFromNow(0)
 
+	// The run names the world's own customer: a run over the whole book
+	// reads every account on the shared test database, and the totals and
+	// the balance it records are then over accounts this test never wrote.
 	run, err := w.svc.CreateStatementRun(context.Background(), account.StatementRunIn{
-		PeriodStart: start, PeriodEnd: end, QueueEmail: true, Actor: "u-test", Role: "finance"})
+		PeriodStart: start, PeriodEnd: end, QueueEmail: true, CustomerIDs: []uuid.UUID{w.customerID},
+		Actor: "u-test", Role: "finance"})
 	if err != nil {
 		t.Fatalf("create the run: %v", err)
 	}
@@ -86,9 +90,20 @@ func TestStatementRunRecordsTheFigures(t *testing.T) {
 	if _, err := w.svc.GetStatementRun(context.Background(), uuid.New()); err == nil {
 		t.Fatal("a run of an unknown id was answered")
 	}
-	runs, err := w.svc.ListStatementRuns(context.Background(), account.StatementRunFilter{Limit: 10})
-	if err != nil || len(runs) != 1 {
-		t.Fatalf("the list answered %d runs, %v", len(runs), err)
+	// The list is the whole tenant's runs, newest first: the test finds its
+	// own run in it and counts nothing else.
+	runs, err := w.svc.ListStatementRuns(context.Background(), account.StatementRunFilter{Limit: 100})
+	if err != nil {
+		t.Fatalf("list the runs: %v", err)
+	}
+	listed := 0
+	for _, r := range runs {
+		if r.ID == run.ID {
+			listed++
+		}
+	}
+	if listed != 1 {
+		t.Fatalf("the list holds the world's run %d times, want once", listed)
 	}
 	got, err := w.svc.GetStatementRun(context.Background(), run.ID)
 	if err != nil {
@@ -141,11 +156,10 @@ func TestStatementRunIsAnArtefact(t *testing.T) {
 // run covers the whole book's balances; and a period that ends past today is
 // refused.
 func TestStatementRunScopeAndQueueing(t *testing.T) {
-	testutil.LockOutboxTables(t)
 	w := statementWorld(t)
 	// A customer with no balance at all.
 	quiet := uuid.New()
-	w.exec(`INSERT INTO customers (id, name, account_number, primary_branch_id) VALUES ($1, 'Quiet Co', $2, `+arBranch+`)`,
+	w.exec(`INSERT INTO customers (id, name, account_number, primary_branch_id) VALUES ($1, 'Quiet Co', $2, `+w.branchSQL()+`)`,
 		quiet, "QUIET-"+uuid.NewString()[:8])
 	w.side = append(w.side, quiet)
 

@@ -9,6 +9,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -262,50 +263,13 @@ func (s *Service) ThermalReceipt(ctx context.Context, invoiceID uuid.UUID, print
 		}
 		r.Lines = append(r.Lines, tl)
 	}
-	changeLeft := sale.ChangeCents
+	r.RoundingCents = roundingOf(sale, tenders)
 	var accountCents int64
-	// The cash rounding the branch's rule made (CP-18), read from the
-	// drawer's cash: the cash the sale's payments kept, less the exact cash
-	// the sale needed (the total less the non-cash legs). An exchange's
-	// credit is one of those legs, the store credit tender row the
-	// completion added, so it is counted once here. A tender row the change
-	// swallowed whole has no payment and never reached the drawer, so it
-	// counts for nothing here; a sale the rule did not touch shows no
-	// rounding.
-	var cashKept, nonCash int64
+	r.Tenders = receiptTenders(sale, tenders)
 	for i := range tenders {
-		switch tenders[i].Method {
-		case TenderCash:
-			if tenders[i].PaymentID != nil {
-				cashKept += int64(tenders[i].AmountCents)
-			}
-		default:
-			nonCash += int64(tenders[i].AmountCents)
+		if tenders[i].Method == TenderAccount {
+			accountCents += int64(tenders[i].AmountCents)
 		}
-	}
-	exactCash := int64(sale.TotalCents) - nonCash
-	if exactCash < 0 {
-		exactCash = 0
-	}
-	r.RoundingCents = httpx.Cents(cashKept - exactCash)
-	for i := range tenders {
-		t := &tenders[i]
-		tt := document.ThermalTender{
-			Method:      string(t.Method),
-			AmountCents: t.AmountCents,
-			LastFour:    derefString(t.CardLast4),
-		}
-		if t.Method == TenderCash && changeLeft > 0 {
-			if t.PaymentID != nil {
-				tt.AmountCents += changeLeft
-			}
-			tt.ChangeCents = changeLeft
-			changeLeft = 0
-		}
-		if t.Method == TenderAccount {
-			accountCents += int64(t.AmountCents)
-		}
-		r.Tenders = append(r.Tenders, tt)
 	}
 	if accountCents > 0 {
 		r.BalanceCents = httpx.Cents(accountCents)
@@ -394,4 +358,76 @@ func thermalTintOf(t *salesdoc.LineTint) *document.ThermalTint {
 			Code: c.ColorantCode, Name: c.ColorantName, Amount: c.Amount.String()})
 	}
 	return out
+}
+
+// roundingOf is the cash rounding the sale's tenders show (CP-18).
+func roundingOf(sale *Sale, tenders []Tender) httpx.Cents {
+	// The cash rounding the branch's rule made (CP-18), read from the
+	// drawer's cash: the cash the sale's payments kept, less the exact cash
+	// the sale needed (the total less the non-cash legs). An exchange's
+	// credit is one of those legs, the store credit tender row the
+	// completion added, so it is counted once here. A tender row the change
+	// swallowed whole has no payment and never reached the drawer, so it
+	// counts for nothing here; a sale the rule did not touch shows no
+	// rounding.
+	var cashKept, nonCash int64
+	for i := range tenders {
+		switch tenders[i].Method {
+		case TenderCash:
+			if tenders[i].PaymentID != nil {
+				cashKept += int64(tenders[i].AmountCents)
+			}
+		default:
+			nonCash += int64(tenders[i].AmountCents)
+		}
+	}
+	exactCash := int64(sale.TotalCents) - nonCash
+	if exactCash < 0 {
+		exactCash = 0
+	}
+	return httpx.Cents(cashKept - exactCash)
+}
+
+// receiptTenders is the sale's tender legs as the paper shows them: the
+// method, amount, the card's brand and last four (no number is ever
+// stored), and the change given, carried by the first cash leg.
+func receiptTenders(sale *Sale, tenders []Tender) []document.ThermalTender {
+	changeLeft := sale.ChangeCents
+	var out []document.ThermalTender
+	for i := range tenders {
+		t := &tenders[i]
+		tt := document.ThermalTender{
+			Method:      string(t.Method),
+			AmountCents: t.AmountCents,
+			LastFour:    derefString(t.CardLast4),
+			Brand:       derefString(t.CardBrand),
+		}
+		if t.Method == TenderCash && changeLeft > 0 {
+			if t.PaymentID != nil {
+				tt.AmountCents += changeLeft
+			}
+			tt.ChangeCents = changeLeft
+			changeLeft = 0
+		}
+		out = append(out, tt)
+	}
+	return out
+}
+
+// InvoiceTenders is the tender legs of the counter sale that owns invoiceID,
+// for the full page layout; an invoice that is not a counter sale has none.
+func (s *Service) InvoiceTenders(ctx context.Context, invoiceID uuid.UUID) ([]document.ThermalTender, error) {
+	facts, err := s.repo.ReceiptSaleByInvoice(ctx, invoiceID)
+	if err != nil {
+		var he *httpx.Error
+		if errors.As(err, &he) && he.Status == http.StatusNotFound {
+			return nil, nil
+		}
+		return nil, err
+	}
+	tenders, err := s.repo.GetTenders(ctx, facts.sale.ID)
+	if err != nil {
+		return nil, err
+	}
+	return receiptTenders(&facts.sale, tenders), nil
 }

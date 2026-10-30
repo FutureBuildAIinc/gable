@@ -36,8 +36,12 @@ up)
   sed "s/__CORE_PORT__/$CORE_PORT/" "$HERE/e2e/gable-api.conf" > "$E2E_DIR/gable-api.conf"
 
   (cd "$HERE/../core" && go build -o "$E2E_DIR/core" ./cmd/core)
+  # The large cash payer capture refuses to store a taxpayer id without a
+  # vault key, so the stack runs with an obvious test pattern unless the
+  # caller gives one.
   AUTH_MODE=dev PORT="$CORE_PORT" DATABASE_URL="$DATABASE_URL" RATE_LIMIT_PER_MINUTE=5000 \
     POS_SCALE_SIMULATOR=1 \
+    PAYMENT_VAULT_KEY="${PAYMENT_VAULT_KEY:-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef}" \
     setsid "$E2E_DIR/core" serve >"$E2E_DIR/core.log" 2>&1 &
   echo $! > "$E2E_DIR/core.pid"
   for _ in $(seq 1 60); do

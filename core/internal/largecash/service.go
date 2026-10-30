@@ -60,6 +60,15 @@ const WalkInFloorNote = "Walk-in cash is not aggregated at this branch: each wal
 // reviews it.
 const StateIdentityDeclined = "identity declined"
 
+// The crossing's own states (migration 139 and 148). Reportable is the
+// United States duty, recorded is the Canadian dealer policy, and identity
+// declined is the walk-in who would not say who they were.
+const (
+	EventStateReportable      = "reportable"
+	EventStateRecorded        = "recorded"
+	EventStateIdentityDeclined = StateIdentityDeclined
+)
+
 // ResolveWalkInFloor answers the floor a branch runs: the branch's own
 // amount, else the branch country's default (3,000 dollars on a United
 // States branch, off on a Canadian one, and off in any country with no rule
@@ -177,26 +186,46 @@ var ErrWalkInIdentityRequired = &httpx.Error{Status: http.StatusConflict, Code: 
 	Details: []httpx.FieldError{httpx.Blocker("walk_in_identity_required",
 		"this walk-in's cash sale is over the branch's identity floor: capture the payer's details or record that the walk-in declined to identify")}}
 
+// ErrVaultUnavailable is the 503 the preview and the completion answer when
+// a sale carries the payer's identity and the server has no valid vault key
+// (PAYMENT_VAULT_KEY missing or malformed): the taxpayer identification
+// number and the ID number are never stored in clear, and the payer's key is
+// never an unkeyed digest, so the capture fails closed. Operator: the counter
+// shows the message and the blocker, so the clerk can say why.
+var ErrVaultUnavailable = &httpx.Error{Status: http.StatusServiceUnavailable, Code: httpx.CodeUnavailable, Operator: true,
+	Message: "the payer's details cannot be recorded: this server has no vault key to seal them; set PAYMENT_VAULT_KEY and restart",
+	Details: []httpx.FieldError{httpx.Blocker("large_cash_vault_unavailable",
+		"the payer's details cannot be recorded: this server has no vault key to seal them; set PAYMENT_VAULT_KEY and restart")}}
+
 // Service is the large cash capture, classification and aggregation.
 type Service struct {
 	db    *database.DB
 	repo  *Repository
 	vault *payment.Vault
-	// keyHex is the vault key as hex, the HMAC key of the TIN digest. Empty
-	// in an unconfigured dev stack, where the digest falls back to a plain
-	// SHA-256.
-	keyHex string
-	now    func() time.Time
+	// digestKey is the vault key's 32 bytes, the HMAC key of the payer's
+	// digests. Nil when the server has no valid vault key: then the service
+	// refuses any capture that carries the payer's identity.
+	digestKey []byte
+	now       func() time.Time
 }
 
-// NewService builds the large cash service. vault may be nil (plaintext
-// passthrough, as the payment vault does when no key is configured).
+// NewService builds the large cash service. vault may be nil, and keyHex
+// empty or malformed: the service then answers ErrVaultUnavailable to any
+// sale that carries the payer's identity, never storing it in clear.
 func NewService(db *database.DB, vault *payment.Vault, keyHex string) *Service {
 	if vault == nil {
 		vault, _ = payment.NewVault("")
 	}
-	return &Service{db: db, repo: NewRepository(db), vault: vault, keyHex: strings.TrimSpace(keyHex), now: time.Now}
+	var digestKey []byte
+	if key, err := hex.DecodeString(strings.TrimSpace(keyHex)); err == nil && len(key) == 32 {
+		digestKey = key
+	}
+	return &Service{db: db, repo: NewRepository(db), vault: vault, digestKey: digestKey, now: time.Now}
 }
+
+// sealing answers whether the service can seal the payer's sensitive values
+// and key their digests: a present vault and a valid digest key.
+func (s *Service) sealing() bool { return s.vault.Present() && s.digestKey != nil }
 
 // settingsEntityID is the audit entity of the dealer's large cash settings,
 // which have no row of their own.
@@ -359,6 +388,11 @@ func (s *Service) compute(ctx context.Context, f *CompletionFacts) (*computed, e
 		return out, nil
 	}
 	out.overFloor = out.floor > 0 && f.CustomerID == nil && out.counted > out.floor
+	if f.Payer != nil && !s.sealing() {
+		// the payer's identity would be keyed and stored without the vault:
+		// refuse before any digest is taken or any row is written
+		return nil, ErrVaultUnavailable
+	}
 	payerKey := s.payerKey(f)
 	if err := s.repo.AdvisoryLock(ctx, payerKey); err != nil {
 		return nil, err
@@ -514,9 +548,9 @@ func (s *Service) Capture(ctx context.Context, f *CompletionFacts) error {
 				uniq = append(uniq, id)
 			}
 		}
-		state := "reportable"
+		state := EventStateReportable
 		if c.agg.rule == RuleCA {
-			state = "recorded"
+			state = EventStateRecorded
 		}
 		if err := s.repo.InsertEvent(ctx, s.payerKey(f), f.CustomerID, f.BranchID, c.agg.rule, f.Currency,
 			c.counted, c.agg.base+c.counted, uniq, c.agg.tenderCount+1, state); err != nil {
@@ -579,8 +613,8 @@ func (s *Service) payerKey(f *CompletionFacts) string {
 		return "cus:" + f.CustomerID.String()
 	}
 	if f.Payer != nil {
-		if tin := strings.TrimSpace(f.Payer.TaxpayerID); tin != "" {
-			return "tin:" + s.tinDigest(tin)
+		if digest := s.tinDigest(f.Payer.TaxpayerID); digest != "" {
+			return "tin:" + digest
 		}
 		if digest := s.identityDigest(f.Payer); digest != "" {
 			return "id:" + digest
@@ -609,8 +643,7 @@ func (s *Service) identityDigest(p *PayerIn) string {
 
 // tinDigest is the HMAC-SHA256 of a normalized taxpayer identification
 // number, keyed with the vault key so the digest cannot be brute forced
-// off the row. Without a configured key (a dev stack) it is a plain
-// SHA-256, which the sealed column's presence still protects.
+// off the row.
 func (s *Service) tinDigest(tin string) string {
 	normalized := strings.ToUpper(strings.Join(strings.Fields(tin), ""))
 	if normalized == "" {
@@ -620,18 +653,15 @@ func (s *Service) tinDigest(tin string) string {
 }
 
 // digest is the keyed digest of a normalized value: the HMAC-SHA256 under the
-// vault key, and a plain SHA-256 without one.
+// vault key. Without the key it is empty, never an unkeyed digest a nine
+// digit number space reverses; compute refuses such a capture first.
 func (s *Service) digest(label, normalized string) string {
-	if s.keyHex != "" {
-		key, err := hex.DecodeString(s.keyHex)
-		if err == nil && len(key) == 32 {
-			m := hmac.New(sha256.New, key)
-			m.Write([]byte(label + ":" + normalized))
-			return hex.EncodeToString(m.Sum(nil))
-		}
+	if s.digestKey == nil {
+		return ""
 	}
-	sum := sha256.Sum256([]byte(label + ":" + normalized))
-	return hex.EncodeToString(sum[:])
+	m := hmac.New(sha256.New, s.digestKey)
+	m.Write([]byte(label + ":" + normalized))
+	return hex.EncodeToString(m.Sum(nil))
 }
 
 // checkPayer refuses a crossing whose payer details are missing, in the

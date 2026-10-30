@@ -136,10 +136,10 @@ func TestCP17_USRelatedTransactionsAggregate(t *testing.T) {
 		t.Fatalf("the second sale with the payer = %d: %s", r.status, r.raw)
 	}
 	want := lcTotalCents(t, f, first) + lcTotalCents(t, f, second)
-	events := countOf(t, f.db, `SELECT count(*) FROM large_cash_events`)
+	events := countOf(t, f.db, `SELECT count(*) FROM large_cash_events WHERE branch_id = $1`, f.branchID)
 	var total int64
 	var state, rule string
-	if err := f.db.Pool.QueryRow(ctxBG(), `SELECT total_cents, state, rule_family FROM large_cash_events`).Scan(&total, &state, &rule); err != nil {
+	if err := f.db.Pool.QueryRow(ctxBG(), `SELECT total_cents, state, rule_family FROM large_cash_events WHERE branch_id = $1`, f.branchID).Scan(&total, &state, &rule); err != nil {
 		t.Fatalf("no crossing was recorded: %v", err)
 	}
 	if events != 1 {
@@ -173,7 +173,7 @@ func TestCP17_US12MonthRunning(t *testing.T) {
 	}
 	want := lcTotalCents(t, f, sale) + 700000
 	var total int64
-	if err := f.db.Pool.QueryRow(ctxBG(), `SELECT total_cents FROM large_cash_events`).Scan(&total); err != nil {
+	if err := f.db.Pool.QueryRow(ctxBG(), `SELECT total_cents FROM large_cash_events WHERE branch_id = $1`, f.branchID).Scan(&total); err != nil {
 		t.Fatal(err)
 	}
 	if total != want {
@@ -187,7 +187,7 @@ func TestCP17_US12MonthRunning(t *testing.T) {
 		t.Fatalf("the sale after the crossing = %d: %s", r.status, r.raw)
 	}
 	var events int64
-	if err := f.db.Pool.QueryRow(ctxBG(), `SELECT count(*) FROM large_cash_events`).Scan(&events); err != nil {
+	if err := f.db.Pool.QueryRow(ctxBG(), `SELECT count(*) FROM large_cash_events WHERE branch_id = $1`, f.branchID).Scan(&events); err != nil {
 		t.Fatal(err)
 	}
 	if events != 1 {
@@ -233,7 +233,7 @@ func TestCP17_USAcrossBranches(t *testing.T) {
 	}
 	var ids []uuid.UUID
 	if err := f.db.Pool.QueryRow(ctxBG(),
-		`SELECT transaction_ids FROM large_cash_events`).Scan(&ids); err != nil {
+		`SELECT transaction_ids FROM large_cash_events WHERE customer_id = $1`, f.customerID).Scan(&ids); err != nil {
 		t.Fatal(err)
 	}
 	if len(ids) != 2 {
@@ -260,7 +260,7 @@ func TestCP17_PersonalCheckNeverCounts(t *testing.T) {
 	if pr.status != http.StatusOK {
 		t.Fatalf("a personal check over the threshold = %d: %s, want it never to count", pr.status, pr.raw)
 	}
-	if n := countOf(t, f.db, `SELECT count(*) FROM large_cash_tenders`); n != 0 {
+	if n := countOf(t, f.db, `SELECT count(*) FROM large_cash_tenders WHERE branch_id = $1`, f.branchID); n != 0 {
 		t.Errorf("a personal check wrote %d counted tenders, want none", n)
 	}
 	cashiers := lcBigSale(f, t, nil, "2000")
@@ -279,7 +279,7 @@ func TestCP17_PersonalCheckNeverCounts(t *testing.T) {
 	if cr.status != http.StatusOK {
 		t.Fatalf("the cashier's check with the payer = %d: %s", cr.status, cr.raw)
 	}
-	if n := countOf(t, f.db, `SELECT count(*) FROM large_cash_events`); n != 1 {
+	if n := countOf(t, f.db, `SELECT count(*) FROM large_cash_events WHERE branch_id = $1`, f.branchID); n != 1 {
 		t.Errorf("events = %d, want the cashier's check's single crossing", n)
 	}
 }
@@ -297,10 +297,10 @@ func TestCP17_CanadaOffByDefault(t *testing.T) {
 	if r.status != http.StatusOK {
 		t.Fatalf("a Canadian cash sale over the threshold with the dealer threshold off = %d: %s", r.status, r.raw)
 	}
-	if n := countOf(t, f.db, `SELECT count(*) FROM large_cash_events`); n != 0 {
+	if n := countOf(t, f.db, `SELECT count(*) FROM large_cash_events WHERE branch_id = $1`, f.branchID); n != 0 {
 		t.Errorf("events = %d, want none with the dealer threshold off", n)
 	}
-	if n := countOf(t, f.db, `SELECT count(*) FROM large_cash_payers`); n != 0 {
+	if n := countOf(t, f.db, `SELECT count(*) FROM large_cash_payers WHERE branch_id = $1`, f.branchID); n != 0 {
 		t.Errorf("payer rows = %d, want none asked", n)
 	}
 }
@@ -336,7 +336,7 @@ func TestCP17_CanadaWindowAtOrAbove(t *testing.T) {
 	}
 	var total int64
 	var state, rule string
-	if err := f.db.Pool.QueryRow(ctxBG(), `SELECT total_cents, state, rule_family FROM large_cash_events`).Scan(&total, &state, &rule); err != nil {
+	if err := f.db.Pool.QueryRow(ctxBG(), `SELECT total_cents, state, rule_family FROM large_cash_events WHERE branch_id = $1`, f.branchID).Scan(&total, &state, &rule); err != nil {
 		t.Fatal(err)
 	}
 	if rule != "CA_DEALER" || state != "recorded" {
@@ -462,10 +462,34 @@ func lcThreeRegisters(t *testing.T, named bool) {
 	lcSetCountry(t, f, "US")
 	lcStock(t, f)
 	registers := []string{f.register}
+	branches := []uuid.UUID{f.branchID}
 	for i := 0; i < 2; i++ {
-		_, reg := lcBranchWithRegister(t, f, "LCC"+string(rune('A'+i)), "US")
+		br, reg := lcBranchWithRegister(t, f, "LCC"+string(rune('A'+i)), "US")
+		branches = append(branches, br)
 		registers = append(registers, reg)
 	}
+	// Stamp created_at with clock_timestamp() when the row is inserted under
+	// the payer's advisory lock, so transaction_timestamp() (captured before
+	// lock acquisition) cannot order a pre-crossing tender after the crossing.
+	mustExec(t, f.db, `
+		CREATE OR REPLACE FUNCTION pos_lc_clock_stamp_fn() RETURNS trigger LANGUAGE plpgsql AS $$
+		BEGIN
+			NEW.created_at := clock_timestamp();
+			RETURN NEW;
+		END $$;
+		DROP TRIGGER IF EXISTS pos_lc_tenders_clock_tr ON large_cash_tenders;
+		CREATE TRIGGER pos_lc_tenders_clock_tr BEFORE INSERT ON large_cash_tenders
+			FOR EACH ROW EXECUTE FUNCTION pos_lc_clock_stamp_fn();
+		DROP TRIGGER IF EXISTS pos_lc_events_clock_tr ON large_cash_events;
+		CREATE TRIGGER pos_lc_events_clock_tr BEFORE INSERT ON large_cash_events
+			FOR EACH ROW EXECUTE FUNCTION pos_lc_clock_stamp_fn();
+	`)
+	t.Cleanup(func() {
+		mustExec(f.t, f.db, `
+			DROP TRIGGER IF EXISTS pos_lc_tenders_clock_tr ON large_cash_tenders;
+			DROP TRIGGER IF EXISTS pos_lc_events_clock_tr ON large_cash_events;
+		`)
+	})
 	sales := make([]string, 3)
 	totals := make([]int64, 3)
 	for i, reg := range registers {
@@ -492,12 +516,12 @@ func lcThreeRegisters(t *testing.T, named bool) {
 			t.Errorf("contender %d = %d (%s), want 200", i, st, "")
 		}
 	}
-	events := countOf(t, f.db, `SELECT count(*) FROM large_cash_events`)
+	events := countOf(t, f.db, `SELECT count(*) FROM large_cash_events WHERE branch_id = ANY($1)`, branches)
 	if events != 1 {
 		t.Errorf("events = %d, want exactly one crossing", events)
 	}
 	var total int64
-	if err := f.db.Pool.QueryRow(ctxBG(), `SELECT total_cents FROM large_cash_events`).Scan(&total); err != nil {
+	if err := f.db.Pool.QueryRow(ctxBG(), `SELECT total_cents FROM large_cash_events WHERE branch_id = ANY($1)`, branches).Scan(&total); err != nil {
 		t.Fatal(err)
 	}
 	// whichever two committed first crossed: equal sales, so the figure is
@@ -506,7 +530,7 @@ func lcThreeRegisters(t *testing.T, named bool) {
 	if total != want {
 		t.Errorf("the crossing's total = %d, want the first two's %d", total, want)
 	}
-	if n := countOf(t, f.db, `SELECT count(*) FROM large_cash_tenders`); n != 3 {
+	if n := countOf(t, f.db, `SELECT count(*) FROM large_cash_tenders WHERE branch_id = ANY($1)`, branches); n != 3 {
 		t.Errorf("counted tenders = %d, want the three sales'", n)
 	}
 }
