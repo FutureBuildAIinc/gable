@@ -47,8 +47,8 @@ import (
 	glint "github.com/gablelbm/gable/internal/integrations/gl"
 	"github.com/gablelbm/gable/internal/inventory"
 	"github.com/gablelbm/gable/internal/invoice"
-	"github.com/gablelbm/gable/internal/links"
 	"github.com/gablelbm/gable/internal/largecash"
+	"github.com/gablelbm/gable/internal/links"
 	"github.com/gablelbm/gable/internal/location"
 	"github.com/gablelbm/gable/internal/marketcheck"
 	"github.com/gablelbm/gable/internal/matching"
@@ -170,6 +170,7 @@ var pinDocumentScopes = []string{
 	"matching:read", "matching:write", "delivery:read", "delivery:write",
 	"purchase-orders:read", "purchase-orders:write", "quotes:read", "quotes:write",
 	"email-deliveries:read", "dealer-profile:read", "dealer-profile:write",
+	"large-cash:read", "large-cash:write",
 }
 
 var pinKeyScopes = []string{
@@ -477,7 +478,9 @@ func newKeyPinFixtureSwitched(t *testing.T, switchState string) *keyPinFixture {
 		WithLedger(glSvc).WithAuditLog(audit.NewLogger(db)).
 		WithOutbox(outbox.NewWriter(db, "")).WithTxRunner(db)
 	wall.pos(mux, pos.NewHandler(posSvc), "admin", "owner", "cashier")
-	wall.largeCash(mux, largecash.NewHandler(largecash.NewService(db, nil, "")), "admin", "owner", "cashier")
+	wall.largeCash(mux, largecash.NewHandler(largecash.NewService(db, nil, "")),
+		[]string{"admin", "owner", "finance"},
+		[]string{"admin", "owner", "cashier"})
 
 	// The AI spending routes exactly as serve registers them, each call
 	// audited with whoever spent the credit (the PD-6 ruling).

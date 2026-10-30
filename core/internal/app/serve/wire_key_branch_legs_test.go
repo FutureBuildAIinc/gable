@@ -108,6 +108,10 @@ func (f *keyPinFixture) twinState(t *testing.T, w *walledTwins) map[string]strin
 		"z_reports":            `SELECT * FROM till_z_reports WHERE branch_id = ` + branchB,
 		"credit_holds":         `SELECT * FROM credit_holds WHERE id = ` + q(w.holdB) + ` OR customer_id = ` + custB,
 		"credit_limit_changes": `SELECT * FROM credit_limit_changes WHERE customer_id = ` + custB,
+		"large_cash_events":    `SELECT * FROM large_cash_events WHERE id = ` + q(w.lcB) + ` OR branch_id = ` + branchB,
+		"large_cash_filings":   `SELECT * FROM large_cash_filings WHERE event_id = ` + q(w.lcB),
+		"large_cash_payers":    `SELECT * FROM large_cash_payers WHERE branch_id = ` + branchB,
+		"large_cash_tenders":   `SELECT * FROM large_cash_tenders WHERE branch_id = ` + branchB,
 	}
 	out := make(map[string]string, len(rows))
 	for name, sel := range rows {

@@ -303,7 +303,9 @@ func newWallFixture(t *testing.T, db *database.DB, multiBranch bool) *wallFixtur
 	// every desk role reads it, the saved colours are customer rows and are
 	// walled to the customer they name, and the counter may save one.
 	wall.tint(mux, tint.NewService(tint.NewRepository(db)).WithTxRunner(db))
-	wall.largeCash(mux, largecash.NewHandler(largecash.NewService(db, nil, "")), "admin", "owner", "cashier")
+	wall.largeCash(mux, largecash.NewHandler(largecash.NewService(db, nil, "")),
+		[]string{"admin", "owner", "finance"},
+		[]string{"admin", "owner", "cashier"})
 	f.srv = httptest.NewServer(asRole(mux))
 	t.Cleanup(f.srv.Close)
 	return f

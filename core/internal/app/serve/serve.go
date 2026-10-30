@@ -812,7 +812,9 @@ func Run() {
 	}
 	largeCashSvc := largecash.NewService(db, lcVault, cfg.PaymentVaultKey)
 	posSvc.WithLargeCash(largeCashSvc)
-	wall.largeCash(mux, largecash.NewHandler(largeCashSvc), "admin", "owner", "cashier")
+	wall.largeCash(mux, largecash.NewHandler(largeCashSvc),
+		[]string{"admin", "owner", "finance"},
+		[]string{"admin", "owner", "cashier"})
 	accountSvc.WithInvoiceApplyGuard(posSvc)
 	accountSvc.WithTenderCreditGuard(posSvc)
 	// and the payment refund route holds the same credit to the counter's

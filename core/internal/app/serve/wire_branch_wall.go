@@ -348,9 +348,16 @@ func (w *branchWall) pos(mux *http.ServeMux, h *pos.Handler, roles ...string) {
 
 // largeCash mounts the large cash routes: the preview rides the counter's
 // roles and the branch middleware and holds the sale it names to the wall;
-// the dealer settings stay admin and owner.
-func (w *branchWall) largeCash(mux *http.ServeMux, h *largecash.Handler, roles ...string) {
-	h.WithBranchGuard(w.guard).RegisterRoutes(mux, middleware.RequireRole("admin", "owner"), w.scoped(roles...))
+// the manager's worklist, the filing and the customer statement ride the
+// finance roles and the branch middleware, so a branch scoped key sees only
+// the crossings its branch received cash for or contributed cash to; the
+// dealer settings and the Form 8300 export stay admin and owner, the export
+// because it carries the payer's taxpayer identification number.
+func (w *branchWall) largeCash(mux *http.ServeMux, h *largecash.Handler, managerRoles, counterRoles []string) {
+	h.WithBranchGuard(w.guard).RegisterRoutes(mux,
+		w.scoped("admin", "owner"),
+		w.scoped(managerRoles...),
+		w.scoped(counterRoles...))
 }
 
 // posReceipts mounts the counter's receipt pair (print and email of a sale's
