@@ -3390,7 +3390,7 @@ export class POSTerminal extends LitElement {
               const noCredit = m === 'store_credit' && storeCreditOffer(this._standing, owed) <= 0;
               return html`
                 <button data-testid="tender-${m}" @click=${() => this._chooseMethod(m)}
-                  ?disabled=${this._till === null || !hasLines || !open || refused !== null || noCredit}
+                  ?disabled=${this._till === null || !hasLines || !open || refused !== null || noCredit || this._changing.size > 0}
                   title=${m === 'account' ? (refused ?? 'Charge the sale to the customer’s account')
                     : m === 'store_credit' ? `The account holds ${money(this._standing?.open_credit_memo_cents ?? 0)} of store credit` : ''}
                   aria-pressed=${chosen ? 'true' : 'false'}
