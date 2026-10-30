@@ -116,6 +116,20 @@ describe('Tint catalogue screen', () => {
     expect(q(el, '[data-testid="tint-success"]').closest('[data-testid="tint-colorants"]')).not.toBeNull()
   })
 
+  it('marks required fields and says what a disabled button is waiting for', async () => {
+    const el = await open()
+    expect(text(q(el, 'label:has([data-testid="tint-new-base-code"])'))).toContain('*')
+    expect(q<HTMLInputElement>(el, '[data-testid="tint-new-base-code"]').required).toBe(true)
+    expect(q<HTMLButtonElement>(el, '[data-testid="tint-add-base"]').disabled).toBe(true)
+    expect(text(q(el, '[data-testid="tint-add-base-needs"]'))).toBe('Needs a code and a name.')
+    expect(q(el, '[data-testid="tint-add-base"]').getAttribute('aria-describedby')).toBe('tint-add-base-needs')
+    await type(el, '[data-testid="tint-new-base-code"]', 'MID')
+    expect(text(q(el, '[data-testid="tint-add-base-needs"]'))).toBe('Needs a name.')
+    await type(el, '[data-testid="tint-new-base-name"]', 'Mid base')
+    expect(el.querySelector('[data-testid="tint-add-base-needs"]')).toBeNull()
+    expect(text(q(el, '[data-testid="tint-add-formula-needs"]'))).toBe('Needs a colour, a base and at least one colorant.')
+  })
+
   it('adds a base, a colorant and a colour to the chosen system', async () => {
     const el = await open()
     await type(el, '[data-testid="tint-new-base-code"]', 'MID')
