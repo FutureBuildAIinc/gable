@@ -20,6 +20,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -38,6 +39,18 @@ func execFile(t *testing.T, db *sql.DB, path string) {
 	if _, err := db.ExecContext(context.Background(), string(text)); err != nil {
 		t.Fatalf("applying %s: %v", filepath.Base(path), err)
 	}
+}
+
+// migrationNumber is the numeric prefix of a migration file name, so a four
+// digit number sorts above 150 as a number and not as text (032b is 32).
+func migrationNumber(t *testing.T, name string) int {
+	t.Helper()
+	prefix, _, _ := strings.Cut(name, "_")
+	n, err := strconv.Atoi(strings.TrimRight(prefix, "abcdefghijklmnopqrstuvwxyz"))
+	if err != nil {
+		t.Fatalf("migration %s has no numeric prefix", name)
+	}
+	return n
 }
 
 // scratch150 builds a scratch database with every migration through 150
@@ -59,6 +72,9 @@ func scratch150(t *testing.T) *sql.DB {
 	name := "gv1_m150_" + hex.EncodeToString(suffix)
 	if _, err := admin.ExecContext(context.Background(), fmt.Sprintf(`CREATE DATABASE %q`, name)); err != nil {
 		admin.Close()
+		if os.Getenv("CI") != "" {
+			t.Fatalf("cannot create a scratch database: %v", err)
+		}
 		t.Skipf("cannot create a scratch database: %v", err)
 	}
 	t.Cleanup(func() {
@@ -80,7 +96,7 @@ func scratch150(t *testing.T) *sql.DB {
 	sort.Strings(files)
 	for _, f := range files {
 		b := filepath.Base(f)
-		if strings.HasSuffix(b, "_down.sql") || strings.Compare(b, "151_") >= 0 {
+		if strings.HasSuffix(b, "_down.sql") || migrationNumber(t, b) > 150 {
 			continue
 		}
 		execFile(t, db, f)

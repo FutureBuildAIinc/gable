@@ -288,13 +288,7 @@ func (h *Handler) emailInvoice(w http.ResponseWriter, r *http.Request, id uuid.U
 		},
 	})
 
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusAccepted)
-	if deliveryID != uuid.Nil {
-		_ = json.NewEncoder(w).Encode(map[string]string{"status": "queued", "delivery_id": deliveryID.String()})
-		return
-	}
-	w.Write([]byte(`{"status":"queued"}`))
+	writeQueued(w, deliveryID)
 }
 
 // outgoing is one document email a route has validated and rendered.
@@ -422,10 +416,16 @@ func writePDF(w http.ResponseWriter, filename string, pdf []byte) {
 	_, _ = w.Write(pdf)
 }
 
-func writeQueued(w http.ResponseWriter) {
+// writeQueued answers an email route's 202: the queued status and, when the
+// delivery row was written, its id, so the desk can follow the send.
+func writeQueued(w http.ResponseWriter, deliveryID uuid.UUID) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusAccepted)
-	_ = json.NewEncoder(w).Encode(map[string]string{"status": "queued"})
+	body := map[string]string{"status": "queued"}
+	if deliveryID != uuid.Nil {
+		body["delivery_id"] = deliveryID.String()
+	}
+	_ = json.NewEncoder(w).Encode(body)
 }
 
 func noEmail() error {
@@ -532,7 +532,7 @@ func (h *Handler) HandleEmailStatement(w http.ResponseWriter, r *http.Request) {
 	dealer := h.docSvc.DealerName(r.Context())
 	period := h.docSvc.StatementPeriod(r.Context(), st)
 	label := "Statement " + period
-	h.dispatch(r.Context(), outgoing{
+	deliveryID := h.dispatch(r.Context(), outgoing{
 		to: email, subject: withDealer(label, dealer),
 		body:     closing("Please find your account statement for "+period+" attached.", dealer),
 		filename: "statement-" + cust.AccountNumber + ".pdf", pdf: pdf,
@@ -541,7 +541,7 @@ func (h *Handler) HandleEmailStatement(w http.ResponseWriter, r *http.Request) {
 			DocumentID: &cust.ID, DocumentNumber: cust.AccountNumber,
 		},
 	})
-	writeQueued(w)
+	writeQueued(w, deliveryID)
 }
 
 func (h *Handler) loadQuote(w http.ResponseWriter, r *http.Request) (*quote.Quote, *customer.Customer, bool) {
@@ -600,7 +600,7 @@ func (h *Handler) HandleEmailQuote(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	dealer := h.docSvc.DealerName(r.Context())
-	h.dispatch(r.Context(), outgoing{
+	deliveryID := h.dispatch(r.Context(), outgoing{
 		to: email, subject: withDealer("Quote "+q.Number, dealer),
 		body:     closing("Please find quote "+q.Number+" attached.", dealer),
 		filename: "quote-" + q.Number + ".pdf", pdf: pdf,
@@ -609,7 +609,7 @@ func (h *Handler) HandleEmailQuote(w http.ResponseWriter, r *http.Request) {
 			DocumentID: &q.ID, DocumentNumber: q.Number,
 		},
 	})
-	writeQueued(w)
+	writeQueued(w, deliveryID)
 }
 
 func (h *Handler) HandlePrintPurchaseOrder(w http.ResponseWriter, r *http.Request) {

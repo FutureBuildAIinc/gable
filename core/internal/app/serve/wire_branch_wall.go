@@ -23,6 +23,7 @@ import (
 	"github.com/gablelbm/gable/internal/matching"
 	"github.com/gablelbm/gable/internal/order"
 	"github.com/gablelbm/gable/internal/payment"
+	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/gablelbm/gable/internal/pos"
 	"github.com/gablelbm/gable/internal/product"
 	"github.com/gablelbm/gable/internal/purchase_order"
@@ -406,13 +407,15 @@ func (w *branchWall) documents(mux *http.ServeMux, h *document.Handler) {
 //
 // The whole list stays the finance roles' read. A read that names one
 // document (document_id) is also open to the roles that send a document (sales
-// emails an invoice, the cashier a receipt), so the desk can follow the send
-// it just made; the wall still holds every row to the caller's branches.
+// emails an invoice, a quote or a statement, the cashier a receipt), so the
+// desk can follow the send it just made; the wall still holds every row to the
+// caller's branches, and a sales or cashier read must name a document_type its
+// role sends, so a purchase order's send is not theirs to follow.
 func (w *branchWall) emailDeliveries(mux *http.ServeMux, h *emaildelivery.Handler) {
 	listAll := w.scoped("admin", "owner", "finance")
 	followSend := w.scoped("admin", "owner", "finance", "sales", "cashier")
 	h.RegisterRoutes(mux, func(next http.Handler) http.Handler {
-		all, one := listAll(next), followSend(next)
+		all, one := listAll(next), followSend(followsItsOwnTypes(next))
 		return http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
 			if r.URL.Query().Get("document_id") != "" {
 				one.ServeHTTP(rw, r)
@@ -420,6 +423,40 @@ func (w *branchWall) emailDeliveries(mux *http.ServeMux, h *emaildelivery.Handle
 			}
 			all.ServeHTTP(rw, r)
 		})
+	})
+}
+
+// followTypes are the document types each sending role may follow the send of.
+var followTypes = map[string][]string{
+	"sales":   {emaildelivery.DocInvoice, emaildelivery.DocQuote, emaildelivery.DocStatement},
+	"cashier": {emaildelivery.DocInvoice},
+}
+
+// followsItsOwnTypes holds a follow read to the document types the caller's
+// roles send. admin, owner and finance (and a request with no sign in claims,
+// which the role guard has already admitted) read every type.
+func followsItsOwnTypes(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
+		claims := middleware.ClaimsFromContext(r.Context())
+		if claims == nil {
+			next.ServeHTTP(rw, r)
+			return
+		}
+		want := r.URL.Query().Get("document_type")
+		for _, role := range append([]string{claims.Role}, claims.Roles...) {
+			switch role {
+			case "admin", "owner", "finance":
+				next.ServeHTTP(rw, r)
+				return
+			}
+			for _, t := range followTypes[role] {
+				if t == want {
+					next.ServeHTTP(rw, r)
+					return
+				}
+			}
+		}
+		httpx.WriteError(rw, r, httpx.Forbidden("this role may not follow that document type's send"))
 	})
 }
 
