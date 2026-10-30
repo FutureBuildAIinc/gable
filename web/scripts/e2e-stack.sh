@@ -63,7 +63,7 @@ up)
     PROBE_PATH=/api/v1/apps
     AUTH_MODE=dev PORT="$CORE_PORT" DATABASE_URL="$DATABASE_URL" RATE_LIMIT_PER_MINUTE=5000 \
       POS_SCALE_SIMULATOR=1 \
-      PAYMENT_VAULT_KEY="${PAYMENT_VAULT_KEY:-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef}" \
+      PAYMENT_VAULT_KEY="${PAYMENT_VAULT_KEY:-$(openssl rand -hex 32)}" \
       setsid "$E2E_DIR/core" serve >"$E2E_DIR/core.log" 2>&1 &
   fi
   echo $! > "$E2E_DIR/core.pid"
