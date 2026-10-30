@@ -92,6 +92,7 @@ up)
     -v "$HERE/apps/desk/dist:/usr/share/nginx/html/desk:ro" \
     -v "$HERE/apps/work-shell/dist:/usr/share/nginx/html/work-shell:ro" \
     -v "$HERE/apps/field-shell/dist:/usr/share/nginx/html/field-shell:ro" \
+    -v "$HERE/apps/pro-portal/dist:/usr/share/nginx/html/pro-portal:ro" \
     nginx:1.27-alpine >/dev/null
   for _ in $(seq 1 30); do
     curl -fsS "http://127.0.0.1:$WEB_PORT$PROBE_PATH" >/dev/null 2>&1 && break
