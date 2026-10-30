@@ -87,21 +87,23 @@ type TxRunner interface {
 // offline sync, every money moment one transaction whose events are written
 // last (ADR 0005 sections 11 and 14.2 C2-5).
 type Service struct {
-	db        *database.DB
-	grants    *middleware.BranchGuard
-	repo      Repository
-	logger    *slog.Logger
-	now       func() time.Time
-	pricer    PriceEngine
-	tax       TaxProvider
-	invoices  InvoiceWriter
-	ledger    LedgerPoster
-	gateway   PaymentGateway
-	auditLog  *audit.Logger
-	events    EventRecorder
-	tx        TxRunner
-	ar        ARCore
-	inventory CounterInventory
+	db     *database.DB
+	grants *middleware.BranchGuard
+	repo   Repository
+	logger *slog.Logger
+	now    func() time.Time
+	pricer PriceEngine
+	// sessionEnder ends a revoked register's web sessions (ADR 0011 6.1)
+	sessionEnder RegisterSessionEnder
+	tax          TaxProvider
+	invoices     InvoiceWriter
+	ledger       LedgerPoster
+	gateway      PaymentGateway
+	auditLog     *audit.Logger
+	events       EventRecorder
+	tx           TxRunner
+	ar           ARCore
+	inventory    CounterInventory
 	// terminal is the card terminal device seam and terminalLedger its
 	// intent ledger (CP-05, IX-01). Both nil keeps the plain gateway path.
 	terminal       payment.TerminalProvider
