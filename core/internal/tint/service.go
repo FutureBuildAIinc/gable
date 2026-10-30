@@ -43,6 +43,8 @@ func httpErr(err error) error {
 	switch {
 	case errors.Is(err, ErrNotFound):
 		return httpx.NotFound("no such tint row")
+	case errors.Is(err, ErrUnknownProduct):
+		return unprocessable("product_id", "names no product")
 	case errors.Is(err, ErrDuplicate):
 		return &httpx.Error{Status: 409, Code: httpx.CodeDuplicate,
 			Message: "a tint row with this key already exists"}

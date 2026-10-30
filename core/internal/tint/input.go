@@ -5,11 +5,31 @@ package tint
 
 import (
 	"encoding/json"
+	"net/http"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/gablelbm/gable/internal/platform/httpx"
 )
+
+// maxBaseName is the paint_bases.name column's CHECK bound, in characters.
+const maxBaseName = 120
+
+// unprocessable is a 422 whose details name the one field the caller must fix.
+func unprocessable(field, message string) *httpx.Error {
+	return &httpx.Error{Status: http.StatusUnprocessableEntity, Code: httpx.CodeValidationFailed,
+		Message: "one or more fields failed validation",
+		Details: []httpx.FieldError{{Field: field, Message: message}}}
+}
+
+// checkBaseName refuses a name the column would, before the store is reached.
+func checkBaseName(name string) error {
+	if utf8.RuneCountInString(name) > maxBaseName {
+		return unprocessable("name", "must be at most 120 characters")
+	}
+	return nil
+}
 
 // systemRequest is POST /api/v1/tint/systems.
 type systemRequest struct {
@@ -73,6 +93,9 @@ func (r *baseRequest) parse() (*BaseDraft, error) {
 	}
 	v.Required("code", d.Code)
 	v.Required("name", d.Name)
+	if err := checkBaseName(d.Name); err != nil {
+		return nil, err
+	}
 	if r.ManufacturerBaseCode != nil {
 		d.ManufacturerBaseCode = *r.ManufacturerBaseCode
 	}
@@ -337,6 +360,9 @@ func (r *baseUpdateRequest) parse() (*BaseUpdate, error) {
 	}
 	if r.Name != nil {
 		v.Required("name", *r.Name)
+		if err := checkBaseName(*r.Name); err != nil {
+			return nil, err
+		}
 	}
 	if r.FillVolumeOZ != nil {
 		v.Check(*r.FillVolumeOZ > 0, "fill_volume_oz", "must be a positive whole number of ounces")

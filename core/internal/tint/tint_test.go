@@ -11,8 +11,12 @@ package tint
 
 import (
 	"encoding/json"
+	"errors"
+	"net/http"
+	"strings"
 	"testing"
 
+	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/gablelbm/gable/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -262,6 +266,49 @@ func TestBaseUpdateRequestParse(t *testing.T) {
 			t.Errorf("%s: %+v, %v", name, u, err)
 		}
 	}
+}
+
+// RULE: an unknown product on a base is a 422 naming product_id, on create and
+// update alike, and a name over the column's 120 characters is a 422 naming
+// name at parse time, never a 500 from the column CHECK (CP-16 fix round 1).
+func TestBaseRefusalsAre422WithAFieldError(t *testing.T) {
+	svc, s := seed(t)
+	ctx := t.Context()
+	ghost := newUUID()
+	_, err := svc.UpdateBase(ctx, s.base.ID, &BaseUpdate{SetProduct: true, ProductID: &ghost})
+	assertUnprocessable(t, "update with an unknown product", err, "product_id")
+	_, err = svc.CreateBase(ctx, &BaseDraft{TintSystemID: s.base.TintSystemID, Code: "GHOST", Name: "Ghost",
+		ProductID: &ghost, FillVolumeOZ: 10})
+	assertUnprocessable(t, "create with an unknown product", err, "product_id")
+
+	long := strings.Repeat("n", 121)
+	sysID := newUUID().String()
+	fill := 10
+	_, err = (&baseRequest{TintSystemID: &sysID, Code: ptr("C"), Name: &long, FillVolumeOZ: &fill}).parse()
+	assertUnprocessable(t, "create with a long name", err, "name")
+	_, err = (&baseUpdateRequest{Name: &long}).parse()
+	assertUnprocessable(t, "update with a long name", err, "name")
+	ok := strings.Repeat("n", 120)
+	if _, err := (&baseUpdateRequest{Name: &ok}).parse(); err != nil {
+		t.Errorf("a 120 character name was refused: %v", err)
+	}
+}
+
+func ptr(s string) *string { return &s }
+
+func assertUnprocessable(t *testing.T, what string, err error, field string) {
+	t.Helper()
+	var he *httpx.Error
+	if !errors.As(err, &he) || he.Status != http.StatusUnprocessableEntity {
+		t.Errorf("%s: %v, want a 422", what, err)
+		return
+	}
+	for _, d := range he.Details {
+		if d.Field == field {
+			return
+		}
+	}
+	t.Errorf("%s: details %+v name no %s field", what, he.Details, field)
 }
 
 func rawJSON(s string) json.RawMessage { return json.RawMessage(s) }

@@ -105,6 +105,8 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
         '500':
           $ref: '#/components/responses/InternalError'
   /api/v1/tint/bases/{id}:
@@ -112,7 +114,7 @@ paths:
       operationId: tintBaseUpdate
       tags: [tint]
       summary: Update a base
-      description: Changes the fields the body names. A product_id sets the link to the stocked base paint can the counter sells; null clears it. The code and the tint system never change. Admin and owner.
+      description: Changes the fields the body names. A product_id sets the link to the stocked base paint can the counter sells; null clears it. The code and the tint system never change. A product_id naming no product, or a name over 120 characters, answers 422 with a field error. Admin and owner.
       parameters:
         - name: id
           in: path
@@ -139,6 +141,8 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
         '500':
           $ref: '#/components/responses/InternalError'
   /api/v1/tint/colorants:

@@ -20,6 +20,10 @@ import (
 // ErrNotFound is the repository's answer for a row that does not exist.
 var ErrNotFound = errors.New("tint row not found")
 
+// ErrUnknownProduct is the repository's answer for a base whose product_id
+// names no product: a refusal of the request's own field, not a missing row.
+var ErrUnknownProduct = errors.New("no such product")
+
 // ErrDuplicate is a unique key another row already holds.
 var ErrDuplicate = errors.New("a tint row with this key already exists")
 
@@ -127,6 +131,16 @@ func mapInsert(err error, what string) error {
 	return fmt.Errorf("%s: %w", what, err)
 }
 
+// mapBaseWrite is mapInsert for a base write, where a foreign key violation on
+// product_id is the caller's field to fix, not a missing tint row.
+func mapBaseWrite(err error, what string) error {
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && pgErr.Code == "23503" && pgErr.ConstraintName == "paint_bases_product_id_fkey" {
+		return ErrUnknownProduct
+	}
+	return mapInsert(err, what)
+}
+
 func notFound(err error) error {
 	if errors.Is(err, ErrNotFound) || errors.Is(err, pgx.ErrNoRows) {
 		return ErrNotFound
@@ -199,7 +213,7 @@ func (r *PostgresRepository) CreateBase(ctx context.Context, d *BaseDraft) (*Bas
 		d.TintSystemID, d.Code, d.Name, d.ManufacturerBaseCode, d.ProductID, d.FillVolumeOZ, d.IsDeepest).
 		Scan(&b.ID, &b.CreatedAt)
 	if err != nil {
-		return nil, mapInsert(err, "failed to create the base")
+		return nil, mapBaseWrite(err, "failed to create the base")
 	}
 	return b, nil
 }
@@ -221,7 +235,7 @@ func (r *PostgresRepository) UpdateBase(ctx context.Context, id uuid.UUID, u *Ba
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrNotFound
 		}
-		return nil, mapInsert(err, "failed to update the base")
+		return nil, mapBaseWrite(err, "failed to update the base")
 	}
 	return &b, nil
 }

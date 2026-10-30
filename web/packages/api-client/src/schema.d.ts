@@ -10212,7 +10212,7 @@ export interface paths {
         head?: never;
         /**
          * Update a base
-         * @description Changes the fields the body names. A product_id sets the link to the stocked base paint can the counter sells; null clears it. The code and the tint system never change. Admin and owner.
+         * @description Changes the fields the body names. A product_id sets the link to the stocked base paint can the counter sells; null clears it. The code and the tint system never change. A product_id naming no product, or a name over 120 characters, answers 422 with a field error. Admin and owner.
          */
         patch: operations["tintBaseUpdate"];
         trace?: never;
@@ -43862,6 +43862,7 @@ export interface operations {
             400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -43893,6 +43894,7 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalError"];
         };
     };
