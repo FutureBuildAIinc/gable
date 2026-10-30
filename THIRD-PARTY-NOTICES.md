@@ -110,6 +110,7 @@ Apache-2.0 dependencies in this project include (Go) `MicahParks/keyfunc`,
 | chart.js | MIT |
 | clsx | MIT |
 | date-fns | MIT |
+| @fontsource/outfit, @fontsource/jetbrains-mono (the Outfit and JetBrains Mono font files) | OFL-1.1 (SIL Open Font License; the licence text ships in each package) |
 | html5-qrcode | Apache-2.0 |
 | leaflet | BSD-2-Clause |
 | lit | BSD-3-Clause |

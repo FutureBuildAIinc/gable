@@ -10,6 +10,19 @@
    entry stylesheet keeps its own @tailwind directives and imports this file;
    the @layer blocks merge with the app's Tailwind layers by name. */
 
+/* Fonts (item 353): Outfit (UI) and JetBrains Mono (data), self hosted from the
+   OFL @fontsource packages so no page asks a third party for them. The woff2
+   files ship with each app's build. */
+@import '@fontsource/outfit/300.css';
+@import '@fontsource/outfit/400.css';
+@import '@fontsource/outfit/500.css';
+@import '@fontsource/outfit/600.css';
+@import '@fontsource/outfit/700.css';
+@import '@fontsource/jetbrains-mono/400.css';
+@import '@fontsource/jetbrains-mono/500.css';
+@import '@fontsource/jetbrains-mono/600.css';
+@import '@fontsource/jetbrains-mono/700.css';
+
 @layer base {
   :root {
     /* Industrial Dark: colour channels read by the Tailwind theme */

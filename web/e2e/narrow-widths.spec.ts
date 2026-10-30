@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: LicenseRef-OpenLBM-Surface-1.0
 // SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
 
-import { test, expect, type Page } from '@playwright/test';
+import { test, expect, type Page } from './font-guard';
 
 /**
  * The desk at 390 (CP polish B, fix round 2): the document is never wider than

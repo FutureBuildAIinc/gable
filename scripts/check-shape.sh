@@ -51,6 +51,13 @@ STRAY='^(pr[-_ ]?body.*|pr[-_ ]?description.*|.*\.(orig|rej|bak|tmp|swp|patch|di
 stray="$(git ls-files -co --exclude-standard | grep -v / | grep -Ei "$STRAY" || true)"
 [ -z "$stray" ] || fail "stray artefact in the repository root: $(echo "$stray" | tr '\n' ' ')"
 
+# 6. No third party fonts (item 353). Every shipped page bundles its fonts, so
+# nothing under web/ or tauri/ may name Google's font hosts. The Playwright
+# request guard (web/e2e/font-guard.ts) fails any test that requests them.
+fonthits="$(git grep -nE 'fonts\.(googleapis|gstatic)\.com' -- web tauri ':!web/e2e/font-guard.ts' || true)"
+[ -z "$fonthits" ] || fail "third party font host referenced; bundle the font instead:
+$fonthits"
+
 # 2 and 4: manifest and JSON, in python (the manifest parser handles the
 # small YAML subset manifest.yaml is kept to).
 python3 - <<'PY'
