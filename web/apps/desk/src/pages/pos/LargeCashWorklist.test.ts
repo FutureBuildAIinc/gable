@@ -168,8 +168,9 @@ describe("the manager's large cash worklist", () => {
         })]);
         const rows = all(el, 'large-cash-row');
         // the amounts are money in the branch's own currency, never raw cents
-        expect(rows[0].textContent).toContain('CA$12,129.60');
-        expect(rows[0].textContent).toContain('CA$10,000.00 or more');
+        expect(rows[0].textContent).toContain('$12,129.60');
+        expect(rows[0].textContent).not.toContain('CA$');
+        expect(rows[0].textContent).toContain('$10,000.00 or more');
         // the Canadian words: currency only, the 24 hour rule, nothing filed
         expect(rows[0].textContent).toContain('currency only');
         expect(rows[0].textContent).toContain('24 hour');
@@ -184,6 +185,19 @@ describe("the manager's large cash worklist", () => {
             expect(page).not.toContain(wrong);
         }
         el.remove();
+    });
+
+    it("keeps the currency code only when it differs from the branch's home currency", async () => {
+        const home = await mount([row({ rule_family: 'CA_DEALER', currency: 'CAD', total_cents: 1_212_960 })]);
+        expect(all(home, 'large-cash-row')[0].textContent).toContain('$12,129.60');
+        expect(all(home, 'large-cash-row')[0].textContent).not.toMatch(/(CA|US)\$/);
+        home.remove();
+        const foreign = await mount([row({ rule_family: 'CA_DEALER', currency: 'USD', total_cents: 1_212_960 })]);
+        expect(all(foreign, 'large-cash-row')[0].textContent).toContain('US$12,129.60');
+        foreign.remove();
+        const us = await mount([row({ rule_family: 'US_8300', currency: 'CAD', total_cents: 1_212_960 })]);
+        expect(all(us, 'large-cash-row')[0].textContent).toContain('CA$12,129.60');
+        us.remove();
     });
 
     it('records the filing under the acknowledgement number the manager typed', async () => {

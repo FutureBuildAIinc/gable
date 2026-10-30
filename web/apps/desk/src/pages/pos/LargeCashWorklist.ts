@@ -17,7 +17,7 @@ import { LitElement, html, nothing } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
 import { LargeCashService } from '../../services/LargeCashService';
 import type { LargeCashForm8300, LargeCashStatement, LargeCashWorklistRow } from '../../types/largecash';
-import { deadlineWords, actionWords, moneyWords, regimeWords, statementLines } from './largeCashWords';
+import { deadlineWords, actionWords, moneyWords, regimeWords, rowMoney, statementLines } from './largeCashWords';
 
 const SURFACE = 'background:rgb(var(--gb-till-surface));border:1px solid rgb(var(--gb-till-edge))';
 const INK = 'color:rgb(var(--gb-till-text))';
@@ -203,7 +203,7 @@ export class LargeCashWorklist extends LitElement {
         <li class="rounded-xl p-4" style=${SURFACE} data-testid="large-cash-row" data-event-id=${row.event_id}>
           <div class="flex flex-wrap items-baseline justify-between gap-2">
             <div class="text-sm font-semibold" style=${INK}>
-              ${row.payer_name} &middot; ${moneyWords(row.total_cents, row.currency)}
+              ${row.payer_name} &middot; ${rowMoney(row, row.total_cents)}
             </div>
             <div class="font-mono text-xs" style=${MUTED}>
               ${row.branch_name}${row.contributed_branch_ids.length > 1
@@ -250,7 +250,7 @@ export class LargeCashWorklist extends LitElement {
               <div class="font-semibold" style=${INK}>${form.form} for ${form.payer.name}</div>
               <div class="mt-1" style=${MUTED}>${form.payer.address}</div>
               <div class="mt-1" style=${MUTED}>Taxpayer identification number ${form.payer.taxpayer_id}</div>
-              <div class="mt-1" style=${MUTED}>${moneyWords(form.amount_cents, form.currency)} received ${form.first_date} to ${form.last_date}</div>
+              <div class="mt-1" style=${MUTED}>${rowMoney(row, form.amount_cents, form.currency)} received ${form.first_date} to ${form.last_date}</div>
               <div class="mt-1" style=${MUTED}>Filed for ${form.filer.branch_name}. Due ${form.filing_deadline}.</div>
               <div class="mt-2" style=${INK}>${form.note}</div>
             </div>` : nothing}

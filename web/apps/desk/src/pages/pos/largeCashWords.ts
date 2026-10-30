@@ -79,10 +79,25 @@ export function actionWords(row: LargeCashWorklistRow): { say: string; button: s
     }
 }
 
-/** An amount in cents in the row's own currency, as the statement prints it. */
-export function moneyWords(cents: number, currency: string): string {
+/**
+ * An amount in cents, formatted in the locale of the branch's country. The
+ * currency code shows only when it differs from the branch's home currency:
+ * a Canadian dealer sees $12,129.60 for CAD and US$12,129.60 for USD. With no
+ * branch country the home is the United States, as the statement prints it.
+ */
+export function moneyWords(cents: number, currency: string, country: 'CA' | 'US' = 'US'): string {
     const code = currency && /^[A-Za-z]{3}$/.test(currency) ? currency.toUpperCase() : 'USD';
-    return new Intl.NumberFormat('en-US', { style: 'currency', currency: code }).format(cents / 100);
+    return new Intl.NumberFormat(country === 'CA' ? 'en-CA' : 'en-US', { style: 'currency', currency: code }).format(cents / 100);
+}
+
+/** The country whose regime a row speaks: its rule family names it. */
+function rowCountry(row: LargeCashWorklistRow): 'CA' | 'US' {
+    return row.rule_family === 'CA_DEALER' ? 'CA' : 'US';
+}
+
+/** A row's amount in cents, in the branch's locale. */
+export function rowMoney(row: LargeCashWorklistRow, cents: number, currency = row.currency): string {
+    return moneyWords(cents, currency, rowCountry(row));
 }
 
 /** The day a statement date falls on, as the statement prints it. */
@@ -112,7 +127,7 @@ export function statementLines(s: LargeCashStatement): { label: string; value: s
 
 /** The regime a row's branch speaks: currency only and the 24 hour rule for a Canadian branch. */
 export function regimeWords(row: LargeCashWorklistRow): string {
-    const threshold = moneyWords(row.threshold_cents, row.currency);
+    const threshold = rowMoney(row, row.threshold_cents);
     if (row.rule_family === 'CA_DEALER') {
         return `Cash means currency only. ${threshold} or more, with the 24 hour rule.`;
     }
