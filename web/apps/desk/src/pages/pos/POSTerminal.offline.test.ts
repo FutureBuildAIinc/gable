@@ -421,6 +421,14 @@ describe('the counter when the connection drops', () => {
       el.remove();
     });
 
+    it('holds the two buttons together in one row beneath the fields', async () => {
+      const el = await openForm();
+      const buttons = q(el, 'pos-offline-pw-buttons') as HTMLElement;
+      expect(buttons.contains(q(el, 'pos-offline-pw-submit'))).toBe(true);
+      expect(buttons.contains(q(el, 'pos-offline-pw-cancel'))).toBe(true);
+      el.remove();
+    });
+
     it('a degraded config shows the unreachable words, no form, and the next tap reads the config again', async () => {
       core.refuse['sync_offline_queue'] = noSession;
       auth.authMethodsConfig.mockResolvedValue(cfg([{ method: 'email_password', kind: 'form' }], true));

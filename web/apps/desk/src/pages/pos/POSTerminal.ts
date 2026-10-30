@@ -479,18 +479,20 @@ export class POSTerminal extends LitElement {
     const input = 'w-full min-h-11 rounded border border-white/10 bg-deep-space px-3 py-2 text-sm text-white outline-none focus:border-gable-green';
     const enter = (e: KeyboardEvent) => { if (e.key === 'Enter') void this._submitPassword(); };
     return html`
-      <form class="flex flex-wrap items-end gap-3 border-b border-blueprint-blue/30 bg-blueprint-blue/5 px-4 py-3 text-sm" data-testid="pos-offline-pw-form" @submit=${(e: Event) => e.preventDefault()}>
-        <label class="block min-w-[12rem] flex-1 space-y-1.5">
+      <form class="flex flex-col gap-3 border-b border-blueprint-blue/30 bg-blueprint-blue/5 px-4 py-3 text-sm sm:flex-row sm:flex-wrap sm:items-end" data-testid="pos-offline-pw-form" @submit=${(e: Event) => e.preventDefault()}>
+        <label class="block w-full space-y-1.5 sm:w-auto sm:min-w-[12rem] sm:flex-1">
           <span class="text-xs uppercase tracking-wider text-muted-foreground">Email</span>
           <input type="email" data-testid="pos-offline-pw-email" aria-label="Email" autocomplete="username" class=${input}
             .value=${this._pwEmail} @input=${(e: Event) => { this._pwEmail = (e.target as HTMLInputElement).value; }} @keydown=${enter} />
         </label>
-        <label class="block min-w-[12rem] flex-1 space-y-1.5">
+        <label class="block w-full space-y-1.5 sm:w-auto sm:min-w-[12rem] sm:flex-1">
           <span class="text-xs uppercase tracking-wider text-muted-foreground">Password</span>
           <input type="password" data-testid="pos-offline-pw-password" aria-label="Password" autocomplete="current-password" class=${input} @keydown=${enter} />
         </label>
-        <button type="button" data-testid="pos-offline-pw-submit" ?disabled=${this._pwBusy} class="min-h-11 rounded-lg bg-gable-green px-4 font-semibold text-deep-space disabled:opacity-60" @click=${() => void this._submitPassword()}>${this._pwBusy ? 'Signing in' : NO_SESSION_ASK}</button>
-        <button type="button" data-testid="pos-offline-pw-cancel" class="min-h-11 rounded-lg border border-white/20 px-4 font-semibold" @click=${() => void this._cancelPasswordForm()}>Cancel</button>
+        <div class="flex gap-3" data-testid="pos-offline-pw-buttons">
+          <button type="button" data-testid="pos-offline-pw-submit" ?disabled=${this._pwBusy} class="min-h-11 rounded-lg bg-gable-green px-4 font-semibold text-deep-space disabled:opacity-60" @click=${() => void this._submitPassword()}>${this._pwBusy ? 'Signing in' : NO_SESSION_ASK}</button>
+          <button type="button" data-testid="pos-offline-pw-cancel" class="min-h-11 rounded-lg border border-white/20 px-4 font-semibold" @click=${() => void this._cancelPasswordForm()}>Cancel</button>
+        </div>
         ${this._pwError ? html`<p class="basis-full text-sm text-amber-400" role="alert" data-testid="pos-offline-pw-error">${this._pwError}</p>` : nothing}
       </form>`;
   }
