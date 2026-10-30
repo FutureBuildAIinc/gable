@@ -38,6 +38,16 @@ type IndexSourceRepository interface {
 	// returns nil when there is none.
 	HistoryByAsOf(ctx context.Context, indexID uuid.UUID, asOf time.Time, source string) (*MarketIndexHistory, error)
 
+	// LockMarketIndex takes the market index row FOR UPDATE: the check of
+	// what the index's current value stands and the write that moves it are
+	// one database act, so a value cannot be lost between the two.
+	LockMarketIndex(ctx context.Context, id uuid.UUID) (*MarketIndex, error)
+
+	// NewestStoredDay returns the day of the index's newest stored value, or
+	// nil when it has none. A value for a day older than this one is history
+	// only: it never replaces a newer day's value.
+	NewestStoredDay(ctx context.Context, id uuid.UUID) (*time.Time, error)
+
 	// InsertHistoryIfAbsent writes one history row and reports whether it
 	// was written. A value for one index, day and source is stored once, so
 	// a second write of the same value writes nothing and says so: that is
@@ -149,6 +159,38 @@ func (r *PostgresIndexSourceRepository) HistoryByAsOf(ctx context.Context, index
 	}
 	return &h, nil
 }
+// LockMarketIndex takes the market index row FOR UPDATE, so the check of
+// what the index's current value stands and the write that moves it are one
+// database act.
+func (r *PostgresIndexSourceRepository) LockMarketIndex(ctx context.Context, id uuid.UUID) (*MarketIndex, error) {
+	var idx MarketIndex
+	err := scanMarketIndex(r.db.GetExecutor(ctx).QueryRow(ctx,
+		`SELECT `+marketIndexColumns+` FROM market_indices WHERE id = $1 FOR UPDATE`, id), &idx)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("lock market index: %w", err)
+	}
+	return &idx, nil
+}
+
+// NewestStoredDay returns the day of the index's newest stored value, or nil
+// when it has none. A value typed by hand carries the day it was recorded, so
+// it counts too.
+func (r *PostgresIndexSourceRepository) NewestStoredDay(ctx context.Context, id uuid.UUID) (*time.Time, error) {
+	const q = `SELECT MAX(COALESCE(as_of_date, recorded_at::date)) FROM market_index_history WHERE market_index_id = $1`
+	var newest pgtype.Date
+	if err := r.db.GetExecutor(ctx).QueryRow(ctx, q, id).Scan(&newest); err != nil {
+		return nil, fmt.Errorf("read the newest stored day: %w", err)
+	}
+	if !newest.Valid {
+		return nil, nil
+	}
+	t := newest.Time
+	return &t, nil
+}
+
 // InsertHistoryIfAbsent writes one history row unless one is already stored
 // for the same index, day and source. It reports whether it wrote.
 func (r *PostgresIndexSourceRepository) InsertHistoryIfAbsent(ctx context.Context, hist *MarketIndexHistory) (bool, error) {

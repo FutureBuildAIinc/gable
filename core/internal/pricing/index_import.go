@@ -240,7 +240,6 @@ func (s *IndexImportService) Preview(ctx context.Context, data []byte) (*IndexIm
 		}
 		row.IndexID = idx.ID.String()
 		row.IndexName = idx.Name
-		row.index = idx
 		value, err := strconv.ParseFloat(raw.value, 64)
 		if err != nil || value <= 0 {
 			row.Status = importStatusRefused
@@ -360,9 +359,11 @@ func (s *IndexImportService) Apply(ctx context.Context, data []byte, recordedBy 
 // value differs from the one that stands. moved reports whether the current
 // value moved, which is what decides the exposure scan.
 //
-// The history write is conditional on the unique index for one index, day
-// and source, so two imports of the same file racing each other store the
-// value once and scan once.
+// The index row is locked for the write, so the check of what the current
+// value stands and the write that moves it are one database act. The history
+// write is conditional on the unique index for one index, day and source, so
+// two imports of the same file racing each other store the value once and
+// scan once.
 func (s *IndexImportService) recordValue(ctx context.Context, indexID uuid.UUID, value float64, source, sourceURL string, asOf *time.Time, recordedBy string, isNewest bool) (bool, error) {
 	moved := false
 	hist := &MarketIndexHistory{
@@ -374,12 +375,16 @@ func (s *IndexImportService) recordValue(ctx context.Context, indexID uuid.UUID,
 		SourceURL:     sourceURL,
 	}
 	err := s.db.RunInTx(ctx, func(txCtx context.Context) error {
-		idx, err := s.escalators.GetMarketIndex(txCtx, indexID)
+		idx, err := s.source.LockMarketIndex(txCtx, indexID)
 		if err != nil {
-			return fmt.Errorf("read the market index: %w", err)
+			return err
 		}
 		if idx == nil {
 			return fmt.Errorf("no market index %s", indexID)
+		}
+		newestStored, err := s.source.NewestStoredDay(txCtx, indexID)
+		if err != nil {
+			return err
 		}
 		inserted, err := s.source.InsertHistoryIfAbsent(txCtx, hist)
 		if err != nil {
@@ -390,7 +395,16 @@ func (s *IndexImportService) recordValue(ctx context.Context, indexID uuid.UUID,
 			// scan runs: the value is already there.
 			return nil
 		}
-		if !isNewest || idx.CurrentValue == value {
+		if !isNewest {
+			// An older day is history only.
+			return nil
+		}
+		if newestStored != nil && hist.AsOfDate != nil && hist.AsOfDate.Before(*newestStored) {
+			// A value for a day older than the index's newest stored day
+			// never replaces a newer day's value.
+			return nil
+		}
+		if idx.CurrentValue == value {
 			return nil
 		}
 		prev := idx.CurrentValue

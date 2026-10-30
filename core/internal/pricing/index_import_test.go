@@ -369,6 +369,57 @@ func TestQE07_StaleIndexReported(t *testing.T) {
 	}
 }
 
+// RULE: a value for a day older than the index's newest stored day is
+// history only: it never replaces a newer day's value, and nothing is
+// scanned for it.
+func TestQE07_CSVOlderDayDoesNotReplaceNewer(t *testing.T) {
+	db := testutil.RequireDB(t)
+	code := "QE07_OLDER_" + uuid.NewString()[:8]
+	indexID := seedImportIndex(t, db, code, 100)
+	quoteID, _, _ := seedImportQuote(t, db, indexID, 100)
+
+	// A newer day's value is stored first, by hand.
+	newer := time.Now().UTC().Truncate(24 * time.Hour)
+	if _, err := db.Pool.Exec(context.Background(),
+		`INSERT INTO market_index_history (market_index_id, value, recorded_at, recorded_by, source, as_of_date, fetched_at)
+		 VALUES ($1, 150, $2, 'seed', 'MANUAL', $3::date, $2)`, indexID, newer, newer); err != nil {
+		t.Fatalf("seed the newer value: %v", err)
+	}
+
+	older := newer.AddDate(0, 0, -10)
+	file := fmt.Sprintf(`index_code,value,as_of_date
+%s,90,%s
+`, code, older.Format("2006-01-02"))
+
+	result, err := importService(t, db).Apply(context.Background(), []byte(file), "user-1")
+	if err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	if result.AppliedCount != 1 {
+		t.Errorf("applied_count = %d, want 1 (the older day is stored as history)", result.AppliedCount)
+	}
+	if result.ChangedIndices != 0 {
+		t.Errorf("changed_indices = %d, want 0 (an older day never replaces a newer one)", result.ChangedIndices)
+	}
+	if result.Scans != 0 {
+		t.Errorf("scans = %d, want 0", result.Scans)
+	}
+	var current float64
+	if err := db.Pool.QueryRow(context.Background(),
+		`SELECT current_value FROM market_indices WHERE id = $1`, indexID).Scan(&current); err != nil {
+		t.Fatal(err)
+	}
+	if current != 100 {
+		t.Errorf("current_value = %v, want the newer day's value to stand (100)", current)
+	}
+	if n := historyCount(t, db, indexID); n != 2 {
+		t.Errorf("history rows = %d, want 2 (the newer value and the older history)", n)
+	}
+	if n := exposureEventCount(t, db, quoteID); n != 0 {
+		t.Errorf("exposure ledger rows = %d, want 0 (nothing moved)", n)
+	}
+}
+
 // findFreshness looks one index up in a freshness list.
 func findFreshness(list []pricing.IndexFreshness, id uuid.UUID) (pricing.IndexFreshness, bool) {
 	for _, f := range list {

@@ -4,6 +4,7 @@
 import { LitElement, html, nothing } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
 import { icon } from '../../../lib/icons.ts';
+import { formatDateTime } from '../../../lib/dates.ts';
 import { BarChart3, Shield } from 'lucide';
 import { apiErrorMessage, fieldErrorMap } from '../../../services/apiError';
 import { techAdminService } from '../../../services/TechAdminService';
@@ -166,7 +167,7 @@ export class GableMarketIndexSourceSettings extends LitElement {
         }
         const s = this._settings;
         const lastPull = s.last_pull_at
-            ? `${new Date(s.last_pull_at).toLocaleString()}${s.last_pull_ok === false ? ' (failed)' : s.last_pull_ok === true ? ' (ok)' : ''}`
+            ? `${formatDateTime(s.last_pull_at)}${s.last_pull_ok === false ? ' (failed)' : s.last_pull_ok === true ? ' (ok)' : ''}`
             : 'No pull yet';
         return html`
             <div class="space-y-6">
