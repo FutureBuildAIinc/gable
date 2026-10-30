@@ -37,6 +37,9 @@ do not appear in the table above:
 - `LicenseRef-OpenLBM-Community-Source-1.0` — the Community Source License,
   applied per-work (by version notice), not per-directory.
 - `LicenseRef-OpenLBM-Trademark` — a brand-use policy, not a code license.
+- `OFL-1.1` — the SIL Open Font License for the bundled Outfit and JetBrains Mono
+  fonts (npm packages, not vendored); each web and Tauri build copies it to
+  `dist/OFL-1.1.txt` next to the fonts.
 
 ## Status
 

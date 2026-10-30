@@ -34,6 +34,8 @@ COPY web/packages/shell-chrome/package.json packages/shell-chrome/
 RUN npm ci
 
 COPY web/ .
+# The OFL text the build copies next to the self hosted fonts (web/scripts/copy-ofl.mjs).
+COPY LICENSES/OFL-1.1.txt /app/LICENSES/OFL-1.1.txt
 
 # Every bundle: desk, front-door, work-shell and field-shell.
 RUN npm run build

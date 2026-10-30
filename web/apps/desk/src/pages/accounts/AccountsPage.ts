@@ -249,7 +249,7 @@ export class GableAccountsPage extends LitElement {
 
                 <div class="grid grid-cols-1 gap-4">
                     <!-- Table Header -->
-                    <div class="grid grid-cols-12 gap-4 px-6 py-3 text-xs font-medium text-zinc-500 uppercase tracking-wider border-b border-white/5">
+                    <div data-testid="accounts-head" class="hidden sm:grid grid-cols-12 gap-4 px-6 py-3 text-xs font-medium text-zinc-500 uppercase tracking-wider border-b border-white/5">
                         <div class="col-span-4">Customer</div>
                         <div class="col-span-2">Account #</div>
                         <div class="col-span-2 text-right">Balance Due</div>
@@ -259,8 +259,8 @@ export class GableAccountsPage extends LitElement {
 
                     ${visible.map(customer => html`
                         <a href="/accounts/${customer.id}" class="block">
-                            <div class="grid grid-cols-12 gap-4 px-6 py-4 items-center hover:bg-white/5 transition-colors border border-white/5 hover:border-gable-green/30 rounded-lg bg-slate-steel group">
-                                <div class="col-span-4 flex items-center gap-3">
+                            <div data-testid="account-row-${customer.id}" class="flex flex-col gap-2 sm:grid sm:grid-cols-12 sm:gap-4 px-4 sm:px-6 py-4 sm:items-center hover:bg-white/5 transition-colors border border-white/5 hover:border-gable-green/30 rounded-lg bg-slate-steel group">
+                                <div class="col-span-4 flex items-center gap-3 min-w-0">
                                     <div class="w-10 h-10 rounded-full flex items-center justify-center text-xs font-bold shrink-0 ${
                                         customer.credit_limit_cents !== 0
                                             ? 'bg-blue-500/10 text-blue-400 border border-blue-500/20'
@@ -268,22 +268,22 @@ export class GableAccountsPage extends LitElement {
                                     }">
                                         ${customer.credit_limit_cents !== 0 ? icon(Building2, 18) : icon(User, 18)}
                                     </div>
-                                    <div>
+                                    <div class="min-w-0">
                                         <div class="font-medium text-white group-hover:text-gable-green transition-colors">${customer.name}</div>
                                         <div class="text-xs text-zinc-500 truncate">${customer.email || 'No email'}</div>
                                     </div>
                                 </div>
-                                <div class="col-span-2 text-sm text-zinc-400 font-mono">${customer.account_number}</div>
-                                <div class="col-span-2 text-right font-mono font-medium text-white">
+                                <div data-label="Account #" class="col-span-2 flex justify-between items-center gap-3 sm:block before:content-[attr(data-label)] before:font-sans before:text-xs before:uppercase before:text-zinc-500 sm:before:hidden text-sm text-zinc-400 font-mono">${customer.account_number}</div>
+                                <div data-label="Balance Due" class="col-span-2 flex justify-between items-center gap-3 sm:block before:content-[attr(data-label)] before:font-sans before:text-xs before:uppercase before:text-zinc-500 sm:before:hidden text-right font-mono font-medium text-white">
                                     ${formatCents(customer.balance_cents)}
                                 </div>
-                                <div class="col-span-2 text-right font-mono text-zinc-400 text-sm">
+                                <div data-label="Credit Limit" class="col-span-2 flex justify-between items-center gap-3 sm:block before:content-[attr(data-label)] before:font-sans before:text-xs before:uppercase before:text-zinc-500 sm:before:hidden text-right font-mono text-zinc-400 text-sm">
                                     ${customer.credit_limit_cents === null
                                         ? html`<span class="text-zinc-500">No limit</span>`
                                         : formatCents(customer.credit_limit_cents)
                                     }
                                 </div>
-                                <div class="col-span-2 flex justify-end">
+                                <div data-label="Status" class="col-span-2 flex justify-between items-center gap-3 sm:justify-end before:content-[attr(data-label)] before:font-sans before:text-xs before:uppercase before:text-zinc-500 sm:before:hidden">
                                     ${this.renderBadge(customer.is_active)}
                                 </div>
                             </div>
