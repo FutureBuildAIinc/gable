@@ -6,16 +6,18 @@
  * Drop-in replacement for fetch() — all frontend services should use this.
  *
  * Moved from web/apps/desk/src/services when web/ became one workspace.
- * The bearer token now comes from @gable/auth's in-memory custody first
- * (the front door hands a signed-in session to the desk through it), with
- * the desk's legacy out-of-band `token` key in localStorage still read as
- * a fallback. Custody never WRITES to localStorage; this read only adopts
- * what an operator or the identity provider put there out of band.
+ * A staff session is the HttpOnly cookie the core sets at sign in (sent with
+ * credentials 'same-origin'); no script holds it. An in-memory bearer from
+ * custody, or the legacy out-of-band `token` key in localStorage, is still
+ * read for the JWKS path until ADR 0012 slice 8 retires it. Custody never
+ * WRITES to localStorage; this read only adopts what an operator or the
+ * identity provider put there out of band.
  */
 
 import { NO_SIGNAL_ERROR } from '@gable/work-offline'
 import { authCustody } from './custody.ts'
 import { BRANCH_STORAGE_KEY } from './branch.ts'
+import { CSRF_HEADER } from './staffAuth.ts'
 
 const DEFAULT_TIMEOUT = 10_000; // 10 seconds
 const DEFAULT_RETRIES = 1;
@@ -89,6 +91,13 @@ export async function fetchWithAuth(
     }
   }
 
+  // A write the session cookie authenticates must carry the custom header a
+  // cross site form cannot set (ADR 0012 section 3). The core checks it only
+  // on the cookie path, so a bearer or machine key request is unaffected.
+  if (!READ_VERBS.has(method) && !headers.has(CSRF_HEADER)) {
+    headers.set(CSRF_HEADER, '1');
+  }
+
   // Inject the currently selected branch for multi-branch installs.
   // We read straight from localStorage to avoid a circular import with the
   // BranchContext singleton, which itself uses fetchWithAuth at init time.
@@ -125,7 +134,7 @@ export async function fetchWithAuth(
       response = await fetch(url, {
         ...fetchOpts,
         headers,
-        credentials: 'include',
+        credentials: 'same-origin',
         signal: controller.signal,
       });
       clearTimeout(timeoutId);

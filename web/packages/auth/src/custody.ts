@@ -2,19 +2,20 @@
 // SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
 
 /**
- * JWT custody for Gable's frontends.
+ * Session custody for Gable's frontends.
  *
- * THE RULE: a bearer token lives in private memory in this module and is
- * never written to localStorage. One exception, stated plainly: at sign in the
- * session is also written to sessionStorage (the handoff key below), so the
- * front door can hand it to the desk across a full page navigation (the door
- * at / and the desk are separate documents, and a desk reload must keep the
- * session). That copy is readable by ANY script on the origin for the life of
- * the tab: an XSS flaw in either bundle can take the token. It is tab scoped
- * and dies with the tab, which is the only thing that makes it better than
- * localStorage. It is removed on sign out and on any 401, and nothing but this
- * module reads it. The target is an HttpOnly SameSite=Strict cookie issued by
- * the API at the cutover; see docs/adr/0004-web-session-custody.md.
+ * THE RULE (ADR 0012 section 3): a staff session is the HttpOnly cookie the
+ * core sets at sign in; no script here ever holds, reads or writes a
+ * credential for it. What this module keeps for a staff session is display
+ * data only (the subject, the roles and the name the person typed), written
+ * to sessionStorage (the handoff key below) so the front door can hand it to
+ * the desk across a full page navigation. A script that reads it learns who
+ * is signed in and nothing it could replay: the cookie decides every
+ * request, and the core answers 401 when the session is gone. The record is
+ * removed on sign out and on any 401.
+ *
+ * A bearer token (the out of band JWKS path, retired in ADR 0012 slice 8) is
+ * held in memory only and is never written to any storage.
  *
  * The record is validated field by field on adoption and dropped outright
  * when it does not parse: a hostile or stale payload buys nothing.
@@ -58,13 +59,15 @@ export const SESSION_HANDOFF_KEY = 'gable.auth.session.v1';
 /** A signed-in session, in the shape the frontends render. */
 export type AuthSession =
   | { kind: 'token'; token: string; claims: GableTokenClaims }
+  | { kind: 'staff'; sub: string; roles: string[]; name: string | null }
   | { kind: 'dev'; name: string; role?: string; homeYardCode?: string };
 
 /** The handoff record's on-the-wire shape. The v tags the payload shape. */
 interface HandoffRecord {
   v: 1;
-  kind: 'token' | 'dev';
-  token?: string;
+  kind: 'staff' | 'dev';
+  sub?: string;
+  roles?: string[];
   name?: string;
   role?: string;
   homeYardCode?: string;
@@ -136,11 +139,11 @@ export class AuthCustody {
     const rec = parsed as HandoffRecord;
     if (rec.v !== 1) return null;
 
-    if (rec.kind === 'token') {
-      if (typeof rec.token !== 'string') return null;
-      const claims = decodeTokenClaims(rec.token);
-      if (claims === null || isExpired(claims)) return null;
-      return { kind: 'token', token: rec.token, claims };
+    if (rec.kind === 'staff') {
+      if (typeof rec.sub !== 'string' || rec.sub.length === 0) return null;
+      if (!Array.isArray(rec.roles) || rec.roles.some((r) => typeof r !== 'string')) return null;
+      const name = typeof rec.name === 'string' && rec.name.length > 0 ? rec.name : null;
+      return { kind: 'staff', sub: rec.sub, roles: [...rec.roles], name };
     }
     if (rec.kind === 'dev') {
       if (!authConfig.devMode) return null;
@@ -175,6 +178,7 @@ export class AuthCustody {
     const s = this.session;
     if (s === null) return null;
     if (s.kind === 'dev') return `dev:${s.name}`;
+    if (s.kind === 'staff') return s.sub;
     return s.claims.sub ?? s.claims.email ?? null;
   }
 
@@ -183,16 +187,19 @@ export class AuthCustody {
     const s = this.session;
     if (s === null) return null;
     if (s.kind === 'dev') return s.name;
+    if (s.kind === 'staff') return s.name ?? s.sub;
     return s.claims.email ?? s.claims.name ?? s.claims.sub ?? null;
   }
 
   /**
-   * The signed-in user's roles from the token claims (empty otherwise): the
-   * roles list plus the single role claim, which core's RequireRole admits
-   * too (core/pkg/middleware/auth.go).
+   * The signed-in user's roles (empty for a dev session): a staff session's
+   * role set as the core answered it, else a token's roles list plus the
+   * single role claim, which core's RequireRole admits too
+   * (core/pkg/middleware/auth.go).
    */
   get roles(): string[] {
     const s = this.session;
+    if (s !== null && s.kind === 'staff') return [...s.roles];
     if (s === null || s.kind !== 'token') return [];
     const { roles, role } = s.claims;
     const merged = Array.isArray(roles) ? roles.filter((r) => typeof r === 'string') : [];
@@ -223,10 +230,28 @@ export class AuthCustody {
   }
 
   /**
-   * Sign in with a bearer token issued by the configured identity provider.
-   * The token is decoded (never verified client-side) and refused as data
-   * when it is not a JWT or its own exp claim is in the past. On success it
-   * is held in memory and written to the sessionStorage handoff.
+   * Hold a staff session the core just opened. The cookie is already set by
+   * the sign in answer; what is held here is display data only. `name` is
+   * what the person typed at the door (a staff session carries no email).
+   */
+  signInStaff(identity: { sub: string; roles: string[]; name?: string | null }): AuthSession {
+    if (identity.sub.length === 0) throw new InvalidTokenError('Empty subject');
+    const name = identity.name !== undefined && identity.name !== null && identity.name.trim() !== ''
+      ? identity.name.trim()
+      : null;
+    const session: AuthSession = { kind: 'staff', sub: identity.sub, roles: [...identity.roles], name };
+    this._session = session;
+    this._adopted = true;
+    this._writeHandoff({ v: 1, kind: 'staff', sub: identity.sub, roles: [...identity.roles], name: name ?? undefined });
+    return session;
+  }
+
+  /**
+   * Hold a bearer token issued by the configured identity provider (the out
+   * of band JWKS path, until ADR 0012 slice 8 retires it). The token is
+   * decoded (never verified client-side) and refused as data when it is not
+   * a JWT or its own exp claim is in the past. It lives in memory only: no
+   * storage ever holds it, so a reload drops it.
    */
   signInWithToken(token: string): AuthSession {
     if (token.length === 0) throw new InvalidTokenError('Empty token');
@@ -237,7 +262,6 @@ export class AuthCustody {
     const session: AuthSession = { kind: 'token', token, claims };
     this._session = session;
     this._adopted = true;
-    this._writeHandoff({ v: 1, kind: 'token', token });
     return session;
   }
 

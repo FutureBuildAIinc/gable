@@ -265,7 +265,7 @@ describe('front door runtime sign in methods (S8)', () => {
       auth_mode: 'production',
       methods: [
         { method: 'google', kind: 'redirect', label: 'Google', start_url: '/api/v1/auth/start/google', issuer_url: null, client_id: null },
-        { method: 'email_password', kind: 'form', label: 'Email and password', start_url: '/api/portal/v1/login', issuer_url: null, client_id: null },
+        { method: 'email_password', kind: 'form', label: 'Email and password', start_url: '/api/v1/auth/signin', issuer_url: null, client_id: null },
       ],
     });
     const el = await mount();
@@ -360,7 +360,7 @@ describe('front door runtime sign in methods (S8)', () => {
     stubConfig({
       auth_mode: 'production',
       methods: [
-        { method: 'email_password', kind: 'form', label: 'Email and password', start_url: '/api/portal/v1/login', issuer_url: null, client_id: null },
+        { method: 'email_password', kind: 'form', label: 'Email and password', start_url: '/api/v1/auth/signin', issuer_url: null, client_id: null },
         { method: 'google', kind: 'redirect', label: 'Google', start_url: '/api/v1/auth/start/google', issuer_url: null, client_id: null },
         { method: 'microsoft', kind: 'redirect', label: 'Microsoft', start_url: '/api/v1/auth/start/microsoft', issuer_url: null, client_id: null },
       ],
@@ -442,7 +442,7 @@ describe('front door runtime sign in methods (S8)', () => {
           auth_mode: 'production',
           methods: [
             { method: 'google', kind: 'redirect', label: 'Google', start_url: '/api/v1/auth/start/google', issuer_url: null, client_id: null },
-            { method: 'email_password', kind: 'form', label: 'Email and password', start_url: '/api/portal/v1/login', issuer_url: null, client_id: null },
+            { method: 'email_password', kind: 'form', label: 'Email and password', start_url: '/api/v1/auth/signin', issuer_url: null, client_id: null },
           ],
         }), { status: 200 });
       }
@@ -505,7 +505,7 @@ describe('front door runtime sign in methods (S8)', () => {
       dealer_name: 'Northridge Lumber',
       dealer_mark_url: null,
       methods: [
-        { method: 'email_password', kind: 'form', label: 'Email and password', start_url: '/api/portal/v1/login', issuer_url: null, client_id: null },
+        { method: 'email_password', kind: 'form', label: 'Email and password', start_url: '/api/v1/auth/signin', issuer_url: null, client_id: null },
       ],
     });
     const el = await mount();
@@ -526,7 +526,7 @@ describe('front door runtime sign in methods (S8)', () => {
       dealer_name: 'Northridge Lumber',
       dealer_mark_url: '/api/v1/dealer-profile/logo',
       methods: [
-        { method: 'email_password', kind: 'form', label: 'Email and password', start_url: '/api/portal/v1/login', issuer_url: null, client_id: null },
+        { method: 'email_password', kind: 'form', label: 'Email and password', start_url: '/api/v1/auth/signin', issuer_url: null, client_id: null },
       ],
     });
     const elWithLogo = await mount();
@@ -541,7 +541,7 @@ describe('front door runtime sign in methods (S8)', () => {
     stubConfig({
       auth_mode: 'production',
       methods: [
-        { method: 'email_password', kind: 'form', label: 'Email and password', start_url: '/api/portal/v1/login', issuer_url: null, client_id: null },
+        { method: 'email_password', kind: 'form', label: 'Email and password', start_url: '/api/v1/auth/signin', issuer_url: null, client_id: null },
         { method: 'oidc', kind: 'redirect', label: 'Northridge Corporate Single Sign On', start_url: '/api/v1/auth/start/oidc', issuer_url: 'https://id.example.com', client_id: 'gable' },
       ],
     });
