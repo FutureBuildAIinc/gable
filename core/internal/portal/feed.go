@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/gablelbm/gable/internal/invoice"
 	"github.com/google/uuid"
 )
 
@@ -120,7 +121,7 @@ func (r *PostgresRepository) ListInvoicesByCustomerFiltered(ctx context.Context,
 	query := `
 		SELECT i.id, i.order_id, i.status, i.total_amount, i.subtotal, i.tax_amount,
 		       (SELECT pt.code FROM payment_terms pt WHERE pt.id = i.payment_terms_id), i.due_date, i.paid_at, i.created_at,
-		       i.number, (i.status IN ('UNPAID', 'PARTIAL') AND i.due_date < CURRENT_DATE), i.updated_at
+		       i.number, ` + invoice.OverdueExpr("i") + `, i.updated_at
 		FROM invoices i
 		WHERE i.customer_id = $1
 	`

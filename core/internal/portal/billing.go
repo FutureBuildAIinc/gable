@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/gablelbm/gable/internal/account"
+	"github.com/gablelbm/gable/internal/invoice"
 	"github.com/gablelbm/gable/pkg/branchctx"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -215,10 +216,10 @@ func (s *Service) GetBillingSummary(ctx context.Context, customerID uuid.UUID) (
 		exec := pgRepo.db.GetExecutor(ctx)
 		if err := exec.QueryRow(ctx, `
 			SELECT
-				COUNT(*) FILTER (WHERE status IN ('UNPAID', 'PARTIAL')),
-				COUNT(*) FILTER (WHERE status IN ('UNPAID', 'PARTIAL') AND due_date < CURRENT_DATE)
-			FROM invoices
-			WHERE customer_id = $1
+				COUNT(*) FILTER (WHERE i.status IN ('UNPAID', 'PARTIAL')),
+				COUNT(*) FILTER (WHERE `+invoice.OverdueExpr("i")+`)
+			FROM invoices i
+			WHERE i.customer_id = $1
 		`, customerID).Scan(&tiles.OpenInvoiceCount, &tiles.OverdueInvoiceCount); err != nil {
 			return nil, fmt.Errorf("failed to count open invoices: %w", err)
 		}

@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/gablelbm/gable/internal/invoice"
 	"github.com/google/uuid"
 )
 
@@ -350,19 +351,20 @@ func (r *PostgresRepository) TodayQuotesCount(ctx context.Context, customerID uu
 	return n, err
 }
 
-// TodayInvoices lists open invoices due today or already overdue.
+// TodayInvoices lists open invoices due today or already overdue, on the
+// branch's own day, so the list and the flag beside it agree with the desk.
 func (r *PostgresRepository) TodayInvoices(ctx context.Context, customerID uuid.UUID, since *time.Time, limit int) ([]TodayInvoiceRow, error) {
 	q := `
-		SELECT id, COALESCE(number, ''), ROUND(total_amount * 100), due_date,
-		       (status IN ('UNPAID', 'PARTIAL') AND due_date < CURRENT_DATE), updated_at
-		FROM invoices
-		WHERE customer_id = $1 AND status IN ('UNPAID', 'PARTIAL') AND due_date <= CURRENT_DATE`
+		SELECT i.id, COALESCE(i.number, ''), ROUND(i.total_amount * 100), i.due_date,
+		       ` + invoice.OverdueExpr("i") + `, i.updated_at
+		FROM invoices i
+		WHERE i.customer_id = $1 AND ` + invoice.DueByBranchTodayExpr("i")
 	args := []any{customerID}
 	if since != nil {
-		q += ` AND updated_at > $2`
+		q += ` AND i.updated_at > $2`
 		args = append(args, *since)
 	}
-	q += ` ORDER BY due_date ASC LIMIT ` + strconv.Itoa(limit)
+	q += ` ORDER BY i.due_date ASC LIMIT ` + strconv.Itoa(limit)
 	rows, err := r.db.GetExecutor(ctx).Query(ctx, q, args...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list today invoices: %w", err)
@@ -379,13 +381,13 @@ func (r *PostgresRepository) TodayInvoices(ctx context.Context, customerID uuid.
 	return out, rows.Err()
 }
 
-// TodayInvoicesCount counts every open invoice due today or overdue.
+// TodayInvoicesCount counts every open invoice due today or overdue, on the
+// branch's own day, the same set TodayInvoices lists.
 func (r *PostgresRepository) TodayInvoicesCount(ctx context.Context, customerID uuid.UUID) (int, error) {
 	var n int
 	err := r.db.GetExecutor(ctx).QueryRow(ctx, `
-		SELECT COUNT(*) FROM invoices
-		WHERE customer_id = $1 AND status IN ('UNPAID', 'PARTIAL') AND due_date <= CURRENT_DATE
-	`, customerID).Scan(&n)
+		SELECT COUNT(*) FROM invoices i
+		WHERE i.customer_id = $1 AND `+invoice.DueByBranchTodayExpr("i"), customerID).Scan(&n)
 	return n, err
 }
 
