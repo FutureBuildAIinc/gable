@@ -4,6 +4,7 @@
 package staffauth
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -43,6 +44,12 @@ type Handler struct {
 	byAddress    *limiter
 	byEmail      *limiter
 	cookieSecure bool
+
+	// The redirect methods' start routes carry limits of their own, per
+	// client address and per email (the callback shares the address one).
+	startByAddress *limiter
+	startByEmail   *limiter
+	allowed        func(ctx context.Context, method string) bool
 }
 
 // NewHandler returns the handler.
@@ -58,19 +65,27 @@ func NewHandler(svc *Service, cfg HandlerConfig) *Handler {
 	}
 	return &Handler{
 		svc: svc, cfg: cfg,
-		byAddress:    newLimiter(cfg.PerAddress, cfg.Window),
-		byEmail:      newLimiter(cfg.PerEmail, cfg.Window),
-		cookieSecure: !cfg.Insecure,
+		byAddress: newLimiter(cfg.PerAddress, cfg.Window),
+		byEmail:   newLimiter(cfg.PerEmail, cfg.Window),
+
+		startByAddress: newLimiter(cfg.PerAddress, cfg.Window),
+		startByEmail:   newLimiter(cfg.PerEmail, cfg.Window),
+		cookieSecure:   !cfg.Insecure,
 	}
 }
 
-// RegisterRoutes mounts the routes. All three are public paths of the auth
-// layer (they read the cookie themselves).
+// RegisterRoutes mounts the routes. Every one but the session read is a
+// public path of the auth layer (they read the cookie themselves).
 func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/v1/auth/signin", h.SignIn)
 	mux.HandleFunc("POST /api/v1/auth/refresh", h.Refresh)
 	mux.HandleFunc("POST /api/v1/auth/signout", h.SignOut)
 	mux.HandleFunc("GET /api/v1/auth/session", h.Session)
+	// The redirect methods (ADR 0012 section 4): the provider starts by
+	// navigation, the magic link start, and the callback every method ends at.
+	mux.HandleFunc("GET /api/v1/auth/start/{method}", h.StartRedirect)
+	mux.HandleFunc("POST /api/v1/auth/start/magic_link", h.StartMagicLink)
+	mux.HandleFunc("GET /api/v1/auth/callback", h.Callback)
 }
 
 type identityBody struct {
