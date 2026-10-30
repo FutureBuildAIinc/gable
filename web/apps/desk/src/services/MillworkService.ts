@@ -1,7 +1,14 @@
 // SPDX-License-Identifier: LicenseRef-OpenLBM-Surface-1.0
 // SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
 
-import type { MillworkOption, MillworkOptionPage, CreateOptionRequest } from '../types/millwork';
+import type {
+    MillworkOption,
+    MillworkOptionPage,
+    CreateOptionRequest,
+    UpdateOptionRequest,
+    EstimateRequest,
+    EstimatedItem,
+} from '../types/millwork';
 import { parseApiError } from './apiError';
 import { fetchWithAuth } from './fetchClient';
 
@@ -50,26 +57,41 @@ export const MillworkService = {
         return response.json();
     },
 
-    /** The configured door's price in integer cents; the option adjustments are cents on the wire. */
-    calculateDoorPriceCents(config: import('../types/millwork').MillworkConfiguration): number {
-        const BASE_PRICE_CENTS = 25000;
-        const STANDARD_WIDTH = 36;
-        const STANDARD_HEIGHT = 80;
-        const PRICE_PER_SQFT_OVERAGE_CENTS = 1500;
-
-        let price = BASE_PRICE_CENTS;
-        if (config.doorType) price += config.doorType.price_adjustment_cents;
-        if (config.material) price += config.material.price_adjustment_cents;
-        if (config.glass) price += config.glass.price_adjustment_cents;
-
-        // Simple dimension logic: +$15 for every sq ft over standard 36x80
-        const area = (config.width * config.height) / 144; // sq ft
-        const standardArea = (STANDARD_WIDTH * STANDARD_HEIGHT) / 144;
-
-        if (area > standardArea) {
-            price += Math.round((area - standardArea) * PRICE_PER_SQFT_OVERAGE_CENTS);
+    /**
+     * Moves an option's money on the revision the caller read. The If-Match
+     * header carries it, so a write that lost the race is a 409 the dealer
+     * sees, not a silent overwrite.
+     */
+    async updateOption(id: string, option: UpdateOptionRequest): Promise<MillworkOption> {
+        const response = await fetchWithAuth(`${API_URL}/api/v1/millwork/options/${id}`, {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json',
+                'If-Match': `"${option.revision ?? 0}"`,
+            },
+            body: JSON.stringify(option),
+        });
+        if (!response.ok) {
+            throw await parseApiError(response, 'Failed to update millwork option');
         }
+        return response.json();
+    },
 
-        return price;
-    }
+    /**
+     * Prices a configuration on the server. The client sends the choices and
+     * reads the money: the price is the server's, computed from the stored
+     * options, and the response carries the deterministic SKU, the
+     * description, the product row and the breakdown that made the price.
+     */
+    async estimate(request: EstimateRequest): Promise<EstimatedItem> {
+        const response = await fetchWithAuth(`${API_URL}/api/v1/millwork/estimate`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(request),
+        });
+        if (!response.ok) {
+            throw await parseApiError(response, 'Failed to price the configuration');
+        }
+        return response.json();
+    },
 };

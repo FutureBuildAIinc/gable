@@ -46,6 +46,7 @@ export function invoiceLine(overrides: Partial<InvoiceLine> = {}): InvoiceLine {
     special_order_unit_cost_ten_thousandths: null,
     created_at: '2026-08-11T14:00:00Z',
     order_line_id: '00000000-0000-4000-8000-000000000ol1',
+    configuration_json: null,
     unit_cost_ten_thousandths: 228_000,
     cost_cents: 54_720,
     weight_source: null,

@@ -710,6 +710,7 @@ func (s *Service) fulfil(ctx context.Context, id uuid.UUID, pre *Precondition, r
 				SKU: b.SKU, Description: b.Description, UOM: b.UOM, PriceUOM: b.PriceUOM,
 				PriceSource: string(b.PriceSource), Taxable: b.Taxable, RevenueAccountCode: b.RevenueAccountCode,
 				OverrideReason: b.OverrideReason, PriceAdjustedBy: b.PriceAdjustedBy,
+				Configuration: b.Configuration,
 			}
 			if b.PricedUnitPrice != nil {
 				fl.PricedUnitPrice = i64(int64(*b.PricedUnitPrice))

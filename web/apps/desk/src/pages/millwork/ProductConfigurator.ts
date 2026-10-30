@@ -10,6 +10,7 @@ import { icon } from '../../lib/icons.ts';
 import { ChevronRight, ChevronLeft, Check, AlertTriangle, Package, TreePine, Gauge, Ruler, Eye, Sparkles, X } from 'lucide';
 import { ToastService } from '../../lib/toast-service.ts';
 import { cssVarColor } from '../../lib/theme-colors.ts';
+import { ConfiguredItemHandoff, CONFIGURED_ITEM_EVENT, type ConfiguredItem } from '../../lib/configured-item.ts';
 
 const STEP_ICONS = [Package, TreePine, Gauge, Ruler, Eye];
 
@@ -19,6 +20,15 @@ const DIMENSION_OPTIONS = [
   '1x4', '1x6', '1x8', '1x10', '1x12',
 ];
 const LENGTH_OPTIONS = ['8', '10', '12', '14', '16', '20'];
+
+/**
+ * The server's money, in ten-thousandths of the major unit, as the dealer
+ * reads it: two decimals of dollars, never a float the client computed.
+ */
+function formatTenThousandths(value: number): string {
+  const cents = Math.round(value / 100);
+  return `$${(cents / 100).toFixed(2)}`;
+}
 
 function getSpeciesColor(species: string): string {
   const colors: Record<string, string> = {
@@ -47,6 +57,7 @@ export class ProductConfigurator extends LitElement {
   @state() private _treatmentOptions: AvailableOption[] = [];
   @state() private _validation: ValidateConfigResponse | null = null;
   @state() private _skuResult: BuildSKUResponse | null = null;
+  @state() private _added = false;
   @state() private _loading = false;
   @state() private _error: string | null = null;
   @state() private _dimensionSize = '';
@@ -147,13 +158,42 @@ export class ProductConfigurator extends LitElement {
 
   private async _handleBuildSKU() {
     this._error = null;
+    this._added = false;
     try {
+      // The server prices the configuration from the stored options and
+      // builds the product row; the client sends the choices and reads the
+      // money.
       const result = await ConfiguratorService.buildSKU(this._selections.ProductType, this._selections);
       this._skuResult = result;
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to build SKU';
       this._error = message;
     }
+  }
+
+  /**
+   * Adds the configured item to the quote: the server's price, the server's
+   * product row and the configuration travel with it, so the line the
+   * document carries is priced by the server and shows what the item is.
+   */
+  private _handleAddToQuote() {
+    if (!this._skuResult) return;
+    const item: ConfiguredItem = {
+      sku: this._skuResult.sku,
+      description: this._skuResult.description,
+      product_id: this._skuResult.product_id,
+      unit_price_ten_thousandths: this._skuResult.unit_price_ten_thousandths,
+      unit_cost_ten_thousandths: this._skuResult.unit_cost_ten_thousandths,
+      configuration_json: this._skuResult.configuration_json,
+    };
+    ConfiguredItemHandoff.offer(item);
+    this.dispatchEvent(new CustomEvent<ConfiguredItem>(CONFIGURED_ITEM_EVENT, {
+      detail: item,
+      bubbles: true,
+      composed: true,
+    }));
+    this._added = true;
+    ToastService.success('Added to the quote');
   }
 
   /* ---- Render helpers ---- */
@@ -372,20 +412,33 @@ export class ProductConfigurator extends LitElement {
             </div>
             <div class="text-sm text-gray-300">${this._skuResult.description}</div>
             <!--
-              A generated non-stock SKU has no catalog product row, and a quote
-              line requires a product_id (QuoteRequest in types/quote.ts),
-              so there is no existing service call to add this to a quote. The
-              button renders disabled rather than looking live and doing nothing
-              on click.
+              The server's money: the price and the cost it computed from the
+              stored options, never a price the client chose.
             -->
+            <dl class="mt-4 grid grid-cols-2 gap-3 text-sm">
+              <div class="rounded-lg bg-black/30 px-3 py-2">
+                <dt class="text-[11px] uppercase tracking-wider text-gray-500">Unit price</dt>
+                <dd class="font-mono font-bold text-gable-green" data-testid="configured-price">
+                  ${formatTenThousandths(this._skuResult.unit_price_ten_thousandths)}
+                </dd>
+              </div>
+              <div class="rounded-lg bg-black/30 px-3 py-2">
+                <dt class="text-[11px] uppercase tracking-wider text-gray-500">Unit cost</dt>
+                <dd class="font-mono font-bold text-gray-200">
+                  ${formatTenThousandths(this._skuResult.unit_cost_ten_thousandths)}
+                </dd>
+              </div>
+            </dl>
             <button
-              disabled
-              title="Not implemented: the generated SKU cannot be added to a quote yet — copy it into the Quote Builder."
-              class="mt-4 border border-white/10 text-zinc-500 font-bold py-3 px-6 rounded-lg opacity-50 cursor-not-allowed"
+              @click=${() => this._handleAddToQuote()}
+              ?disabled=${this._added}
+              data-testid="add-to-quote"
+              class="mt-4 ${this._added
+                ? 'border border-gable-green/40 text-gable-green font-bold py-3 px-6 rounded-lg cursor-default'
+                : 'bg-gradient-to-r from-gable-green to-emerald-400 text-black font-bold py-3 px-6 rounded-lg hover:shadow-glow-40-30 transition-all'}"
             >
-              Add to Quote
+              ${this._added ? 'Added to the quote' : 'Add to Quote'}
             </button>
-            <p class="mt-2 text-[11px] text-gray-500">Copy the SKU above into the Quote Builder &mdash; adding it directly is not wired up in this build.</p>
           </div>
         ` : nothing}
       </div>

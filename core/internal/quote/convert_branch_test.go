@@ -199,7 +199,7 @@ type poRecorder struct {
 	err      error
 }
 
-func (p *poRecorder) CreatePOFromSpecialOrderLine(_ context.Context, _ *uuid.UUID, _ *uuid.UUID, qty, unitCost float64, lineID uuid.UUID, branch uuid.UUID) error {
+func (p *poRecorder) CreatePOFromSpecialOrderLine(_ context.Context, _ *uuid.UUID, _ *uuid.UUID, qty, unitCost float64, lineID uuid.UUID, branch uuid.UUID, _ string) error {
 	p.calls = append(p.calls, lineID)
 	p.branches = append(p.branches, branch)
 	p.qty = append(p.qty, qty)

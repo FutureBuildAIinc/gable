@@ -1083,6 +1083,12 @@ func (s *Service) RefreshReorderTargets(ctx context.Context, dryRun bool, lookba
 	res := &RefreshResult{DryRun: dryRun}
 	lookbackFloat := float64(lookbackDays)
 	for _, p := range products {
+		// A configured item is never reordered: the dealer does not hold it,
+		// so it has no reorder target to move.
+		if p.IsNonStock {
+			res.ProductsSkipped++
+			continue
+		}
 		units, ok := velByProduct[p.ID]
 		if !ok || units <= 0 {
 			res.ProductsSkipped++

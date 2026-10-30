@@ -50,6 +50,12 @@ func (f *fakeProductRepo) GetProduct(_ context.Context, id uuid.UUID) (*product.
 	return p, nil
 }
 
+// FindOrCreateNonStock is the configured item's catalog row; the fakes do
+// not stock one, so the answer is a fresh id and no row.
+func (fakeProductRepo) FindOrCreateNonStock(context.Context, string, string, httpx.Price, httpx.Price) (uuid.UUID, error) {
+	return uuid.New(), nil
+}
+
 func newRepo(products ...*product.Product) *fakeProductRepo {
 	r := &fakeProductRepo{byID: map[uuid.UUID]*product.Product{}}
 	for _, p := range products {

@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gablelbm/gable/internal/product"
 	"github.com/gablelbm/gable/internal/platform/httpx"
+	"github.com/gablelbm/gable/internal/product"
 	"github.com/gablelbm/gable/internal/units"
 	"github.com/google/uuid"
 )
@@ -109,6 +109,12 @@ func (f *fakeProductRepo) UpdateDensity(_ context.Context, _ uuid.UUID, _ *httpx
 }
 func (f *fakeProductRepo) UpdateLeadTime(_ context.Context, _ uuid.UUID, _ *int, _ int64) (int64, error) {
 	return 0, nil
+}
+
+// FindOrCreateNonStock is the configured item's catalog row; the fakes do
+// not stock one, so the answer is a fresh id and no row.
+func (fakeProductRepo) FindOrCreateNonStock(context.Context, string, string, httpx.Price, httpx.Price) (uuid.UUID, error) {
+	return uuid.New(), nil
 }
 
 // TestRefreshReorderTargets_Math pins the reorder-point formula

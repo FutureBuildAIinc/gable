@@ -1244,7 +1244,7 @@ export interface paths {
         put?: never;
         /**
          * Build a non stock SKU from selections
-         * @description The body is bounded by the platform request size limit (10 MiB); a larger body is a 413. Product type and selections are both required. The selections are validated first; a conflict is a 400 validation_failed whose details carry one config_conflict blocker per violated rule (the base answered one fixed message and never said which rules). The SKU is NS, the product type code, then the Species, Grade, Treatment and Dimensions selections upper cased with spaces as hyphens; the keys other than those four are ignored.
+         * @description The body is bounded by the platform request size limit (10 MiB); a larger body is a 413. Product type and selections are both required. The selections are validated first; a conflict is a 400 validation_failed whose details carry one config_conflict blocker per violated rule (the base answered one fixed message and never said which rules). The server then prices the configuration from the stored options and builds the configured item: the SKU is NS-, the product type's short name and the first twelve hex characters of the hash of the configuration's canonical form, so the same choices always give the same SKU and the same product row. The price and the cost are the server's; the client sends the choices and reads the money.
          */
         post: operations["configuratorBuildSku"];
         delete?: never;
@@ -4707,8 +4707,32 @@ export interface paths {
          * @description The option with its ETag, so the create's Location resolves.
          */
         get: operations["millworkGetOption"];
-        put?: never;
+        /**
+         * Update an option
+         * @description The same body as the create, minus the fields the update leaves alone. The write moves the option's revision on and needs the revision the caller read, carried by If-Match, by the body's revision, or by both (ADR 0001 section 11); a row that moved past it is a 409 and a write without one is a 428. Writes the audit row millwork_option.updated and the event millwork_option.updated in the same transaction, the event last.
+         */
+        put: operations["millworkUpdateOption"];
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/millwork/estimate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Price a configured item
+         * @description The body is the configuration: the product type, the choices and the door's width and height. The server prices it from the stored options: the unit price is the sum over the options the configuration selects of that option's base plus its adjustment, and the unit cost is the same sum over the cost columns. The price is the server's; the client sends the choices and reads the money. A choice the catalog does not carry is a 400. The response carries the deterministic NS- SKU, the description the documents show, the product row the configured item becomes (found or created), the canonical configuration and the breakdown that made the price.
+         */
+        post: operations["millworkEstimate"];
         delete?: never;
         options?: never;
         head?: never;
@@ -10548,6 +10572,19 @@ export interface components {
                 last_checked_at?: string | null;
             };
         };
+        /** @description A configured item's configuration: the choices the dealer made, in the canonical form the server wrote it. The category names are the option catalog's own (snake_case); the values are the option names the catalog stores. A configured line carries this so the server can price it again and the documents can show it as a short description. */
+        ConfiguredConfiguration: {
+            /** @description The product type the configuration is for (Door, Lumber). */
+            product_type?: string;
+            /** @description The chosen option for each attribute category. */
+            selections: {
+                [key: string]: string;
+            };
+            /** @description The door's width in inches, when the configuration carries one. */
+            width?: number;
+            /** @description The door's height in inches, when the configuration carries one. */
+            height?: number;
+        };
         /** @description Go type purchase_order.InboundPOWebhook (github.com/gablelbm/gable/internal/purchase_order), the A2A webhook envelope. No field is validated at this level except that the body is JSON; for event_type create_purchase_order the payload must decode as purchase_order.A2APurchaseOrderPayload (vendor_id, lines, requested_by, project_id, rfq_ref) and vendor_id must be a UUID. Only vendor_id and the line product_id, description, quantity and cost are used to create the order; the other fields are logged or ignored. */
         A2aInboundPOWebhook: {
             /** @description Only create_purchase_order is processed; any other value is acknowledged and ignored. */
@@ -11984,13 +12021,31 @@ export interface components {
         ConfiguratorBuildSKURequest: {
             /** @description Lumber, Door, Trim or Panel map to LBR, DR, TRM and PNL; any other value is upper cased and cut to three characters. */
             product_type: string;
+            /** @description The choices, one per attribute. The names are the configurator's own (Species, Grade, Treatment, Dimensions); the option catalog folds them into its own categories (species, grade, treatment, dimensions) on the way in. */
             selections: {
                 [key: string]: string;
             };
+            /** @description The item's width in inches, when it has one. */
+            width?: number;
+            /** @description The item's height in inches, when it has one. */
+            height?: number;
         };
+        /** @description The configured item: its SKU, the description the documents carry, the product row it became, the server's price and cost and the canonical configuration they came from. */
         ConfiguratorBuildSKUResponse: {
+            /** @description The deterministic NS- SKU: NS-, the product type's short name and the first twelve hex characters of the hash of the configuration's canonical form. */
             sku: string;
             description: string;
+            /**
+             * Format: uuid
+             * @description The product row the configured item became.
+             */
+            product_id: string;
+            /** Format: int64 */
+            unit_price_ten_thousandths: number;
+            /** Format: int64 */
+            unit_cost_ten_thousandths: number;
+            /** @description The canonical configuration the price came from. */
+            configuration_json: components["schemas"]["ConfiguredConfiguration"];
         };
         /** @enum {string} */
         TermsKind: "net_days" | "day_of_month" | "due_on_receipt";
@@ -14659,6 +14714,8 @@ export interface components {
         };
         /** @description A sales line on an invoice: the shared shape of ADR 0005 section 2.2 for the quantity billed, with the order line it bills and the cost that left. */
         InvoiceLine: {
+            /** @description A configured item's configuration: the choices the dealer made, in the canonical form the configurator wrote. Null on an ordinary product line. The line's price was computed from it and the documents show it as a short description. */
+            configuration_json: components["schemas"]["ConfiguredConfiguration"] | null;
             /** Format: uuid */
             id: string;
             /** @description The line's place on the document; a kit's components follow it. */
@@ -14960,6 +15017,8 @@ export interface components {
         };
         /** @description A line on a credit memo: the shared shape with a NEGATIVE quantity and line total (ADR 0001 section 7a; a plain sum is the AR effect), the invoice line it returns and whether it restocks. */
         CreditMemoLine: {
+            /** @description A configured item's configuration: the choices the dealer made, in the canonical form the configurator wrote. Null on an ordinary product line. The line's price was computed from it and the documents show it as a short description. */
+            configuration_json: components["schemas"]["ConfiguredConfiguration"] | null;
             /** Format: uuid */
             id: string;
             /** @description The line's place on the document; a kit's components follow it. */
@@ -15700,6 +15759,21 @@ export interface components {
              * @description A positive option adds to the configured price, a negative one discounts it.
              */
             price_adjustment_cents: number;
+            /**
+             * Format: int64
+             * @description What the option contributes to a configured item's price when it is the one naming the item (a door's door type, a board's species). Zero on an option that only adjusts.
+             */
+            base_price_cents: number;
+            /**
+             * Format: int64
+             * @description The same contribution to the item's cost.
+             */
+            base_cost_cents: number;
+            /**
+             * Format: int64
+             * @description What the option adds to the configured item's cost on top of the base. Zero on an option that carries no cost of its own.
+             */
+            cost_adjustment_cents: number;
             /** @description Any JSON value stored as sent (an object in practice). */
             attributes: Record<string, never> | unknown[] | string | number | boolean | null;
             /** Format: int64 */
@@ -15717,8 +15791,101 @@ export interface components {
             name: string;
             /** Format: int64 */
             price_adjustment_cents: number;
+            /**
+             * Format: int64
+             * @description Optional; the option's base price, zero when absent.
+             */
+            base_price_cents?: number;
+            /**
+             * Format: int64
+             * @description Optional; the option's base cost, zero when absent.
+             */
+            base_cost_cents?: number;
+            /**
+             * Format: int64
+             * @description Optional; the option's cost adjustment, zero when absent.
+             */
+            cost_adjustment_cents?: number;
             /** @description Optional; stored as sent, null when absent. */
             attributes?: Record<string, never> | unknown[] | string | number | boolean;
+        };
+        /** @description The same body as the create. category and name are the option's own and are taken as they stand; the money fields and attributes are the ones that move. Every field problem is collected into one 400 with a details entry per field; an unknown field is refused. */
+        MillworkUpdateOptionRequest: {
+            /** @description 1 to 50 characters. */
+            category: string;
+            /** @description 1 to 100 characters. */
+            name: string;
+            /** Format: int64 */
+            price_adjustment_cents?: number;
+            /**
+             * Format: int64
+             * @description The option's base price, zero when absent.
+             */
+            base_price_cents?: number;
+            /**
+             * Format: int64
+             * @description The option's base cost, zero when absent.
+             */
+            base_cost_cents?: number;
+            /**
+             * Format: int64
+             * @description The option's cost adjustment, zero when absent.
+             */
+            cost_adjustment_cents?: number;
+            /** @description Optional; stored as sent, null when absent. */
+            attributes?: Record<string, never> | unknown[] | string | number | boolean;
+            /**
+             * Format: int64
+             * @description The revision the caller read, when the body carries it.
+             */
+            revision?: number;
+        };
+        /** @description The configuration to price. The category names are the option catalog's own (snake_case); the configurator's attribute names ("Species", "Grade") are folded into that shape on the way in. */
+        MillworkEstimateRequest: {
+            /** @description The product type, one of Lumber, Door, Trim or Panel. */
+            product_type: string;
+            /** @description The choices, one per category. */
+            selections: {
+                [key: string]: string;
+            };
+            /** @description The door's width in inches, when it has one. */
+            width?: number;
+            /** @description The door's height in inches, when it has one. */
+            height?: number;
+        };
+        /** @description One option's contribution to a configured item's price. */
+        MillworkPriceLine: {
+            category: string;
+            name: string;
+            /**
+             * Format: int64
+             * @description The option's base plus its adjustment, in cents.
+             */
+            price_cents: number;
+            /**
+             * Format: int64
+             * @description The option's base cost plus its cost adjustment, in cents.
+             */
+            cost_cents: number;
+        };
+        /** @description The priced configured item. The money is in ten-thousandths of the major unit, the scale the documents carry their prices in. */
+        MillworkEstimateResponse: {
+            /** @description The deterministic NS- SKU: NS-, the product type's short name and the first twelve hex characters of the hash of the configuration's canonical form. */
+            sku: string;
+            /** @description The short description the documents carry. */
+            description: string;
+            /**
+             * Format: uuid
+             * @description The product row the configured item became.
+             */
+            product_id: string;
+            /** Format: int64 */
+            unit_price_ten_thousandths: number;
+            /** Format: int64 */
+            unit_cost_ten_thousandths: number;
+            /** @description The canonical configuration the price came from. */
+            configuration_json: components["schemas"]["ConfiguredConfiguration"];
+            breakdown: components["schemas"]["MillworkPriceLine"][];
         };
         /** @description The list envelope of ADR 0001 section 1. items is never null; total is present only under include=total. */
         MillworkOptionPage: {
@@ -15756,6 +15923,8 @@ export interface components {
         SalesPriceSource: "price_list" | "quote" | "override" | "manual" | "none";
         /** @description One line of a sales document, the shared shape of ADR 0005 section 2.2. Every priced line carries all the priced fields, always present; a text line carries them as null, present on the wire (ADR 0001 section 12), so a client reads one shape per line. */
         SalesLine: {
+            /** @description A configured item's configuration: the choices the dealer made, in the canonical form the configurator wrote. Null on an ordinary product line. The line's price was computed from it and the documents show it as a short description. */
+            configuration_json: components["schemas"]["ConfiguredConfiguration"] | null;
             /** Format: uuid */
             id: string;
             /** @description The line's place on the document; a kit's components follow it. */
@@ -15871,6 +16040,8 @@ export interface components {
         };
         /** @description A sales line on an order, with the order's own columns (ADR 0005 sections 2.2 and 5.4). */
         OrderLine: {
+            /** @description A configured item's configuration: the choices the dealer made, in the canonical form the configurator wrote. Null on an ordinary product line. The line's price was computed from it and the documents show it as a short description. */
+            configuration_json: components["schemas"]["ConfiguredConfiguration"] | null;
             /** Format: uuid */
             id: string;
             /** @description The line's place on the document; a kit's components follow it. */
@@ -16293,6 +16464,8 @@ export interface components {
              * @description Absent on a stocked product line means the engine prices it; present it is an override naming override_reason, and on a non stock or charge line the manual price.
              */
             unit_price_ten_thousandths?: number;
+            /** @description A configured item's configuration. The line's price is the engine's, read from the configured product row, which the configurator priced from the stored options. */
+            configuration_json?: components["schemas"]["ConfiguredConfiguration"];
             override_reason?: string;
             discount_percent?: string;
             /** Format: int64 */
@@ -18630,6 +18803,8 @@ export interface components {
         };
         /** @description A sale line in the shared shape of ADR 0005 section 2.2: product, kit (with its component lines), charge and text lines, the priced fields null on a text line, the extension rounded once. */
         PosLineItem: {
+            /** @description A configured item's configuration; null on an ordinary product line. */
+            configuration_json: components["schemas"]["ConfiguredConfiguration"] | null;
             /** Format: uuid */
             id: string;
             position: number;
@@ -20706,6 +20881,8 @@ export interface components {
         UOM: string;
         /** @description The product on the wire (ADR 0006 sections 6 and 7.1): stock_uom, the scaled base price, quantities as decimal strings, and the stock totals in the stocking unit. */
         ProductView: {
+            /** @description True on a product the dealer never holds: a configured item, a door or a millwork piece the dealer configures and prices on the server. Such a row is kept out of the stock reads. */
+            is_non_stock: boolean;
             /** Format: uuid */
             id: string;
             sku: string;
@@ -21395,6 +21572,8 @@ export interface components {
              * @description The unit price per price_uom, times 10,000 (13725 is 1.3725).
              */
             unit_price_ten_thousandths: number;
+            /** @description A configured item's configuration: the choices the dealer made, in the canonical form the configurator wrote. Null on an ordinary product line. The line's price was computed from it and the documents show it as a short description. */
+            configuration_json: components["schemas"]["ConfiguredConfiguration"] | null;
             /** Format: int64 */
             line_total_cents: number;
             /**
@@ -21475,6 +21654,8 @@ export interface components {
             price_uom_qty?: components["schemas"]["Quantity"];
             /** Format: int64 */
             unit_price_ten_thousandths: number;
+            /** @description A configured item's configuration. A line that carries one is priced by the server from the stored options, so the price is not required on the wire for it and a price sent on it is read and ignored. */
+            configuration_json?: components["schemas"]["ConfiguredConfiguration"];
             tally?: components["schemas"]["TallyRequest"];
         };
         QuoteTransitionRequest: {
@@ -32963,6 +33144,88 @@ export interface operations {
                     "application/json": components["schemas"]["AppsDisabledError"] | components["schemas"]["WireError"];
                 };
             };
+            500: components["responses"]["InternalErrorEither"];
+        };
+    };
+    millworkUpdateOption: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MillworkUpdateOptionRequest"];
+            };
+        };
+        responses: {
+            /** @description The updated option, with its ETag. */
+            200: {
+                headers: {
+                    /** @description The record's revision in quotes. */
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MillworkOption"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            /** @description The millwork app is disabled on this instance (app_disabled, written by the registry gate), or no option has this id (not_found). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AppsDisabledError"] | components["schemas"]["WireError"];
+                };
+            };
+            409: components["responses"]["WireConflict"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
+            428: components["responses"]["WirePreconditionRequired"];
+            500: components["responses"]["InternalErrorEither"];
+        };
+    };
+    millworkEstimate: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MillworkEstimateRequest"];
+            };
+        };
+        responses: {
+            /** @description The priced configured item. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MillworkEstimateResponse"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["AppDisabled"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalErrorEither"];
         };
     };

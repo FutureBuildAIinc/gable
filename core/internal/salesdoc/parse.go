@@ -42,6 +42,11 @@ type LineRequest struct {
 	SpecialOrderCost json.RawMessage `json:"special_order_unit_cost_ten_thousandths"`
 	Tally            *TallyRequest   `json:"tally"`
 	Tint             *TintRequest    `json:"tint,omitempty"`
+	// Configuration is a configured item's configuration. A line that
+	// carries one is a product line on a non stock row: the document
+	// prices it from the product's own price, which the configurator
+	// computed from the stored options.
+	Configuration json.RawMessage `json:"configuration_json"`
 }
 
 // TintRequest is a paint line's tint as the counter sends it: the colour and
@@ -103,6 +108,9 @@ type ParsedLine struct {
 	HasQuantity bool
 	// Tint is the paint line's tint record, nil when the request sent none.
 	Tint *LineTint
+	// Configuration is a configured item's configuration, nil when the
+	// request sent none.
+	Configuration json.RawMessage
 }
 
 // chargeCodePattern is a charge code: one to sixteen uppercase letters,
@@ -279,6 +287,12 @@ func (l *LineRequest) parse(v *httpx.Validator, path string) (ParsedLine, bool) 
 		if rows, ok := ParseTally(v, path, l.Tally); ok {
 			d.TallyRows = rows
 		}
+	}
+
+	// A configured item's configuration rides the line as it was sent: the
+	// document shows it and the price came from it.
+	if !isAbsent(l.Configuration) {
+		d.Configuration = l.Configuration
 	}
 
 	// The paint tint record (row CP-16): parsed here, priced by the document

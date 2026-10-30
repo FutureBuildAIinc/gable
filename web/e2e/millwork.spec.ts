@@ -65,10 +65,18 @@ test.describe('Millwork and configurator flows on the new contract', () => {
     const items = (await events.json()).items as { entity: { id: string } }[];
     expect(items.some((e) => e.entity.id === option.id)).toBe(true);
 
-    // The door configurator prices in cents from the wire.
+    // The door configurator prices on the server: the price it shows is the
+    // one the server computed from the stored options, and it shows nothing
+    // before the dealer has chosen anything.
+    const doorType = await request.post('/api/v1/millwork/options', {
+      data: { category: 'door_type', name: `E2E Door ${run}`, price_adjustment_cents: 0, base_price_cents: 12345, base_cost_cents: 6000 },
+    });
+    expect(doorType.status(), await doorType.text()).toBe(201);
     await page.goto('/millwork/configure');
     await expect(page.getByRole('heading', { name: /Configure Door/i })).toBeVisible();
-    await expect(page.getByText('$250.00').first()).toBeVisible();
+    await expect(page.getByTestId('estimate-price')).toHaveText('--');
+    await page.getByRole('button', { name: `E2E Door ${run}` }).click();
+    await expect(page.getByTestId('estimate-price')).toHaveText('$123.45');
 
     // The product configurator: the selections ride as one declared
     // parameter, and a conflict names its rule.
@@ -100,6 +108,8 @@ test.describe('Millwork and configurator flows on the new contract', () => {
       data: { product_type: 'Lumber', selections: { Species: 'SYP', Grade: '#2' } },
     });
     expect(clean.status()).toBe(200);
-    expect((await clean.json()).sku).toBe('NS-LBR-SYP-#2');
+    // The SKU is the configuration's: NS-, the product type's short name and
+    // the hash of the configuration's canonical form.
+    expect((await clean.json()).sku).toMatch(/^NS-LBR-[0-9A-F]{12}$/);
   });
 });

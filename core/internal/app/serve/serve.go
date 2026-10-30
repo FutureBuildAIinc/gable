@@ -1089,11 +1089,16 @@ func Run() {
 	millworkSvc := millwork.NewService(millwork.NewRepository(db)).
 		WithOutbox(outbox.NewWriter(db, cfg.EventsOrg)).
 		WithTxRunner(db).
-		WithAudit(auditLog)
+		WithAudit(auditLog).
+		WithProducts(productSvc)
 	millworkHandler := millwork.NewHandler(millworkSvc)
 	configuratorRepo := configurator.NewRepository(db)
-	configuratorSvc := configurator.NewService(configuratorRepo)
+	configuratorSvc := configurator.NewService(configuratorRepo).
+		WithConfiguredBuilder(millworkSvc)
 	configuratorHandler := configurator.NewHandler(configuratorSvc)
+	// A configured line's price is the server's: the quote prices it from
+	// the option catalog, the same catalog the configurator priced it from.
+	quoteSvc.WithConfiguredPricer(millworkSvc)
 	appRegistry.Add(apps.App{Manifest: millwork.App, Register: func(r apps.Router) {
 		millworkHandler.RegisterRoutes(r, middleware.RequireRole("admin", "owner", "sales"))
 		configuratorHandler.RegisterRoutes(r, middleware.RequireRole("admin", "owner", "sales"))
@@ -1609,10 +1614,15 @@ type autoPOAdapter struct {
 	productSvc *product.Service
 }
 
-func (a *autoPOAdapter) CreatePOFromSpecialOrderLine(ctx context.Context, productID *uuid.UUID, vendorID *uuid.UUID, quantity float64, unitCost float64, linkedSOLineID uuid.UUID, branch uuid.UUID) error {
+func (a *autoPOAdapter) CreatePOFromSpecialOrderLine(ctx context.Context, productID *uuid.UUID, vendorID *uuid.UUID, quantity float64, unitCost float64, linkedSOLineID uuid.UUID, branch uuid.UUID, description string) error {
 	// Resolve product description for the PO line; a line with no product
-	// (the quote accept path, which carries none) takes a plain one.
-	desc := "special order"
+	// (the quote accept path, which carries none) takes the short
+	// description the line itself carries, which for a configured item is
+	// what the item is.
+	desc := description
+	if desc == "" {
+		desc = "special order"
+	}
 	if productID != nil && a.productSvc != nil {
 		if p, err := a.productSvc.GetProduct(ctx, *productID); err == nil && p != nil {
 			desc = fmt.Sprintf("%s - %s", p.SKU, p.Description)

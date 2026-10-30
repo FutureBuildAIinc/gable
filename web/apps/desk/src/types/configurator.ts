@@ -27,9 +27,35 @@ export interface ValidateConfigResponse {
     conflicts: ValidationConflict[];
 }
 
+/**
+ * A configured item's configuration: the choices the dealer made, in the
+ * canonical form the server wrote them. The category names are the option
+ * catalog's own (snake_case) and the values are the option names the catalog
+ * stores. The server prices a line that carries one from the stored options.
+ */
+export interface ConfiguredConfiguration {
+    product_type?: string;
+    /** The chosen option for each attribute category. */
+    selections: Record<string, string>;
+    /** The door's width in inches, when the configuration carries one. */
+    width?: number;
+    /** The door's height in inches, when the configuration carries one. */
+    height?: number;
+}
+
+/**
+ * The configured item the server answers: its SKU, the description the
+ * documents carry, the product row it became, the server's price and cost
+ * and the canonical configuration they came from. The money is in
+ * ten-thousandths of the major unit.
+ */
 export interface BuildSKUResponse {
     sku: string;
     description: string;
+    product_id: string;
+    unit_price_ten_thousandths: number;
+    unit_cost_ten_thousandths: number;
+    configuration_json: ConfiguredConfiguration;
 }
 
 export interface AvailableOption {

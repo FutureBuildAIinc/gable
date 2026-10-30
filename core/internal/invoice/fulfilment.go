@@ -5,6 +5,7 @@ package invoice
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -58,6 +59,9 @@ type FulfilmentLine struct {
 	CostSource         *string
 	UnitCost           *int64 // scale 4, per the stocking unit
 	CostCents          int64
+	// Configuration is a configured item's configuration, copied from the
+	// billed line so the invoice shows what the item is.
+	Configuration json.RawMessage
 }
 
 // TallyRowInput is one row of a line's tally (ADR 0006 section 4.2), copied

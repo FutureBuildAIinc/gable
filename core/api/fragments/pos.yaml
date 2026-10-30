@@ -4064,8 +4064,13 @@ components:
         A sale line in the shared shape of ADR 0005 section 2.2: product, kit
         (with its component lines), charge and text lines, the priced fields
         null on a text line, the extension rounded once.
-      required: [id, position, line_type, parent_line_id, product_id, charge_code_id, charge_code, sku, description, quantity, uom, price_uom, uom_qty, price_uom_qty, stock_uom, stock_quantity, tally, tint, unit_price_ten_thousandths, priced_unit_price_ten_thousandths, price_source, price_basis, override_reason, discount_percent, discount_cents, discount_reason, price_adjusted_by, line_total_cents, taxable, revenue_account_code, is_special_order, vendor_id, special_order_unit_cost_ten_thousandths, weight_source, weight_gross_lb, weight_tare_lb, weight_net_lb, weight_net_basis, scale_device_id, scale_ticket_id, scale_ticket_number, manual_weight_reason, weight_captured_by, weight_captured_at, created_at]
+      required: [id, position, line_type, parent_line_id, product_id, charge_code_id, charge_code, sku, description, quantity, uom, price_uom, uom_qty, price_uom_qty, stock_uom, stock_quantity, tally, tint, unit_price_ten_thousandths, priced_unit_price_ten_thousandths, price_source, price_basis, override_reason, discount_percent, discount_cents, discount_reason, price_adjusted_by, line_total_cents, taxable, revenue_account_code, is_special_order, vendor_id, special_order_unit_cost_ten_thousandths, weight_source, weight_gross_lb, weight_tare_lb, weight_net_lb, weight_net_basis, scale_device_id, scale_ticket_id, scale_ticket_number, manual_weight_reason, weight_captured_by, weight_captured_at, created_at, configuration_json]
       properties:
+        configuration_json:
+          oneOf:
+            - $ref: "#/components/schemas/ConfiguredConfiguration"
+            - type: "null"
+          description: A configured item's configuration; null on an ordinary product line.
         id: {type: string, format: uuid}
         position: {type: integer}
         line_type: {type: string, enum: [product, kit, component, charge, text]}

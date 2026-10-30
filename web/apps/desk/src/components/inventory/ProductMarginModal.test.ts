@@ -18,6 +18,7 @@ const PRODUCT: Product = {
   sku: 'SPF-2x4x8',
   description: '2x4x8 SPF Stud',
   stock_uom: 'PCS',
+  is_non_stock: false,
   base_price_ten_thousandths: 42500,
   average_unit_cost_ten_thousandths: 30000,
   target_margin: 30,

@@ -527,7 +527,8 @@ const lineColumns = `
 	ROUND(l.quantity_backordered * 10000)::bigint, ROUND(l.quantity_fulfilled * 10000)::bigint,
 	l.stock_uom, ROUND(l.stock_quantity * 10000)::bigint,
 	ROUND(l.board_thickness_in * 10000)::bigint, ROUND(l.board_width_in * 10000)::bigint,
-	l.price_basis, l.cost_source, ROUND(l.unit_cost * 10000)::bigint, l.created_at`
+	l.price_basis, l.cost_source, ROUND(l.unit_cost * 10000)::bigint, l.created_at,
+	l.configuration_json`
 
 func (r *PostgresRepository) orderLines(ctx context.Context, orderID uuid.UUID) ([]OrderLine, error) {
 	rows, err := r.db.GetExecutor(ctx).Query(ctx, `
@@ -566,7 +567,8 @@ func (r *PostgresRepository) orderLines(ctx context.Context, orderID uuid.UUID) 
 			&l.RevenueAccountCode, &l.IsSpecialOrder, &l.VendorID, &specialCost,
 			&l.QuoteLineID, qtyScanPtr(&l.QuantityAllocated), qtyScanPtr(&l.QuantityBackordered), qtyScanPtr(&l.QuantityFulfilled),
 			&l.StockUOM, &stockQty, &thick, &width,
-			&l.PriceBasis, &l.CostSource, &unitCost, timeScanPtr(&l.CreatedAt)); err != nil {
+			&l.PriceBasis, &l.CostSource, &unitCost, timeScanPtr(&l.CreatedAt),
+			&l.Configuration); err != nil {
 			return nil, fmt.Errorf("failed to scan order line: %w", err)
 		}
 		l.PriceSource = salesdoc.PriceSource(source)
@@ -722,6 +724,15 @@ func (r *PostgresRepository) LockOrder(ctx context.Context, id uuid.UUID) error 
 	return nil
 }
 
+// jsonArg renders an optional JSON column for a parameterised write: a line
+// without a configuration writes null, not an empty object.
+func jsonArg(raw json.RawMessage) any {
+	if len(raw) == 0 {
+		return nil
+	}
+	return []byte(raw)
+}
+
 func nullIfEmpty(s *string) any {
 	if s == nil || *s == "" {
 		return nil
@@ -829,7 +840,7 @@ func (r *PostgresRepository) insertLines(ctx context.Context, o *Order) error {
 				discount_percent, discount_amount, discount_reason, price_adjusted_by,
 				line_total, taxable, revenue_account_code,
 				is_special_order, vendor_id, special_order_cost, cost_source, unit_cost,
-				quote_line_id, created_at
+				quote_line_id, created_at, configuration_json
 			) VALUES ($1, $2, $3, $4, $5, $6, $7,
 				$8, $9, $10::numeric / 10000, $11, $12, $13::numeric / 10000, $14::numeric / 10000,
 				$15, $16::numeric / 10000, $17::numeric / 10000, $18::numeric / 10000,
@@ -837,7 +848,7 @@ func (r *PostgresRepository) insertLines(ctx context.Context, o *Order) error {
 				$24::numeric / 10000, $25::numeric / 100, $26, $27,
 				$28::numeric / 100, $29, $30,
 				$31, $32, $33::numeric / 10000, $34, $35::numeric / 10000,
-				$36, $37)`,
+				$36, $37, $38)`,
 			l.ID, o.ID, l.Position, string(l.LineType), l.ParentLineID, productArg(l.ProductID), l.ChargeCodeID,
 			nullIfEmpty(l.SKU), l.Description, qtyArg(l.Quantity), strArg(l.UOM), strArg(l.PriceUOM),
 			qtyArg(l.UOMQty), qtyArg(l.PriceUOMQty),
@@ -846,7 +857,7 @@ func (r *PostgresRepository) insertLines(ctx context.Context, o *Order) error {
 			qtyArg(l.DiscountPercent), centsArg(l.DiscountAmount), nullIfEmpty(l.DiscountReason), nullIfEmpty(l.PriceAdjustedBy),
 			centsArg(l.LineTotal), l.Taxable, nullIfEmpty(l.RevenueAccountCode),
 			l.IsSpecialOrder, l.VendorID, priceArg(l.SpecialOrderCost), strArg(l.CostSource), priceArg(l.StockingUnitCost),
-			l.QuoteLineID, l.CreatedAt.Time)
+			l.QuoteLineID, l.CreatedAt.Time, jsonArg(l.Configuration))
 		if err != nil {
 			return mapWriteError(err, "failed to insert order line")
 		}

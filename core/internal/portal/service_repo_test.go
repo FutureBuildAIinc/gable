@@ -15,11 +15,11 @@ import (
 	"github.com/gablelbm/gable/internal/customer"
 	"github.com/gablelbm/gable/internal/inventory"
 	"github.com/gablelbm/gable/internal/order"
-	"github.com/gablelbm/gable/internal/tax"
 	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/gablelbm/gable/internal/pricing"
 	"github.com/gablelbm/gable/internal/product"
 	"github.com/gablelbm/gable/internal/salesdoc"
+	"github.com/gablelbm/gable/internal/tax"
 	"github.com/gablelbm/gable/internal/taxzone"
 	"github.com/gablelbm/gable/internal/units"
 	"github.com/google/uuid"
@@ -468,6 +468,12 @@ func (f *fakeProductRepo) UpdateDensity(context.Context, uuid.UUID, *httpx.Quant
 }
 func (f *fakeProductRepo) UpdateLeadTime(context.Context, uuid.UUID, *int, int64) (int64, error) {
 	return 0, nil
+}
+
+// FindOrCreateNonStock is the configured item's catalog row; the fakes do
+// not stock one, so the answer is a fresh id and no row.
+func (fakeProductRepo) FindOrCreateNonStock(context.Context, string, string, httpx.Price, httpx.Price) (uuid.UUID, error) {
+	return uuid.New(), nil
 }
 
 type fakePricingRepo struct {

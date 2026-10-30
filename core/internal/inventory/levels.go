@@ -100,6 +100,7 @@ func (r *PostgresRepository) ListLevelsPage(ctx context.Context, filters LevelFi
 			OR ($3::uuid IS NULL AND $4::text IS NOT NULL AND l.branch_id IN
 			    (SELECT branch_id FROM user_locations WHERE user_sub = $4))
 			OR ($3::uuid IS NULL AND $4::text IS NULL))
+		   AND p.is_non_stock = false
 		   AND ($5::timestamptz IS NULL OR (i.created_at, i.id) < ($5, $6))
 		 ORDER BY i.created_at DESC, i.id DESC
 		 LIMIT $7`
@@ -136,7 +137,8 @@ func (r *PostgresRepository) CountLevels(ctx context.Context, filters LevelFilte
 			($3::uuid IS NOT NULL AND l.branch_id = $3)
 			OR ($3::uuid IS NULL AND $4::text IS NOT NULL AND l.branch_id IN
 			    (SELECT branch_id FROM user_locations WHERE user_sub = $4))
-			OR ($3::uuid IS NULL AND $4::text IS NULL))`,
+			OR ($3::uuid IS NULL AND $4::text IS NULL))
+		   AND EXISTS (SELECT 1 FROM products p WHERE p.id = i.product_id AND p.is_non_stock = false)`,
 		filters.ProductID, filters.LocationID,
 		middleware.BranchIDForQuery(ctx), middleware.GrantsSubForQuery(ctx)).Scan(&total)
 	if err != nil {

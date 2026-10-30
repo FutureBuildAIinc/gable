@@ -20,6 +20,8 @@ import (
 	"testing"
 
 	"github.com/gablelbm/gable/internal/configurator"
+	"github.com/gablelbm/gable/internal/millwork"
+	"github.com/gablelbm/gable/internal/product"
 	"github.com/gablelbm/gable/internal/testutil"
 	"github.com/gablelbm/gable/pkg/database"
 	"github.com/google/uuid"
@@ -36,7 +38,13 @@ func newFixture(t *testing.T) *fixture {
 	db := testutil.RequireDB(t)
 	f := &fixture{t: t, db: db}
 	mux := http.NewServeMux()
-	configurator.NewHandler(configurator.NewService(configurator.NewRepository(db))).RegisterRoutes(mux)
+	// The configurator is wired the way serve wires it: the option catalog
+	// with the product catalog behind it is the configurator's builder, so
+	// a built SKU is priced from the stored options.
+	catalog := millwork.NewService(millwork.NewRepository(db)).
+		WithProducts(product.NewService(product.NewRepository(db)))
+	svc := configurator.NewService(configurator.NewRepository(db)).WithConfiguredBuilder(catalog)
+	configurator.NewHandler(svc).RegisterRoutes(mux)
 	f.srv = httptest.NewServer(mux)
 	t.Cleanup(f.srv.Close)
 	return f
@@ -264,8 +272,11 @@ func TestBuildSKU(t *testing.T) {
 		t.Fatalf("build = %d %s", code, raw)
 	}
 	out := body(t, raw)
-	if out["sku"] != "NS-LBR-SYP-#2" {
-		t.Errorf("sku = %v", out["sku"])
+	// The SKU is the configuration's: NS-, the product type's short name and
+	// the hash of the canonical configuration.
+	sku, _ := out["sku"].(string)
+	if !strings.HasPrefix(sku, "NS-LBR-") || len(sku) != len("NS-LBR-")+12 {
+		t.Errorf("sku = %v, want the NS-LBR- form", out["sku"])
 	}
 }
 

@@ -101,6 +101,7 @@ describe('menuForKey', () => {
       'Product Configurator',
       'Door Configurator',
       'Blueprint Verifier',
+      'Option Catalog',
     ])
   })
 })

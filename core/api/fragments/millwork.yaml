@@ -140,12 +140,122 @@ paths:
                   - $ref: "#/components/schemas/WireError"
         "500":
           $ref: "#/components/responses/InternalErrorEither"
+    put:
+      operationId: millworkUpdateOption
+      tags: [millwork]
+      summary: Update an option
+      description: >-
+        The same body as the create, minus the fields the update leaves
+        alone. The write moves the option's revision on and needs the
+        revision the caller read, carried by If-Match, by the body's
+        revision, or by both (ADR 0001 section 11); a row that moved past it
+        is a 409 and a write without one is a 428. Writes the audit row
+        millwork_option.updated and the event millwork_option.updated in the
+        same transaction, the event last.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MillworkUpdateOptionRequest"
+      responses:
+        "200":
+          description: The updated option, with its ETag.
+          headers:
+            ETag:
+              description: The record's revision in quotes.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MillworkOption"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: >-
+            The millwork app is disabled on this instance (app_disabled,
+            written by the registry gate), or no option has this id
+            (not_found).
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/AppsDisabledError"
+                  - $ref: "#/components/schemas/WireError"
+        "409":
+          $ref: "#/components/responses/WireConflict"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "428":
+          $ref: "#/components/responses/WirePreconditionRequired"
+        "500":
+          $ref: "#/components/responses/InternalErrorEither"
+  /api/v1/millwork/estimate:
+    post:
+      operationId: millworkEstimate
+      tags: [millwork]
+      summary: Price a configured item
+      description: >-
+        The body is the configuration: the product type, the choices and the
+        door's width and height. The server prices it from the stored
+        options: the unit price is the sum over the options the
+        configuration selects of that option's base plus its adjustment, and
+        the unit cost is the same sum over the cost columns. The price is
+        the server's; the client sends the choices and reads the money. A
+        choice the catalog does not carry is a 400. The response carries the
+        deterministic NS- SKU, the description the documents show, the
+        product row the configured item becomes (found or created), the
+        canonical configuration and the breakdown that made the price.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MillworkEstimateRequest"
+      responses:
+        "200":
+          description: The priced configured item.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MillworkEstimateResponse"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/AppDisabled"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "500":
+          $ref: "#/components/responses/InternalErrorEither"
 components:
   schemas:
     MillworkOption:
       type: object
       description: One catalog option. The price adjustment is integer cents; attributes is whatever JSON the create carried, null when it carried none.
-      required: [id, category, name, price_adjustment_cents, attributes, revision, created_at, updated_at]
+      required: [id, category, name, price_adjustment_cents, base_price_cents, base_cost_cents, cost_adjustment_cents, attributes, revision, created_at, updated_at]
       properties:
         id:
           type: string
@@ -158,6 +268,23 @@ components:
           type: integer
           format: int64
           description: A positive option adds to the configured price, a negative one discounts it.
+        base_price_cents:
+          type: integer
+          format: int64
+          description: >-
+            What the option contributes to a configured item's price when it
+            is the one naming the item (a door's door type, a board's
+            species). Zero on an option that only adjusts.
+        base_cost_cents:
+          type: integer
+          format: int64
+          description: The same contribution to the item's cost.
+        cost_adjustment_cents:
+          type: integer
+          format: int64
+          description: >-
+            What the option adds to the configured item's cost on top of the
+            base. Zero on an option that carries no cost of its own.
         attributes:
           type: [object, array, string, number, boolean, "null"]
           description: Any JSON value stored as sent (an object in practice).
@@ -184,9 +311,130 @@ components:
         price_adjustment_cents:
           type: integer
           format: int64
+        base_price_cents:
+          type: integer
+          format: int64
+          description: Optional; the option's base price, zero when absent.
+        base_cost_cents:
+          type: integer
+          format: int64
+          description: Optional; the option's base cost, zero when absent.
+        cost_adjustment_cents:
+          type: integer
+          format: int64
+          description: Optional; the option's cost adjustment, zero when absent.
         attributes:
           type: [object, array, string, number, boolean]
           description: Optional; stored as sent, null when absent.
+    MillworkUpdateOptionRequest:
+      type: object
+      required: [category, name]
+      description: >-
+        The same body as the create. category and name are the option's own
+        and are taken as they stand; the money fields and attributes are the
+        ones that move. Every field problem is collected into one 400 with a
+        details entry per field; an unknown field is refused.
+      properties:
+        category:
+          type: string
+          description: 1 to 50 characters.
+        name:
+          type: string
+          description: 1 to 100 characters.
+        price_adjustment_cents:
+          type: integer
+          format: int64
+        base_price_cents:
+          type: integer
+          format: int64
+          description: The option's base price, zero when absent.
+        base_cost_cents:
+          type: integer
+          format: int64
+          description: The option's base cost, zero when absent.
+        cost_adjustment_cents:
+          type: integer
+          format: int64
+          description: The option's cost adjustment, zero when absent.
+        attributes:
+          type: [object, array, string, number, boolean]
+          description: Optional; stored as sent, null when absent.
+        revision:
+          type: integer
+          format: int64
+          description: The revision the caller read, when the body carries it.
+    MillworkEstimateRequest:
+      type: object
+      required: [product_type, selections]
+      description: >-
+        The configuration to price. The category names are the option
+        catalog's own (snake_case); the configurator's attribute names
+        ("Species", "Grade") are folded into that shape on the way in.
+      properties:
+        product_type:
+          type: string
+          description: The product type, one of Lumber, Door, Trim or Panel.
+        selections:
+          type: object
+          additionalProperties:
+            type: string
+          description: The choices, one per category.
+        width:
+          type: integer
+          description: The door's width in inches, when it has one.
+        height:
+          type: integer
+          description: The door's height in inches, when it has one.
+    MillworkPriceLine:
+      type: object
+      required: [category, name, price_cents, cost_cents]
+      description: One option's contribution to a configured item's price.
+      properties:
+        category:
+          type: string
+        name:
+          type: string
+        price_cents:
+          type: integer
+          format: int64
+          description: The option's base plus its adjustment, in cents.
+        cost_cents:
+          type: integer
+          format: int64
+          description: The option's base cost plus its cost adjustment, in cents.
+    MillworkEstimateResponse:
+      type: object
+      required: [sku, description, product_id, unit_price_ten_thousandths, unit_cost_ten_thousandths, configuration_json, breakdown]
+      description: >-
+        The priced configured item. The money is in ten-thousandths of the
+        major unit, the scale the documents carry their prices in.
+      properties:
+        sku:
+          type: string
+          description: >-
+            The deterministic NS- SKU: NS-, the product type's short name
+            and the first twelve hex characters of the hash of the
+            configuration's canonical form.
+        description:
+          type: string
+          description: The short description the documents carry.
+        product_id:
+          type: string
+          format: uuid
+          description: The product row the configured item became.
+        unit_price_ten_thousandths:
+          type: integer
+          format: int64
+        unit_cost_ten_thousandths:
+          type: integer
+          format: int64
+        configuration_json:
+          $ref: "#/components/schemas/ConfiguredConfiguration"
+          description: The canonical configuration the price came from.
+        breakdown:
+          type: array
+          items:
+            $ref: "#/components/schemas/MillworkPriceLine"
     MillworkOptionPage:
       type: object
       required: [items, next_cursor, limit]

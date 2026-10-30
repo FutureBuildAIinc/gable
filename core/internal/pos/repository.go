@@ -2330,6 +2330,7 @@ func (r *PostgresRepository) SearchProducts(ctx context.Context, query string, l
 			COALESCE(p.uom_primary::text, 'EA'), COALESCE(ROUND(SUM(i.quantity - i.allocated) * 10000)::bigint, 0)
 		FROM products p LEFT JOIN inventory i ON i.product_id = p.id`+counterStockScope(3, 4)+`
 		WHERE (p.sku ILIKE $1 OR p.description ILIKE $1)
+		  AND p.is_non_stock = false
 		GROUP BY p.id, p.sku, p.description, p.base_price, p.uom_primary
 		ORDER BY p.sku LIMIT $2`, "%"+query+"%", limit,
 		middleware.BranchIDForQuery(ctx), middleware.GrantsSubForQuery(ctx))
@@ -2423,6 +2424,7 @@ func (r *PostgresRepository) CounterTiles(ctx context.Context, q TileQuery) (Til
 		  LEFT JOIN inventory i ON i.product_id = p.id`+counterStockScope(1, 2)+`
 		 WHERE ($3 = '' OR p.category = $3)
 		   AND ($4 = '' OR p.sku ILIKE '%' || $4 || '%' OR p.description ILIKE '%' || $4 || '%')
+		   AND p.is_non_stock = false
 		 GROUP BY p.id, p.sku, p.description, p.uom_primary, p.base_price, p.category, p.image_url, top.units
 		 ORDER BY ($4 <> '' AND LOWER(p.sku) = LOWER($4)) DESC, COALESCE(top.units, 0) DESC, p.description, p.sku
 		 LIMIT $5`, branch, grants, q.Category, q.Q, q.Limit, out.Images)
@@ -2445,6 +2447,7 @@ func (r *PostgresRepository) GetProductCatalog(ctx context.Context) ([]CatalogPr
 		SELECT p.id, COALESCE(p.sku, ''), COALESCE(p.description, ''), `+WalkInPriceCentsSQL+`,
 			COALESCE(p.uom_primary::text, 'EA'), COALESCE(ROUND(SUM(i.quantity - i.allocated) * 10000)::bigint, 0)
 		FROM products p LEFT JOIN inventory i ON i.product_id = p.id`+counterStockScope(1, 2)+`
+		WHERE p.is_non_stock = false
 		GROUP BY p.id, p.sku, p.description, p.base_price, p.uom_primary
 		ORDER BY p.sku`, middleware.BranchIDForQuery(ctx), middleware.GrantsSubForQuery(ctx))
 	if err != nil {

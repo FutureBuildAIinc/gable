@@ -60,10 +60,20 @@ type ValidateResponse struct {
 	Conflicts []ValidationConflict `json:"conflicts"`
 }
 
-// BuildSKUResponse contains the generated non-stock SKU.
+// BuildSKUResponse is what a configured item is: its deterministic non-stock
+// SKU, the description the documents carry, the catalog row it became, the
+// server's price and cost for it, and the configuration all of it came from.
+//
+// The price is the server's. The client sends the choices and reads the
+// money; a client that sends a price of its own is ignored (ADR 0001 section
+// 7: no float ever carries money, and the price is not the client's to send).
 type BuildSKUResponse struct {
-	SKU         string `json:"sku"`
-	Description string `json:"description"`
+	SKU           string          `json:"sku"`
+	Description   string          `json:"description"`
+	ProductID     uuid.UUID       `json:"product_id"`
+	UnitPrice     httpx.Price     `json:"unit_price_ten_thousandths"`
+	UnitCost      httpx.Price     `json:"unit_cost_ten_thousandths"`
+	Configuration json.RawMessage `json:"configuration_json"`
 }
 
 // AvailableOption is a single allowed value with its verdict.

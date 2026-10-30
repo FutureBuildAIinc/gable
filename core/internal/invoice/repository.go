@@ -320,10 +320,20 @@ func (r *PostgresRepository) invoiceHead(ctx context.Context, id uuid.UUID, cont
 	return &inv, nil
 }
 
+// jsonArg renders an optional JSON column for a parameterised write: a line
+// without a configuration writes null, not an empty object.
+func jsonArg(raw json.RawMessage) any {
+	if len(raw) == 0 {
+		return nil
+	}
+	return []byte(raw)
+}
+
 func (r *PostgresRepository) invoiceLines(ctx context.Context, id uuid.UUID) ([]InvoiceLine, error) {
 	rows, err := r.db.GetExecutor(ctx).Query(ctx, `
 		SELECT `+salesdoc.LineColumns("COALESCE(ol.is_special_order, false), ol.vendor_id, ROUND(ol.special_order_cost * 10000)::bigint")+`,
-		       l.order_line_id, ROUND(l.unit_cost * 10000)::bigint, ROUND(l.cost * 100)::bigint
+		       l.order_line_id, ROUND(l.unit_cost * 10000)::bigint, ROUND(l.cost * 100)::bigint,
+		       l.configuration_json
 		FROM invoice_lines l
 		LEFT JOIN charge_codes cc ON cc.id = l.charge_code_id
 		LEFT JOIN order_lines ol ON ol.id = l.order_line_id
@@ -341,7 +351,7 @@ func (r *PostgresRepository) invoiceLines(ctx context.Context, id uuid.UUID) ([]
 			unitCost *int64
 			cost     int64
 		)
-		if err := rows.Scan(append(ls.Dests(&l.Line), &l.OrderLineID, &unitCost, &cost)...); err != nil {
+		if err := rows.Scan(append(ls.Dests(&l.Line), &l.OrderLineID, &unitCost, &cost, &l.Configuration)...); err != nil {
 			return nil, fmt.Errorf("failed to scan invoice line: %w", err)
 		}
 		ls.Finish(&l.Line)
@@ -773,7 +783,7 @@ func (r *PostgresRepository) InsertFulfilmentInvoice(ctx context.Context, in *Fu
 				unit_price, price_each, price_source,
 				price_basis, priced_unit_price, override_reason, price_adjusted_by,
 				discount_percent, discount_amount, discount_reason, line_total, taxable, revenue_account_code,
-				order_line_id, cost_source, unit_cost, cost, created_at)
+				order_line_id, cost_source, unit_cost, cost, created_at, configuration_json)
 			VALUES ($1, $2, $3, $4, $5, $6, $7,
 				$8, $9, $10::numeric / 10000, $11, $12, $13::numeric / 10000, $14::numeric / 10000,
 				$15, $16::numeric / 10000, $17::numeric / 10000, $18::numeric / 10000,
@@ -782,14 +792,14 @@ func (r *PostgresRepository) InsertFulfilmentInvoice(ctx context.Context, in *Fu
 				$21,
 				$22, $23::numeric / 10000, $24, $25,
 				$26::numeric / 10000, $27::numeric / 100, $28, $29::numeric / 100, $30, $31,
-				$32, $33, $34::numeric / 10000, $35::numeric / 100, NOW())`,
+				$32, $33, $34::numeric / 10000, $35::numeric / 100, NOW(), $36)`,
 			l.ID, in.ID, l.Position, l.LineType, l.ParentLineID, l.ProductID, l.ChargeCodeID,
 			l.SKU, l.Description, l.Quantity, l.UOM, l.PriceUOM, l.UOMQty, l.PriceUOMQty,
 			l.StockUOM, l.StockQuantity, l.BoardThicknessIn, l.BoardWidthIn,
 			l.UnitPrice, l.UnitPrice, l.PriceSource,
 			l.PriceBasis, l.PricedUnitPrice, l.OverrideReason, l.PriceAdjustedBy,
 			l.DiscountPercent, l.DiscountCents, l.DiscountReason, l.LineTotalCents, l.Taxable, l.RevenueAccountCode,
-			l.OrderLineID, l.CostSource, l.UnitCost, l.CostCents)
+			l.OrderLineID, l.CostSource, l.UnitCost, l.CostCents, jsonArg(l.Configuration))
 		if err != nil {
 			return fmt.Errorf("failed to insert invoice line: %w", err)
 		}
@@ -847,7 +857,7 @@ func (r *PostgresRepository) InsertCounterInvoice(ctx context.Context, in *Fulfi
 				unit_price, price_each, price_source,
 				price_basis, priced_unit_price, override_reason, price_adjusted_by,
 				discount_percent, discount_amount, discount_reason, line_total, taxable, revenue_account_code,
-				order_line_id, cost_source, unit_cost, cost, created_at)
+				order_line_id, cost_source, unit_cost, cost, created_at, configuration_json)
 			VALUES ($1, $2, $3, $4, $5, $6, $7,
 				$8, $9, $10::numeric / 10000, $11, $12, $13::numeric / 10000, $14::numeric / 10000,
 				$15, $16::numeric / 10000, $17::numeric / 10000, $18::numeric / 10000,
@@ -856,14 +866,14 @@ func (r *PostgresRepository) InsertCounterInvoice(ctx context.Context, in *Fulfi
 				$21,
 				$22, $23::numeric / 10000, $24, $25,
 				$26::numeric / 10000, $27::numeric / 100, $28, $29::numeric / 100, $30, $31,
-				$32, $33, $34::numeric / 10000, $35::numeric / 100, NOW())`,
+				$32, $33, $34::numeric / 10000, $35::numeric / 100, NOW(), $36)`,
 			l.ID, in.ID, l.Position, l.LineType, l.ParentLineID, l.ProductID, l.ChargeCodeID,
 			l.SKU, l.Description, l.Quantity, l.UOM, l.PriceUOM, l.UOMQty, l.PriceUOMQty,
 			l.StockUOM, l.StockQuantity, l.BoardThicknessIn, l.BoardWidthIn,
 			l.UnitPrice, l.UnitPrice, l.PriceSource,
 			l.PriceBasis, l.PricedUnitPrice, l.OverrideReason, l.PriceAdjustedBy,
 			l.DiscountPercent, l.DiscountCents, l.DiscountReason, l.LineTotalCents, l.Taxable, l.RevenueAccountCode,
-			l.OrderLineID, l.CostSource, l.UnitCost, l.CostCents)
+			l.OrderLineID, l.CostSource, l.UnitCost, l.CostCents, jsonArg(l.Configuration))
 		if err != nil {
 			return fmt.Errorf("failed to insert invoice line: %w", err)
 		}

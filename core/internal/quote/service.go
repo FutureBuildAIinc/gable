@@ -29,7 +29,10 @@ import (
 type AutoPOService interface {
 	// productID is nil for a line that carries no product on its purchase
 	// order line (the plain accept path, whose lines are inert on receipt).
-	CreatePOFromSpecialOrderLine(ctx context.Context, productID *uuid.UUID, vendorID *uuid.UUID, quantity float64, unitCost float64, linkedSOLineID uuid.UUID, branch uuid.UUID) error
+	// description is the short description the purchase order line carries
+	// when it names no product of its own: the line's own description, which
+	// for a configured item is what the item is.
+	CreatePOFromSpecialOrderLine(ctx context.Context, productID *uuid.UUID, vendorID *uuid.UUID, quantity float64, unitCost float64, linkedSOLineID uuid.UUID, branch uuid.UUID, description string) error
 }
 
 // OrderCreator is the order module's conversion seam (ADR 0005 section 5.8):
@@ -41,6 +44,15 @@ type OrderCreator interface {
 	PrepareQuoteTax(ctx context.Context, src *order.QuoteSource) (*order.ProviderTax, error)
 	CreateFromQuote(ctx context.Context, src *order.QuoteSource, priced *order.ProviderTax) (*order.Order, error)
 	QuoteHasOrder(ctx context.Context, quoteID uuid.UUID) (bool, error)
+}
+
+// ConfiguredPricer prices a configured line from the configuration it
+// carries. A configured item's price is the server's: the client sends the
+// choices and the server prices them from the stored options, so a price the
+// client sent on such a line is read and ignored. The millwork service
+// satisfies it.
+type ConfiguredPricer interface {
+	PriceConfiguration(ctx context.Context, configuration json.RawMessage) (httpx.Price, httpx.Price, error)
 }
 
 // EventRecorder writes a domain event into the transactional outbox. The
@@ -89,9 +101,10 @@ type Service struct {
 	events      EventRecorder // optional; nil records nothing (unit tests)
 	tx          TxRunner      // optional; nil runs each method unwrapped (unit tests)
 	logger      *slog.Logger
-	branches    BranchGuard  // optional; nil leaves a payload branch unchecked (unit tests)
-	orders      OrderCreator // optional; nil refuses the convert (unit tests)
-	auditor     AuditSink    // optional; nil writes no audit row (unit tests)
+	branches    BranchGuard      // optional; nil leaves a payload branch unchecked (unit tests)
+	orders      OrderCreator     // optional; nil refuses the convert (unit tests)
+	auditor     AuditSink        // optional; nil writes no audit row (unit tests)
+	pricer      ConfiguredPricer // optional; nil refuses a configured line (unit tests)
 	now         func() time.Time
 }
 
@@ -111,6 +124,12 @@ func (s *Service) WithAudit(a AuditSink) *Service {
 
 func NewService(repo Repository) *Service {
 	return &Service{repo: repo, logger: slog.Default(), now: time.Now}
+}
+
+// WithConfiguredPricer injects the pricing of a configured line.
+func (s *Service) WithConfiguredPricer(p ConfiguredPricer) *Service {
+	s.pricer = p
+	return s
 }
 
 // WithAutoPO injects the purchase order service for auto-PO on quote accept.
@@ -270,12 +289,26 @@ func (s *Service) priceDraft(ctx context.Context, d *Draft) (*Quote, error) {
 	total := int64(q.FreightCents)
 	for i, dl := range d.Lines {
 		path := fmt.Sprintf("lines[%d]", i)
+		// A configured line's price is the server's: the client sends the
+		// configuration, the server prices it from the stored options, and a
+		// price the client sent on such a line is ignored.
+		if dl.Configuration != nil {
+			price, perr := s.configuredPrice(ctx, dl.Configuration)
+			if perr != nil {
+				v.Check(false, path+".configuration_json", perr.Error())
+				continue
+			}
+			dl.UnitPrice = price
+		}
 		line := QuoteLine{
 			ID: dl.ID, ProductID: dl.ProductID, SKU: dl.SKU, Description: dl.Description,
 			Quantity: dl.Quantity, UOM: dl.UOM, PriceUOM: dl.PriceUOM,
 			UOMQty: dl.UOMQty, PriceUOMQty: dl.PriceUOMQty, UnitPrice: dl.UnitPrice,
 			CreatedAt: q.CreatedAt,
 		}
+		// A configured item's configuration rides the line: it is what the
+		// price was computed from and what the documents show.
+		line.Configuration = dl.Configuration
 		if dl.CustomerNote != "" {
 			note := dl.CustomerNote
 			line.CustomerNote = &note
@@ -318,6 +351,19 @@ func (s *Service) priceDraft(ctx context.Context, d *Draft) (*Quote, error) {
 	}
 	q.TotalCents = httpx.Cents(total)
 	return q, nil
+}
+
+// configuredPrice prices a configured line from the configuration it carries.
+func (s *Service) configuredPrice(ctx context.Context, configuration json.RawMessage) (httpx.Price, error) {
+	if s.pricer == nil {
+		return 0, httpx.BadRequest("a configured line cannot be priced",
+			httpx.FieldError{Field: "configuration_json", Message: "the option catalog is not wired"})
+	}
+	price, _, err := s.pricer.PriceConfiguration(ctx, configuration)
+	if err != nil {
+		return 0, err
+	}
+	return price, nil
 }
 
 // resolveLineUnits settles one line's units (ADR 0006 sections 3.3, 3.4 and
@@ -968,6 +1014,7 @@ func quoteSourceFor(q *Quote) *order.QuoteSource {
 			Quantity: l.Quantity, UOM: string(l.UOM), PriceUOM: l.PriceUOM,
 			UOMQty: l.UOMQty, PriceUOMQty: l.PriceUOMQty, UnitPrice: l.UnitPrice,
 			StockUOM: l.StockUOM, StockQuantity: l.StockQuantity, UnitCost: l.UnitCost,
+			Configuration: l.Configuration,
 		}
 		if l.Tally != nil {
 			t := &order.QuoteSourceTally{
@@ -1072,6 +1119,7 @@ func (s *Service) triggerAutoPO(ctx context.Context, q *Quote, created *order.Or
 			}
 			err := s.poSvc.CreatePOFromSpecialOrderLine(
 				ctx, product, nil, float64(line.Quantity)/10000, float64(line.UnitCost)/10000, linked, branch,
+				line.Description,
 			)
 			if err != nil {
 				s.logger.Warn("auto-PO failed for quote line",
