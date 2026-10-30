@@ -24,7 +24,11 @@
 #      one required, so the Appwrite variant cannot start without them);
 #   8. the recipe has no dev sign in: neither core nor worker takes AUTH_MODE,
 #      the web build takes no VITE_AUTH_DEV_MODE, and the web image is the
-#      customer image (no `demo-` tag).
+#      customer image (no `demo-` tag);
+#   9. the simulated card terminal is the demo variant's alone: with
+#      DEMO_POS_TERMINAL_SIMULATOR=approve core gets POS_TERMINAL_SIMULATOR=approve,
+#      and the customer variant never gets it, even when a stray
+#      POS_TERMINAL_SIMULATOR is in its environment.
 #
 # Run it from anywhere inside the repository:
 #
@@ -144,18 +148,26 @@ check_recipe() {
 	docker compose --env-file "$TMPDIR_CHECK/all.env" -f "$file" config --format json >"$TMPDIR_CHECK/config.json"
 	cp "$TMPDIR_CHECK/all.env" "$TMPDIR_CHECK/customer.env"
 	printf 'JWKS_URL=%s\nAUTH_ISSUER=%s\n' "$PH_JWKS" "$PH_ISSUER" >>"$TMPDIR_CHECK/customer.env"
+	# A stray simulator setting in the customer's environment must not reach
+	# core: the recipe reads only the DEMO_ name, which the customer never sets.
+	printf 'POS_TERMINAL_SIMULATOR=approve\n' >>"$TMPDIR_CHECK/customer.env"
 	(unset AUTH_MODE; docker compose --env-file "$TMPDIR_CHECK/customer.env" -f "$file" config --format json >"$TMPDIR_CHECK/customer.json")
+	cp "$TMPDIR_CHECK/all.env" "$TMPDIR_CHECK/demo.env"
+	printf 'DEMO_SEED=1\nDEMO_POS_TERMINAL_SIMULATOR=approve\n' >>"$TMPDIR_CHECK/demo.env"
+	(unset AUTH_MODE; docker compose --env-file "$TMPDIR_CHECK/demo.env" -f "$file" config --format json >"$TMPDIR_CHECK/demo.json")
 
-	python3 - "$TMPDIR_CHECK/config.json" "$TMPDIR_CHECK/customer.json" "$mode" "$PH_JWKS" "$PH_ISSUER" "$PH_TAG" "$PH_APPWRITE" <<'PY'
+	python3 - "$TMPDIR_CHECK/config.json" "$TMPDIR_CHECK/customer.json" "$mode" "$PH_JWKS" "$PH_ISSUER" "$PH_TAG" "$PH_APPWRITE" "$TMPDIR_CHECK/demo.json" <<'PY'
 import json
 import os
 import sys
 
-config_path, customer_path, mode, expected_jwks, expected_issuer, expected_tag, expected_appwrite_endpoint = sys.argv[1:8]
+config_path, customer_path, mode, expected_jwks, expected_issuer, expected_tag, expected_appwrite_endpoint, demo_path = sys.argv[1:9]
 with open(config_path, encoding="utf-8") as handle:
     config = json.load(handle)
 with open(customer_path, encoding="utf-8") as handle:
     customer = json.load(handle)
+with open(demo_path, encoding="utf-8") as handle:
+    demo = json.load(handle)
 
 services = config.get("services", {})
 problems = []
@@ -257,6 +269,18 @@ if customer_core_env.get("JWKS_URL") != expected_jwks:
 if customer_core_env.get("AUTH_ISSUER") != expected_issuer:
     problems.append("service core does not receive AUTH_ISSUER in the customer variant")
 
+# The simulated card terminal belongs to the demo variant alone (CP-05): the
+# demo sets it through its DEMO_ name, the customer variant never gets it,
+# whatever stray POS_TERMINAL_SIMULATOR its environment carries.
+demo_core_env = demo.get("services", {}).get("core", {}).get("environment", {})
+if demo_core_env.get("POS_TERMINAL_SIMULATOR") != "approve":
+    problems.append("the demo variant does not give core POS_TERMINAL_SIMULATOR=approve")
+if customer_core_env.get("POS_TERMINAL_SIMULATOR", "") != "":
+    problems.append("the customer variant gives core POS_TERMINAL_SIMULATOR=%r: a production deployment never runs the simulated card terminal" % customer_core_env.get("POS_TERMINAL_SIMULATOR"))
+for name in ("worker", "migrate", "web"):
+    if "POS_TERMINAL_SIMULATOR" in customer.get("services", {}).get(name, {}).get("environment", {}):
+        problems.append("service %s takes POS_TERMINAL_SIMULATOR; only core reads it" % name)
+
 if problems:
     for problem in problems:
         print("check-deploy: FAIL: %s" % problem, file=sys.stderr)
@@ -270,6 +294,7 @@ else:
 print("check-deploy: ok: the customer variant passes JWKS_URL and AUTH_ISSUER to core")
 print("check-deploy: ok: core receives the four Appwrite settings from the environment")
 print("check-deploy: ok: the recipe has no dev sign in (no AUTH_MODE, no persona sign in build, customer web image)")
+print("check-deploy: ok: the simulated card terminal is the demo variant's alone (the customer variant never gets it)")
 PY
 }
 

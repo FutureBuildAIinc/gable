@@ -16,6 +16,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/gablelbm/gable/internal/payment"
 	"github.com/gablelbm/gable/internal/testutil"
 	"github.com/gablelbm/gable/pkg/database"
 	"github.com/google/uuid"
@@ -138,6 +139,9 @@ func (d *dayFixture) removeBranches() {
 		exec(`DELETE FROM payments WHERE id IN `+pays, b.id, regs)
 		exec(`DELETE FROM line_tally_rows WHERE invoice_line_id IN (SELECT id FROM invoice_lines WHERE invoice_id IN `+invs+`)
 			OR pos_line_item_id IN (SELECT id FROM pos_line_items WHERE transaction_id IN `+sales+`)`, b.id, regs)
+		// the card legs a simulated terminal ran, before their sales
+		exec(`DELETE FROM payment_terminal_lost_items WHERE branch_id = $1`, b.id)
+		exec(`DELETE FROM payment_terminal_intents WHERE branch_id = $1 OR transaction_id IN `+sales, b.id, regs)
 		// the sale goes before the invoice it names
 		exec(`DELETE FROM pos_transactions WHERE id IN `+sales, b.id, regs)
 		exec(`DELETE FROM invoice_lines WHERE invoice_id IN `+invs, b.id)
@@ -262,7 +266,8 @@ func obj(t *testing.T, m map[string]any, key string) map[string]any {
 // and a second branch's tills never appear in it.
 func TestTheBranchSummaryAddsUpToTheCent(t *testing.T) {
 	testutil.LockOutboxTables(t)
-	d := newDayFixture(t, testutil.RequireDB(t))
+	// the card runs on the simulated terminal: with none wired the counter refuses a card (CP-05 A1)
+	d := newDayFixture(t, testutil.RequireDB(t), withTerminal(payment.SimApprove, 0))
 	a, other := d.makeBranch(), d.makeBranch()
 	r1, r2 := a.registers[0], a.registers[1]
 

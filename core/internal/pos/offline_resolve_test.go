@@ -569,3 +569,32 @@ func TestOfflineResolve_AnAcceptKeepsTheSessionRules(t *testing.T) {
 	wantRefused(t, err, "out_of_wall")
 	wantNothingPosted(t, f, sale)
 }
+
+// RULE (CP-05 P3-4): an accept judges no price, tax or cap again, but it still
+// posts only the tenders an offline sale may carry. A stored signed sale
+// whose tender is a card (no terminal ran it) is refused tender_not_offline
+// and posts nothing: no sale, no payment, no ledger entry.
+func TestOfflineResolve_AnAcceptedExceptionBooksNoCardTender(t *testing.T) {
+	f := newFixture(t, testutil.RequireDB(t))
+	offlinePolicyOn(t, f)
+	b := newOfflineBench(t, f)
+	raw, sale := b.build(t, saleSpec{lines: []offlineLine{line(f.productID, "1")}}, func(s *pos.SignedOfflineSale) {
+		s.Lines[0].UnitPriceTenThousandths = 10000
+		s.Lines[0].LineTotalCents = 100
+		s.SubtotalCents, s.TaxCents, s.TotalCents = 100, 9, 109
+		s.Tenders[0].AmountCents = 109
+		s.QueueTotalCents = 109
+	})
+	id := *wantOutcome(t, b.sync(t, raw), sale, pos.OfflineRefused, "price_unverified").ExceptionID
+	mustExec(t, f.db, `UPDATE pos_offline_exceptions SET signed_sale = jsonb_set(signed_sale, '{tenders,0,method}', '"card"') WHERE id = $1`, id)
+	payments, entries := f.counterPayments(t), f.counterEntries(t)
+	_, err := resolveAs(t, f, id, pos.ResolveAccept, offlineManager)
+	wantRefused(t, err, "tender_not_offline")
+	wantNothingPosted(t, f, sale)
+	if got := f.counterPayments(t); got != payments {
+		t.Errorf("payments = %d, want %d", got, payments)
+	}
+	if got := f.counterEntries(t); got != entries {
+		t.Errorf("ledger entries = %d, want %d", got, entries)
+	}
+}
