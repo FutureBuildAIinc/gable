@@ -13,6 +13,7 @@ import (
 	"context"
 	"io"
 	"log/slog"
+	"net/http"
 	"testing"
 
 	"github.com/gablelbm/gable/internal/payment"
@@ -75,8 +76,11 @@ func TestRunWayBackNeverSendsAKeyTwice(t *testing.T) {
 	if _, err := payment.RefundUnderKey(context.Background(), gw, "TRX-SALE3", 500, "refund-key-3"); err != nil {
 		t.Fatalf("first refund: %v", err)
 	}
-	if _, err := payment.RefundUnderKey(context.Background(), gw, "TRX-SALE3", 500, "refund-key-3"); err == nil {
-		t.Fatal("the retried key was answered: the customer would be refunded twice")
+	// the guard's refusal is an unknown (CP-05 round 4 P1-E): the first
+	// attempt's outcome is not known here, so it is never a refund
+	res, err := payment.RefundUnderKey(context.Background(), gw, "TRX-SALE3", 500, "refund-key-3")
+	if err != nil || res.Status != payment.GatewayStatusError {
+		t.Fatalf("the retried key answered %v, %v; want ERROR (unknown) with a nil error", res, err)
 	}
 	if n := len(fs.fake.voidPosts_()); n != 1 {
 		t.Fatalf("%d posts, want 1", n)
@@ -167,8 +171,9 @@ func TestRunAReversalUnderTheChargeKeyIsSentOnce(t *testing.T) {
 		if res.Status != payment.GatewayStatusVoided {
 			t.Fatalf("status %s, want VOIDED", res.Status)
 		}
-		if _, err := payment.VoidUnderKey(context.Background(), gw, "TRX-LOST1", in.IdempotencyKey); err == nil {
-			t.Fatal("the retried reversal was answered: the customer would be refunded twice")
+		// the retry is refused by the guard, an unknown (CP-05 round 4 P1-E)
+		if res, err := payment.VoidUnderKey(context.Background(), gw, "TRX-LOST1", in.IdempotencyKey); err != nil || res.Status != payment.GatewayStatusError {
+			t.Fatalf("the retried reversal answered %v, %v; want ERROR (unknown) with a nil error", res, err)
 		}
 		posts := fs.fake.voidPosts_()
 		if len(posts) != 1 {
@@ -179,4 +184,23 @@ func TestRunAReversalUnderTheChargeKeyIsSentOnce(t *testing.T) {
 		}
 		return true
 	})
+}
+
+// CP-05 round 4 P1-E: a void that fails after its POST went out (here an
+// HTTP error status) may have gone through at Run, so it is an unknown:
+// status ERROR with a nil error, never an error the counter would send on to
+// a refund on top.
+func TestRunWayBackAFailedPostIsUnknown(t *testing.T) {
+	fs, gw := runWayBack(t)
+	fs.fake.voidStatus = http.StatusInternalServerError
+	res, err := payment.VoidUnderKey(context.Background(), gw, "TRX-SALE7", "void-key-7")
+	if err != nil {
+		t.Fatalf("a failed void POST came back as an error (the counter would refund on top): %v", err)
+	}
+	if res.Status != payment.GatewayStatusError {
+		t.Fatalf("a failed void POST was filed as %s, want ERROR (unknown)", res.Status)
+	}
+	if n := len(fs.fake.voidPosts_()); n != 1 {
+		t.Fatalf("%d posts, want 1", n)
+	}
 }

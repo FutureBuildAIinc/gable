@@ -12,7 +12,8 @@ import (
 // card return or void goes through the Run driver's own void-or-refund, the
 // call shaped to Run's public page. The leg's idempotency key goes as
 // user_identifier, a void sends no amount, and a key is never sent twice.
-// A Run C is DECLINED; a B or any other result is ERROR, an unknown.
+// A Run C is DECLINED; a B, any other result, or any error from the driver
+// is ERROR with a nil error, an unknown.
 //
 // It is only a way back: the sale is the terminal's, so Charge and Capture
 // are refused. Calls without a key are refused too, since an unkeyed
@@ -65,7 +66,16 @@ func (g *RunTerminalGateway) reverse(ctx context.Context, kind, transID string, 
 	}
 	res, err := g.term.reverse(ctx, kind, transID, amountCents, key)
 	if err != nil {
-		return nil, err
+		// Every error from the driver is an unknown, not a refusal (CP-05
+		// round 4 P1-E): the guard refusing a retry whose first attempt is
+		// still unknown, or a failure after the POST went out (transport or
+		// timeout, an error status, an unreadable body), when the reversal
+		// may have gone through at Run. It answers status ERROR with a nil
+		// error, as a B does, so the counter sends no refund on top of it.
+		// The driver's refusals before any POST (no configuration, no
+		// trans_id) read the same way, which is safe: nothing was sent.
+		return &GatewayResult{TransactionID: transID, AmountCents: amountCents, Status: GatewayStatusError,
+			RawResponse: map[string]any{"error": err.Error()}}, nil
 	}
 	out := &GatewayResult{TransactionID: res.TransID, AuthCode: res.RespCode, AmountCents: amountCents}
 	if out.TransactionID == "" {
