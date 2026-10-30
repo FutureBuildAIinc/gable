@@ -35,6 +35,8 @@ test.describe('Quote follow up', () => {
   test('set a follow up, work the queue, log a call on the quote and clear the follow up', async ({ page, request }) => {
     const run = Date.now().toString(36).toUpperCase();
 
+    await signIn(page, 'Playwright Follow Up');
+
     // A customer and a sent quote for this run.
     const customerRes = await request.post('/api/v1/customers', {
       data: { account_number: `E2E-FU-${run}`, name: `E2E Follow Up ${run}` },
@@ -53,8 +55,6 @@ test.describe('Quote follow up', () => {
     expect(sent.status(), await sent.text()).toBe(200);
     const sentQuote = await sent.json();
     expect(sentQuote.status).toBe('sent');
-
-    await signIn(page, 'Playwright Follow Up');
 
     // The quote page carries the follow up card and the quote's own activity feed.
     await page.goto(`/quotes/${quote.id}`);
@@ -82,10 +82,10 @@ test.describe('Quote follow up', () => {
 
     // The queue tab asks the server for the due queue, and the quote is in it, marked overdue.
     await page.goto('/quotes');
-    await page.getByRole('tab', { name: 'Follow ups due' }).click();
     const queued = page.waitForResponse(
       (r) => new URL(r.url()).pathname === '/api/v1/quotes' && r.url().includes('follow_up=due'),
     );
+    await page.getByRole('tab', { name: 'Follow ups due' }).click();
     await queued;
     await expect(page.locator('tbody tr').filter({ hasText: quote.number })).toBeVisible();
     await expect(

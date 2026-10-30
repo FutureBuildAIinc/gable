@@ -10,6 +10,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import './FollowUpCard'
 import type { GableFollowUpCard } from './FollowUpCard'
 import { mountAsync, update, flush, q, text, jsonResponse } from '../../test/dom'
+import type { Quote } from '../../types/quote'
 
 const QUOTE_ID = '11111111-1111-4111-8111-111111111111'
 const OWNER_ID = '22222222-2222-4222-8222-222222222222'
@@ -36,7 +37,7 @@ function quote(followUpAt: string | null, ownerName: string | null = null) {
     follow_up_at: followUpAt,
     follow_up_owner_id: ownerName ? OWNER_ID : null,
     follow_up_owner_name: ownerName,
-  }
+  } as unknown as Quote
 }
 
 interface Recorded {
@@ -71,9 +72,9 @@ function serve() {
   vi.stubGlobal('fetch', fetchMock)
 }
 
-async function card(quoteFixture: ReturnType<typeof quote>): Promise<GableFollowUpCard> {
+async function card(quoteFixture: Quote): Promise<GableFollowUpCard> {
   serve()
-  const el = await mountAsync<GableFollowUpCard>('gable-follow-up-card', { quote: quoteFixture } as Partial<GableFollowUpCard>)
+  const el = await mountAsync<GableFollowUpCard>('gable-follow-up-card', { quote: quoteFixture })
   await update(el, {})
   return el
 }
