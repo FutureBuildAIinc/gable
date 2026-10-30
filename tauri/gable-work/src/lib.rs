@@ -253,25 +253,28 @@ pub mod commands {
 }
 
 /// The work shell's token state over the shared `custody` (the offline
-/// counter reads the same keychain entry). Names the Gable server when a URL
-/// is set, so the shell can sign in and rotate the token it holds.
+/// counter reads the same keychain entry), with the Gable URL it resolved:
+/// the enrolled device's URL, else `url_var`'s. Names the Gable server when a
+/// URL is set, so the shell can sign in and rotate the token it holds. The
+/// URL is resolved here, so no caller can build the state without it.
 fn token_state(
     custody: Arc<dyn custody::Custody>,
     profile: &'static profiles::Profile,
-    override_url: Option<&Url>,
-) -> Result<TokenState, BadOrigin> {
-    let state = TokenState::build(TokenStore::new(custody), profile, override_url)?;
-    Ok(match override_url {
+    url_var: &str,
+) -> Result<(TokenState, Option<Url>), BadOrigin> {
+    let url = shell::enrolled_or_configured_url(&*custody, profile, url_var);
+    let state = TokenState::build(TokenStore::new(custody), profile, url.as_ref())?;
+    let state = match &url {
         Some(url) => state.with_server(url, Arc::new(UreqTransport::new())),
         None => state,
-    })
+    };
+    Ok((state, url))
 }
 
 pub fn run() {
     let profile = profiles::work();
     let custody: Arc<dyn custody::Custody> = Arc::from(custody::platform_custody());
-    let override_url = shell::enrolled_or_configured_url(&*custody, profile, URL_VAR);
-    let state = token_state(custody.clone(), profile, override_url.as_ref())
+    let (state, override_url) = token_state(custody.clone(), profile, URL_VAR)
         .expect("the app's own origins build a fence");
 
     tauri::Builder::default()
@@ -358,15 +361,37 @@ mod tests {
     // RULE (PR 246 read, finding P1): the work shell's state holds a sign in
     // client whenever a Gable URL is set, so the token it holds can be
     // rotated and the page can start the shell's sign in; with no URL there is
-    // no server to name and no client.
+    // no server to name and no client. token_state() resolves the URL itself
+    // (PR 246's final read, P3-2), so run() cannot hand it none.
     #[test]
     fn the_work_shell_state_has_a_client_exactly_when_a_url_is_set() {
-        let url = super::Url::parse("https://gable.yard.internal:8443/").unwrap();
-        let with = super::token_state(Arc::new(MemoryCustody::new()), profiles::work(), Some(&url))
+        use gable_shell_core::fence::OriginFence;
+        use gable_shell_core::offline::OfflineCounter;
+
+        let enrolled = Arc::new(MemoryCustody::new());
+        let db_path = std::env::temp_dir().join("gable-work-token-state-test.sqlite");
+        let fence = OriginFence::from_starts(&["https://gable.yard.internal:8443"]).unwrap();
+        OfflineCounter::new(profile_id(), enrolled.clone(), &db_path, Some(fence))
+            .enrol_register(Some("https://gable.yard.internal:8443/pos"), "REG-01", 1)
+            .expect("enrol succeeds from /pos on the Gable origin");
+        let _ = std::fs::remove_file(&db_path);
+
+        let (with, url) = super::token_state(enrolled, profiles::work(), "UNSET_GABLE_VAR")
             .expect("a fence over the bundled origins and the url");
+        assert_eq!(
+            url.as_ref().map(|u| u.as_str()),
+            Some("https://gable.yard.internal:8443/"),
+            "the enrolled url"
+        );
         assert!(with.client().is_some(), "a url names the server");
-        let without = super::token_state(Arc::new(MemoryCustody::new()), profiles::work(), None)
-            .expect("a fence over the bundled origins");
+
+        let (without, url) = super::token_state(
+            Arc::new(MemoryCustody::new()),
+            profiles::work(),
+            "UNSET_GABLE_VAR",
+        )
+        .expect("a fence over the bundled origins");
+        assert!(url.is_none(), "no enrolment and no variable, no url");
         assert!(without.client().is_none(), "no url, no server");
     }
 
@@ -706,7 +731,7 @@ mod tests {
         // The exact call: run() handing token_state() no URL brings back a
         // state with no sign in client (PR 246's final read, mutation M2).
         assert!(
-            run_code.contains("token_state(custody.clone(), profile, override_url.as_ref())"),
+            run_code.contains("token_state(custody.clone(), profile, URL_VAR)"),
             "run() builds its state through token_state() with the Gable URL it resolved"
         );
     }
