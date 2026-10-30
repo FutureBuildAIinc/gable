@@ -51,6 +51,7 @@ const PRODUCT: Product = {
   density_lb_per_cy: null,
   density_volume_state: null,
   consumer_durable: false,
+  is_kit: false,
 }
 
 let fetchMock: ReturnType<typeof vi.fn>
