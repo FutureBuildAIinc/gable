@@ -113,14 +113,26 @@ func TestRunWayBackADeclineIsDefinite(t *testing.T) {
 	}
 }
 
-// A Run B (retry) says nothing about the money, so it stays an unknown.
-func TestRunWayBackARetryAnswerIsNotADecline(t *testing.T) {
+// A Run B (retry) says nothing about the money, so it stays an unknown. It
+// answers status ERROR with a nil error (CP-05 round 3b), on a void and on a
+// refund alike: the counter reads ERROR as unknown, so no refund is sent on
+// top of a void that may have gone through. An error would send the
+// counter's reversal on to the refund, risking a double reversal.
+func TestRunWayBackARetryAnswerIsUnknown(t *testing.T) {
 	fs, gw := runWayBack(t)
 	fs.fake.voidAnswer = func(map[string]any) map[string]any {
 		return map[string]any{"result": "B", "resp_code": "91", "resp_text": "RETRY"}
 	}
-	if res, err := payment.RefundUnderKey(context.Background(), gw, "TRX-SALE6", 500, "refund-key-6"); err == nil {
-		t.Fatalf("a Run B was filed as %s: the outcome is unknown", res.Status)
+	res, err := payment.VoidUnderKey(context.Background(), gw, "TRX-SALE6", "void-key-6")
+	if err != nil {
+		t.Fatalf("a Run B on a void came back as an error (the counter would refund on top): %v", err)
+	}
+	if res.Status != payment.GatewayStatusError {
+		t.Fatalf("a Run B on a void was filed as %s, want ERROR (unknown)", res.Status)
+	}
+	res, err = payment.RefundUnderKey(context.Background(), gw, "TRX-SALE6", 500, "refund-key-6")
+	if err != nil || res.Status != payment.GatewayStatusError {
+		t.Fatalf("a Run B on a refund answered %v, %v; want ERROR with a nil error", res, err)
 	}
 }
 

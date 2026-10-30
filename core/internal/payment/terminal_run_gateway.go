@@ -12,6 +12,7 @@ import (
 // card return or void goes through the Run driver's own void-or-refund, the
 // call shaped to Run's public page. The leg's idempotency key goes as
 // user_identifier, a void sends no amount, and a key is never sent twice.
+// A Run C is DECLINED; a B or any other result is ERROR, an unknown.
 //
 // It is only a way back: the sale is the terminal's, so Charge and Capture
 // are refused. Calls without a key are refused too, since an unkeyed
@@ -78,7 +79,12 @@ func (g *RunTerminalGateway) reverse(ctx context.Context, kind, transID string, 
 		out.Status = GatewayStatusDeclined
 	default:
 		// B (retry) or anything else says nothing about the money: unknown.
-		return nil, fmt.Errorf("run void-or-refund answered result %q (%s): the outcome is unknown", res.Result, res.RespText)
+		// It answers status ERROR with a nil error (CP-05 round 3b), which
+		// every caller reads as unknown: an error would send the counter's
+		// reversal on to a refund on top of a void that may have gone
+		// through, and a double reversal costs more than a leg left open.
+		out.Status = GatewayStatusError
+		out.RawResponse = map[string]any{"result": res.Result, "resp_code": res.RespCode, "resp_text": res.RespText}
 	}
 	return out, nil
 }

@@ -12,7 +12,12 @@ package pos_test
 
 import (
 	"context"
+	"encoding/json"
+	"io"
+	"log/slog"
 	"net/http"
+	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 
 	"github.com/gablelbm/gable/internal/payment"
@@ -218,5 +223,74 @@ func TestCP05R3_TheFallbackRefundHasItsOwnKey(t *testing.T) {
 	voidKey, refundKey := gw.keys[0][len("void "):], gw.keys[1][len("refund "):]
 	if voidKey == "" || refundKey == "" || voidKey == refundKey {
 		t.Fatalf("the void went under %q and the refund under %q, wanted two distinct keys", voidKey, refundKey)
+	}
+}
+
+// runRetryServer is a scripted Run void-or-refund endpoint that answers every
+// reversal with a Run B (retry), and counts the POSTs.
+func runRetryServer(t *testing.T) (*payment.RunTerminalGateway, *atomic.Int32) {
+	t.Helper()
+	var posts atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/void-or-refund" {
+			http.NotFound(w, r)
+			return
+		}
+		posts.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"result": "B", "resp_code": "91", "resp_text": "RETRY"})
+	}))
+	t.Cleanup(srv.Close)
+	term := payment.NewRunTerminal(func() payment.GatewayConfig {
+		return payment.GatewayConfig{APIKey: "teststub" + "teststub", MID: "MID-TESTSTUB", BaseURL: srv.URL}
+	}, nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	return payment.NewRunTerminalGateway(term), &posts
+}
+
+// RULE (CP-05 round 3b): a Run B on the compensation void is unknown: the
+// one void POST is the only reversal sent, no refund goes on top, and the
+// sale leg stays unspent for the sweep.
+func TestCP05R3b_ARunRetryOnTheCompensationVoidSendsNoRefund(t *testing.T) {
+	gw, posts := runRetryServer(t)
+	f := terminalFixture(t, payment.SimApprove, nil)
+	f.service.WithGateway(gw)
+	saleID := f.openSale(t, nil)
+	mustExec(t, f.db, `UPDATE inventory SET quantity = 0 WHERE product_id = $1`, f.productID)
+	r := f.completeSale(saleID, f.cardAll(t, saleID))
+	if r.status != http.StatusBadGateway {
+		t.Fatalf("the completion = %d, wanted 502 (the reversal is unknown): %s", r.status, r.raw)
+	}
+	if n := posts.Load(); n != 1 {
+		t.Fatalf("%d void-or-refund posts, wanted only the void (no refund on top of a B)", n)
+	}
+	saleLegID, _, _ := f.terminalIntentOfKind(t, saleID, "sale")
+	if _, spent, _ := f.intentFacts(t, saleLegID); spent {
+		t.Fatalf("the sale leg is spent after an unknown reversal")
+	}
+}
+
+// RULE (CP-05 round 3b): a Run B on the manager's whole charge reversal
+// sends no refund: 502, the item is open again, the leg unspent.
+func TestCP05R3b_ARunRetryOnAResolutionSendsNoRefund(t *testing.T) {
+	gw, posts := runRetryServer(t)
+	f := terminalFixture(t, payment.SimNoAnswer, nil)
+	f.service.WithGateway(gw)
+	saleID := f.openSale(t, nil)
+	intentID, itemID := f.lostLegOf(t, saleID)
+	if r := f.completeSale(saleID, f.cashAll(t, saleID)); r.status != http.StatusOK {
+		t.Fatalf("the cash completion = %d: %s", r.status, r.raw)
+	}
+	r := f.resolveItem(itemID, "authorized", f.recordedRefOf(t, intentID, itemID))
+	if r.status != http.StatusBadGateway {
+		t.Fatalf("the resolve = %d, wanted 502: %s", r.status, r.raw)
+	}
+	if n := posts.Load(); n != 1 {
+		t.Fatalf("%d void-or-refund posts, wanted only the void (no refund on top of a B)", n)
+	}
+	if got := itemStateOf(t, f, itemID); got != "open" {
+		t.Fatalf("the item is %s, wanted open again", got)
+	}
+	if _, spent, _ := f.intentFacts(t, intentID); spent {
+		t.Fatalf("the leg is spent after an unknown reversal")
 	}
 }
