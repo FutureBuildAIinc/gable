@@ -104,10 +104,18 @@ func (s *Store) RevokeSubject(ctx context.Context, sub uuid.UUID, reason string,
 }
 
 // Sweep deletes sessions that are past their absolute limit or were revoked
-// before cutoff.
+// before cutoff, and pending sign ins past their expiry.
 func (s *Store) Sweep(ctx context.Context, now, revokedBefore time.Time) (int64, error) {
 	tag, err := s.db.GetExecutor(ctx).Exec(ctx,
 		`DELETE FROM staff_sessions WHERE absolute_expires_at < $1 OR (revoked_at IS NOT NULL AND revoked_at < $2)`,
 		now, revokedBefore)
-	return tag.RowsAffected(), err
+	if err != nil {
+		return 0, err
+	}
+	// Pending sign ins live minutes; one past its expiry is garbage whether
+	// or not it was used.
+	if _, err := s.db.GetExecutor(ctx).Exec(ctx, `DELETE FROM pending_sign_ins WHERE expires_at < $1`, now); err != nil {
+		return tag.RowsAffected(), err
+	}
+	return tag.RowsAffected(), nil
 }
