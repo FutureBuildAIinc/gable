@@ -60,7 +60,7 @@ import { offlineCounter, OfflineCounterError } from '../../services/OfflineCount
 import type { OfflineQueue, OfflineSignedSale } from '../../types/offline';
 import {
   OFFLINE_BANNER, RESULT_UNKNOWN, SAME_GOODS_QUESTION, bannerFigures, carryCart, isLostAnswer,
-  snapshotRefusalWords, syncWords, tillCloseWait, unknownCartKey, type CarriedCart,
+  queueDrained, snapshotRefusalWords, syncWords, tillCloseWait, unknownCardKey, unknownCartKey, type CarriedCart,
 } from './offline';
 import { POS_SW_WARNING_ATTR } from '../../lib/pos-sw';
 
@@ -172,6 +172,8 @@ export class POSTerminal extends LitElement {
   // The card the terminal still holds: the intent's own record, read again
   // while the desk shows the waiting state. Null when no card leg waits.
   @state() private _cardIntent: TerminalIntent | null = null;
+  /** The card leg being watched, kept while its read is in flight or failed (ADR 0011 5.3). */
+  private _cardWaitId: string | null = null;
   @state() private _cardNote: string | null = null;
   @state() private _cardBusy = false;
   /** Counts card reads; an answer to an older one is dropped. */
@@ -258,6 +260,8 @@ export class POSTerminal extends LitElement {
   @state() private _offlineSeed: CarriedCart | null = null;
   /** The cart whose completion was sent and not answered (ADR 0011 5.3). */
   @state() private _unknownCart: string | null = null;
+  /** The unknown cart's card leg the terminal had not answered when the connection dropped. */
+  private _unknownCard: string | null = null;
   @state() private _offlineQueue: OfflineQueue | null = null;
   @state() private _offlineStrip: string | null = null;
   @state() private _offlineRoom: ReturnType<typeof bannerFigures> = null;
@@ -331,32 +335,45 @@ export class POSTerminal extends LitElement {
   private _restoreUnknownCart() {
     try {
       this._unknownCart = this._registerId ? localStorage.getItem(unknownCartKey(this._registerId)) : null;
+      this._unknownCard = this._registerId && this._unknownCart ? localStorage.getItem(unknownCardKey(this._registerId)) : null;
     } catch {
       this._unknownCart = null;
+      this._unknownCard = null;
     }
   }
 
-  private _setUnknownCart(id: string | null) {
+  private _setUnknownCart(id: string | null, cardIntentId: string | null = null) {
     this._unknownCart = id;
+    this._unknownCard = id ? cardIntentId : null;
     try {
       if (!this._registerId) return;
       if (id) localStorage.setItem(unknownCartKey(this._registerId), id);
       else localStorage.removeItem(unknownCartKey(this._registerId));
+      if (this._unknownCard) localStorage.setItem(unknownCardKey(this._registerId), this._unknownCard);
+      else localStorage.removeItem(unknownCardKey(this._registerId));
     } catch {
       // a refused store keeps the cart for this page only
     }
   }
 
+  /** The card leg the terminal has not answered: waiting at the device, or its read in flight or failed. */
+  private _cardInFlight(): string | null {
+    if (this._cardIntent) return ['claimed', 'pending_at_device'].includes(this._cardIntent.state) ? this._cardIntent.id : null;
+    return this._cardWaitId;
+  }
+
   /**
    * The connection dropped (ADR 0011 5.3). With no completion in flight the
    * open cart's lines become the local cart and the offline sale names it;
-   * a completion sent and not answered is the result unknown case, whose
-   * cart is never carried.
+   * a completion or a terminal call sent and not answered is the result
+   * unknown case, whose cart is never carried.
    */
   private async _goOffline(): Promise<boolean> {
     if (this._offline) return true;
     if (this._till === null || !(await this._offlineReady())) return false;
     let seed: CarriedCart | null = null;
+    const card = this._cardInFlight();
+    if (card !== null && this._sale && this._unknownCart === null) this._setUnknownCart(this._sale.id, card);
     if (!this._completing && this._unknownCart === null && this._sale && this._sale.status !== 'completed') {
       try {
         const snapshot = await offlineCounter.snapshot();
@@ -386,10 +403,12 @@ export class POSTerminal extends LitElement {
     }
     this._reconnecting = true;
     const wasOffline = this._offline;
+    let drained = false;
     try {
       try {
         const report = await offlineCounter.sync();
         this._offlineQueue = report.queue;
+        drained = queueDrained(report.queue);
         this._offlineStrip = report.sent > 0 ? syncWords(report) : this._offlineStrip;
       } catch (err) {
         this._offlineStrip = err instanceof Error ? err.message : null;
@@ -401,7 +420,9 @@ export class POSTerminal extends LitElement {
           this._offlineStrip = [this._offlineStrip, snapshotRefusalWords(err.code, err.message)].filter(Boolean).join('. ');
         }
       }
-      await this._settleUnknownCart();
+      // 5.3: the unknown cart is read only once the queue has drained; a
+      // linked sale still waiting means the cart may yet be abandoned by it
+      if (drained) await this._settleUnknownCart();
       await this._refreshOfflineQueue();
     } finally {
       this._reconnecting = false;
@@ -423,6 +444,16 @@ export class POSTerminal extends LitElement {
   private async _settleUnknownCart() {
     const id = this._unknownCart;
     if (!id) return;
+    // the card leg first: while the terminal may still take the card the cart stays unknown
+    const card = this._unknownCard;
+    if (card) {
+      try {
+        const intent = await posService.getTerminalIntent(card);
+        if (intent.state === 'claimed' || intent.state === 'pending_at_device') return;
+      } catch {
+        return;
+      }
+    }
     let sale: Sale;
     try {
       sale = await posService.getSale(id);
@@ -2210,6 +2241,7 @@ export class POSTerminal extends LitElement {
   /** Reads the card leg's own record until the terminal answers or the waiting is dismissed. */
   private async _watchCard(id: string) {
     const seq = ++this._cardSeq;
+    this._cardWaitId = id;
     this._cardIntent = null;
     this._cardNote = null;
     try {
@@ -2221,7 +2253,10 @@ export class POSTerminal extends LitElement {
       this._cardNote = err instanceof Error ? err.message : 'Failed to read the card at the terminal';
       return;
     }
-    if (this._cardIntent === null || !['claimed', 'pending_at_device'].includes(this._cardIntent.state)) return;
+    if (this._cardIntent === null || !['claimed', 'pending_at_device'].includes(this._cardIntent.state)) {
+      this._cardWaitId = null;
+      return;
+    }
     this._cardTimer = setTimeout(() => { void this._watchCard(id); }, 2000);
   }
 
@@ -2229,6 +2264,7 @@ export class POSTerminal extends LitElement {
   private _dismissCardWait() {
     this._cardSeq++;
     if (this._cardTimer) clearTimeout(this._cardTimer);
+    this._cardWaitId = null;
     this._cardIntent = null;
     this._cardNote = null;
   }

@@ -127,6 +127,19 @@ export function bannerFigures(queue: OfflineQueue | null, snapshot: OfflineSnaps
     };
 }
 
+/** Whether a queued sale still waits on the server's answer (signed, sent or not yet sent). */
+export function awaitsAnswer(item: OfflineQueue['items'][number]): boolean {
+    return item.state === 'signing' || item.state === 'waiting' || item.state === 'pending';
+}
+
+/**
+ * Whether the queue has drained (ADR 0011 5.3): the sync answered and no sale
+ * it holds waits on an answer. Only then is the unknown cart read again.
+ */
+export function queueDrained(queue: OfflineQueue | null): boolean {
+    return queue !== null && !queue.items.some(awaitsAnswer);
+}
+
 /**
  * Why the till close waits (ADR 0011 sections 4 and 5.3): a result unknown
  * cart first, then any sale the register has not had answered or that waits
@@ -135,7 +148,7 @@ export function bannerFigures(queue: OfflineQueue | null, snapshot: OfflineSnaps
 export function tillCloseWait(queue: OfflineQueue | null, unknownCartId: string | null): string | null {
     if (unknownCartId) return UNKNOWN_HOLDS_CLOSE;
     if (!queue) return null;
-    const waiting = queue.items.filter((i) => i.state === 'signing' || i.state === 'waiting' || i.state === 'pending').length;
+    const waiting = queue.items.filter(awaitsAnswer).length;
     if (waiting > 0) return QUEUE_HOLDS_CLOSE;
     const review = queue.items.filter((i) => i.state === 'review').length;
     if (review > 0) return `${review === 1 ? 'A sale waits' : `${review} sales wait`} on a manager: the till closes once ${review === 1 ? 'it is' : 'they are'} resolved`;
@@ -194,6 +207,11 @@ export function soldAt(now: Date): string {
 /** The register's unknown cart, kept across a reload offline (one per register). */
 export function unknownCartKey(register: string): string {
     return `gable.pos.offline.unknown-cart.${register}`;
+}
+
+/** The card leg still open at the terminal for the register's unknown cart, kept beside it. */
+export function unknownCardKey(register: string): string {
+    return `gable.pos.offline.unknown-card.${register}`;
 }
 
 /**
