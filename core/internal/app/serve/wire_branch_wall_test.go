@@ -1868,7 +1868,7 @@ func TestBranchWall_FormsAndDeliveries(t *testing.T) {
 	}
 	// The sends the routes made are recorded with the log sender's answer.
 	var n int
-	if err := db.Pool.QueryRow(ctx, `SELECT count(*) FROM email_deliveries WHERE document_id = $1 AND document_type = 'quote' AND status = 'sent' AND sender_answer LIKE '%not sent%'`, quoteA).Scan(&n); err != nil || n != 1 {
+	if err := db.Pool.QueryRow(ctx, `SELECT count(*) FROM email_deliveries WHERE document_id = $1 AND document_type = 'quote' AND status = 'logged' AND sender_answer LIKE '%not sent%'`, quoteA).Scan(&n); err != nil || n != 1 {
 		t.Errorf("the emailed quote left %d delivery rows (%v), want 1", n, err)
 	}
 	if err := db.Pool.QueryRow(ctx, `SELECT count(*) FROM email_deliveries WHERE document_id = $1 AND document_type = 'statement'`, f.docCust).Scan(&n); err != nil || n != 1 {
