@@ -8,7 +8,7 @@
  */
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { authCustody, authConfig } from '@gable/auth'
-import { router, rolesAllow, heldRoles, routeRefused, refusalWords, ADMIN_OWNER, type RouteConfig, type RouteMatch } from './router'
+import { router, rolesAllow, heldRoles, routeRefused, refusalWords, ADMIN_OWNER, ADMIN_OWNER_FINANCE, type RouteConfig, type RouteMatch } from './router'
 
 const noop = async () => {}
 
@@ -200,10 +200,17 @@ describe('router: role gate', () => {
     expect(refusalWords(['admin', 'owner', 'finance'])).toBe('This page is for admin, owner and finance')
   })
 
-  it('gates the counter rules and offline selling pages to admin and owner', async () => {
+  it('gates the counter rules page to admin and owner', async () => {
     const { routes } = await import('../routes')
-    for (const path of ['/admin/counter-rules', '/admin/offline-counter']) {
-      expect(routes.find((r) => r.path === path)?.roles).toEqual(['admin', 'owner'])
-    }
+    expect(routes.find((r) => r.path === '/admin/counter-rules')?.roles).toEqual(ADMIN_OWNER)
+  })
+
+  it('lets finance read the offline selling page and refuses a cashier', async () => {
+    const { routes } = await import('../routes')
+    const roles = routes.find((r) => r.path === '/admin/offline-counter')?.roles
+    expect(roles).toEqual(ADMIN_OWNER_FINANCE)
+    expect(rolesAllow(roles, ['finance'])).toBe(true)
+    expect(rolesAllow(roles, ['cashier'])).toBe(false)
+    expect(refusalWords(roles ?? [])).toBe('This page is for admin, owner and finance')
   })
 })

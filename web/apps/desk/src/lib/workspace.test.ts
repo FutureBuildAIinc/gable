@@ -143,6 +143,12 @@ describe('visibleMenu', () => {
     expect(paths).toEqual(['/admin/market-indices'])
   })
 
+  it('shows finance the offline selling page but not the admin only items', () => {
+    const paths = visibleMenu(menuForKey('techadmin'), ['finance']).map((m) => m.path)
+    expect(paths).toContain('/admin/offline-counter')
+    expect(paths).not.toContain('/admin/counter-rules')
+  })
+
   it('shows every Tech Admin item to an owner', () => {
     expect(visibleMenu(menuForKey('techadmin'), ['owner'])).toHaveLength(menuForKey('techadmin').length)
   })

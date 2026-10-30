@@ -20,12 +20,16 @@ async function signInAs(page: import('@playwright/test').Page, name: string, rol
 }
 
 test.describe('Desk role walls', () => {
-  for (const path of ['/admin/counter-rules', '/admin/offline-counter']) {
+  const walled = [
+    { path: '/admin/counter-rules', words: 'This page is for admin and owner', heading: /counter rules/i },
+    { path: '/admin/offline-counter', words: 'This page is for admin, owner and finance', heading: /counter rules/i },
+  ];
+  for (const { path, words, heading } of walled) {
     test(`a cashier persona sees the refusal on ${path}`, async ({ page }) => {
       await signInAs(page, 'Cashier Persona', 'cashier');
       await page.goto(path);
-      await expect(page.getByTestId('role-refusal')).toHaveText('This page is for admin and owner');
-      await expect(page.getByRole('heading', { name: /counter rules/i })).toHaveCount(0);
+      await expect(page.getByTestId('role-refusal')).toHaveText(words);
+      await expect(page.getByRole('heading', { name: heading })).toHaveCount(0);
     });
   }
 

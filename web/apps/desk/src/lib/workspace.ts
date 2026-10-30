@@ -22,7 +22,7 @@ import {
 } from 'lucide';
 import type { IconData } from '../apps/types.ts';
 import { appManifests } from '../apps/registry.ts';
-import { router, rolesAllow, ADMIN_OWNER, TAX_ZONE_ROLES } from './router.ts';
+import { router, rolesAllow, ADMIN_OWNER, ADMIN_OWNER_FINANCE } from './router.ts';
 
 export interface ZoneMenuItem {
   label: string;
@@ -121,14 +121,14 @@ const staticZones: AppZone[] = [
     { label: 'Branches', path: '/admin/branches' },
   ] },
   { prefix: '/admin/tax-zones', key: 'taxzone', label: 'Tax Zones', icon: Building2, menu: [
-    { label: 'Tax Zones', path: '/admin/tax-zones', roles: TAX_ZONE_ROLES },
+    { label: 'Tax Zones', path: '/admin/tax-zones', roles: ADMIN_OWNER_FINANCE },
   ] },
   { prefix: '/admin', key: 'techadmin', label: 'Tech Admin', icon: Settings, menu: [
     { label: 'Settings', path: '/admin', roles: ADMIN_OWNER },
     { label: 'Apps', path: '/admin/apps', roles: ADMIN_OWNER },
     { label: 'Market Indices', path: '/admin/market-indices' },
     { label: 'Counter Rules', path: '/admin/counter-rules', roles: ADMIN_OWNER },
-    { label: 'Offline Selling', path: '/admin/offline-counter', roles: ADMIN_OWNER },
+    { label: 'Offline Selling', path: '/admin/offline-counter', roles: ADMIN_OWNER_FINANCE },
   ] },
   { prefix: '/sales', key: 'quote', label: 'Quotes', icon: FileText },
 ];

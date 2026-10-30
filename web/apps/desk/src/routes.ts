@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: LicenseRef-OpenLBM-Surface-1.0
 // SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
 
-import { ADMIN_OWNER, TAX_ZONE_ROLES, type RouteConfig } from './lib/router.ts';
+import { ADMIN_OWNER, ADMIN_OWNER_FINANCE, type RouteConfig } from './lib/router.ts';
 import { appRoutes } from './apps/registry.ts';
 
 /**
@@ -84,10 +84,10 @@ export const routes: RouteConfig[] = [
   { path: '/admin/apps', load: () => import('./pages/admin/AppsPage.ts'), layout: 'erp', roles: ADMIN_OWNER },
   { path: '/admin/branches/:id/users', load: () => import('./pages/admin/branches/BranchUsers.ts'), layout: 'erp' },
   { path: '/admin/branches', load: () => import('./pages/admin/branches/Branches.ts'), layout: 'erp' },
-  { path: '/admin/tax-zones', load: () => import('./pages/admin/taxzones/TaxZones.ts'), layout: 'erp', roles: TAX_ZONE_ROLES },
+  { path: '/admin/tax-zones', load: () => import('./pages/admin/taxzones/TaxZones.ts'), layout: 'erp', roles: ADMIN_OWNER_FINANCE },
   { path: '/admin/market-indices', load: () => import('./pages/admin/MarketIndices.ts'), layout: 'erp' },
   { path: '/admin/counter-rules', load: () => import('./pages/admin/CounterRules.ts'), layout: 'erp', roles: ADMIN_OWNER },
-  { path: '/admin/offline-counter', load: () => import('./pages/admin/OfflineCounter.ts'), layout: 'erp', roles: ADMIN_OWNER },
+  { path: '/admin/offline-counter', load: () => import('./pages/admin/OfflineCounter.ts'), layout: 'erp', roles: ADMIN_OWNER_FINANCE },
   { path: '/admin', load: () => import('./pages/admin/tech_admin/TechAdminPage.ts'), layout: 'erp', roles: ADMIN_OWNER },
   { path: '/pricing/market-check', load: () => import('./pages/admin/pricing/MarketCheck.ts'), layout: 'erp' },
   { path: '/pricing', load: () => import('./pages/admin/pricing/PricingMatrix.ts'), layout: 'erp' },

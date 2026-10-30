@@ -26,7 +26,8 @@ export interface RouteConfig {
 
 /** The roles the server's own wall admits to the admin pages (core/internal/app/serve). */
 export const ADMIN_OWNER = ['admin', 'owner'];
-export const TAX_ZONE_ROLES = ['admin', 'owner', 'finance'];
+/** Admin and owner, plus finance, who read the tax zones and the offline selling policy (`policyRead`). */
+export const ADMIN_OWNER_FINANCE = ['admin', 'owner', 'finance'];
 
 /**
  * The roles the desk knows the person by: a staff session or token's roles,
