@@ -7,8 +7,8 @@ import '../../components/ui/gable-select';
 import { posService, dollarsToCents } from '../../services/POSService';
 import './StepUpDialog';
 import type { MovementKind, TillMovement } from '../../types/pos';
-import {
 import { formatCents } from '../../lib/utils.ts';
+import {
     MOVEMENT_KINDS,
     MOVEMENT_REASONS,
     isPaidKind,
