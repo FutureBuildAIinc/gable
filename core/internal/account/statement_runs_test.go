@@ -90,9 +90,20 @@ func TestStatementRunRecordsTheFigures(t *testing.T) {
 	if _, err := w.svc.GetStatementRun(context.Background(), uuid.New()); err == nil {
 		t.Fatal("a run of an unknown id was answered")
 	}
-	runs, err := w.svc.ListStatementRuns(context.Background(), account.StatementRunFilter{Limit: 10})
-	if err != nil || len(runs) != 1 {
-		t.Fatalf("the list answered %d runs, %v", len(runs), err)
+	// The list is the whole tenant's runs, newest first: the test finds its
+	// own run in it and counts nothing else.
+	runs, err := w.svc.ListStatementRuns(context.Background(), account.StatementRunFilter{Limit: 100})
+	if err != nil {
+		t.Fatalf("list the runs: %v", err)
+	}
+	listed := 0
+	for _, r := range runs {
+		if r.ID == run.ID {
+			listed++
+		}
+	}
+	if listed != 1 {
+		t.Fatalf("the list holds the world's run %d times, want once", listed)
 	}
 	got, err := w.svc.GetStatementRun(context.Background(), run.ID)
 	if err != nil {
@@ -148,7 +159,7 @@ func TestStatementRunScopeAndQueueing(t *testing.T) {
 	w := statementWorld(t)
 	// A customer with no balance at all.
 	quiet := uuid.New()
-	w.exec(`INSERT INTO customers (id, name, account_number, primary_branch_id) VALUES ($1, 'Quiet Co', $2, `+arBranch+`)`,
+	w.exec(`INSERT INTO customers (id, name, account_number, primary_branch_id) VALUES ($1, 'Quiet Co', $2, `+w.branchSQL()+`)`,
 		quiet, "QUIET-"+uuid.NewString()[:8])
 	w.side = append(w.side, quiet)
 
