@@ -346,7 +346,10 @@ func (s *Service) resolveSaleAuthorized(ctx context.Context, item *payment.Termi
 				"item_id", item.ID, "released", ok, "error", err)
 		}
 		s.logger.Error("CRITICAL: the terminal charged and the manager's reversal failed",
-			"item_id", item.ID, "reference", ref, "amount_cents", plan.reverse, "error", rerr)
+			"item_id", item.ID, "reference", ref, "amount_cents", plan.reverse, "outcome", outcome, "error", rerr)
+		if outcome == string(chargeUnknown) {
+			return nil, reversalUnknown(ref)
+		}
 		return nil, reversalFailure(ref)
 	}
 	entry.Changes["reversal"] = outcome
@@ -379,7 +382,8 @@ func (s *Service) resolveSaleAuthorized(ctx context.Context, item *payment.Termi
 // first, then refund when the void is refused or declined; a part goes as a
 // refund of that part. Each answer's verdict is read, not only its error
 // (CP-05 round 3 P1-A): a declined or unknown answer is a failed reversal,
-// so nothing is booked and the item opens again.
+// so nothing is booked and the item opens again. The outcome is answered
+// with the error too, so the manager is told when it is unknown.
 func (s *Service) reverseTerminalCharge(ctx context.Context, ref string, plan salePlan, intent *payment.TerminalIntent) (string, error) {
 	var outcome chargeOutcome
 	var err error
@@ -388,10 +392,7 @@ func (s *Service) reverseTerminalCharge(ctx context.Context, ref string, plan sa
 	} else {
 		outcome, err = refundUnder(ctx, s.gateway, ref, plan.reverse, intent.IdempotencyKey+"-rest")
 	}
-	if err != nil {
-		return "", err
-	}
-	return string(outcome), nil
+	return string(outcome), err
 }
 
 // settleSaleLeg writes everything a sale leg's resolution books, inside the

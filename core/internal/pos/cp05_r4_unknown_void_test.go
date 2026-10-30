@@ -130,3 +130,31 @@ func TestCP05R4_ARetriedResolutionAfterAnUnknownVoidSendsNoRefund(t *testing.T) 
 		t.Fatalf("the leg is spent after an unknown reversal")
 	}
 }
+
+// RULE: when the card machine's answer to the reversal is unknown, the 502
+// tells the manager so in plain words: Gable will not send the money back
+// again, so the manager checks Run's portal and resolves the item by hand.
+// It reads so on every resolve while the guard holds (until a restart).
+func TestCP05R4_TheManagerIsToldTheReversalIsUnknown(t *testing.T) {
+	gw, _ := runScriptServer(t, http.StatusOK, "B")
+	f := terminalFixture(t, payment.SimNoAnswer, nil)
+	f.service.WithGateway(gw)
+	saleID := f.openSale(t, nil)
+	intentID, itemID := f.lostLegOf(t, saleID)
+	if r := f.completeSale(saleID, f.cashAll(t, saleID)); r.status != http.StatusOK {
+		t.Fatalf("the cash completion = %d: %s", r.status, r.raw)
+	}
+	ref := f.recordedRefOf(t, intentID, itemID)
+	want := "The card machine's answer to sending this money back is unknown, so Gable will not send it back again. " +
+		"Check terminal reference " + ref + " in Run's portal and resolve it there by hand."
+	for i := 1; i <= 2; i++ {
+		r := f.resolveItem(itemID, "authorized", ref)
+		if r.status != http.StatusBadGateway {
+			t.Fatalf("resolve %d = %d, wanted 502: %s", i, r.status, r.raw)
+		}
+		e, _ := r.body["error"].(map[string]any)
+		if got, _ := e["message"].(string); got != want {
+			t.Fatalf("resolve %d said %q,\nwanted %q", i, got, want)
+		}
+	}
+}
