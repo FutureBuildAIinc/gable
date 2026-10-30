@@ -57,6 +57,43 @@ export interface RoutingSettings {
 }
 
 /**
+ * The market index source document (QE-07-b1): where a deployment's market
+ * index values come from.
+ *
+ * Two facts in this document are secrets and the server never answers them:
+ * the feed URL (it carries the feed's identity in its path, so the address is
+ * itself the secret) and the feed key's value. The document says only whether
+ * one is stored, and the screen masks both and replaces them whole.
+ */
+export interface MarketIndexSourceSettings {
+    source: 'manual' | 'fb_connect_feed';
+    /** Whether a feed URL is stored. The URL itself is never answered. */
+    feed_url_set: boolean;
+    /** The header the feed key rides in; empty means no header. */
+    feed_key_header: string;
+    /** Whether a feed key is stored. The key itself is never answered. */
+    feed_key_set: boolean;
+    staleness_days: number;
+    last_pull_at: string | null;
+    last_pull_ok: boolean | null;
+    last_pull_error: string | null;
+    revision: number;
+}
+
+/**
+ * The write side of the market index source. `feed_url` and `feed_key` are
+ * write only: absent leaves one, an empty string clears it, a value replaces
+ * it. Neither is ever echoed back.
+ */
+export interface MarketIndexSourceInput {
+    source?: 'manual' | 'fb_connect_feed';
+    feed_url?: string;
+    feed_key_header?: string;
+    feed_key?: string;
+    staleness_days?: number;
+}
+
+/**
  * A row of the dealer staff roster (`staff`). This is NOT an ERP user — it is
  * the identity AI_LM authenticates against via POST /api/integration/validate-staff.
  *
@@ -269,6 +306,38 @@ export const techAdminService = {
             await failOn(response);
             return;
         }
+    },
+
+    // --- Market index source (QE-07-b1) ---
+    //
+    // The settings are a document on a revision (ADR 0001 section 11): the
+    // save sends the revision it read as its If-Match, and one stale retry
+    // re-reads and tries again.
+
+    async getMarketIndexSource(): Promise<MarketIndexSourceSettings> {
+        const response = await fetchWithAuth(`${API_URL}/api/v1/admin/settings/market-index-source`);
+        await failOn(response);
+        return response.json();
+    },
+
+    /**
+     * Saves the market index source. The feed URL and the feed key are write
+     * only: they go in the body and never come back, so the screen masks
+     * them and replaces them whole.
+     */
+    async saveMarketIndexSource(input: MarketIndexSourceInput): Promise<MarketIndexSourceSettings> {
+        for (let attempt = 0; attempt < 2; attempt++) {
+            const current = await this.getMarketIndexSource();
+            const response = await fetchWithAuth(`${API_URL}/api/v1/admin/settings/market-index-source`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json', 'If-Match': `"${current.revision}"` },
+                body: JSON.stringify(input),
+            });
+            if (response.status === 409 && attempt === 0) continue;
+            await failOn(response);
+            return response.json();
+        }
+        throw new Error('Could not save the market index source');
     },
 
     // --- Staff Management & Module Access ---

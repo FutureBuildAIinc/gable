@@ -11,6 +11,7 @@ import { ExposureService } from '../../services/ExposureService';
 import type { ExposureRow, ExposureState } from '../../types/exposure';
 import { TrendingUp, ShieldAlert } from 'lucide';
 import '../../components/quotes/acknowledgment-modal.ts';
+import '../../components/quotes/index-staleness-banner.ts';
 
 const STATE_STYLES: Record<ExposureState, string> = {
   OK: 'text-zinc-400 bg-white/5',
@@ -122,6 +123,10 @@ export class QuoteExposurePage extends LitElement {
           <p class="text-xs text-zinc-500 uppercase tracking-wider">Total Exposure</p>
           <p class="text-2xl font-mono font-bold text-rose-400">${this._fmt(totalExposure)}</p>
         </div>
+      </div>
+
+      <div class="mb-6">
+        <gable-index-staleness-banner></gable-index-staleness-banner>
       </div>
 
       <div class="flex items-center gap-3 mb-4">

@@ -7,6 +7,7 @@ import { customElement, state } from 'lit/decorators.js';
 import { icon } from '../../../lib/icons.ts';
 import { cn } from '../../../lib/utils.ts';
 import './MarketCheckSettings.ts';
+import './MarketIndexSourceSettings.ts';
 import { techAdminService, ediService } from '../../../services/TechAdminService';
 import { confirmDialog, promptDialog } from '../../../components/ui/app-dialog.ts';
 import { aiHeadline, aiIsOn, aiLeadLine, aiStatusLine, imageWords, modelLabel, providerLabel } from '../../../lib/aiWords.ts';
@@ -14,7 +15,7 @@ import { formatDate, formatTime } from '../../../lib/dates.ts';
 import type { APIKey, AISettings, RoutingSettings, EDITradingPartner, StaffMember, ModuleInfo, Readiness } from '../../../services/TechAdminService';
 import {
     Key, Globe, Activity, Plus, Trash2, Copy, Check, Eye, Sparkles,
-    Shield, AlertCircle, Image as ImageIcon, Network, Power, RefreshCw, Navigation, Users, Radar
+    Shield, AlertCircle, Image as ImageIcon, Network, Power, RefreshCw, Navigation, Users, Radar, BarChart3
 } from 'lucide';
 
 const AI_LM_MODULE_ID = 'ai_lm';
@@ -23,7 +24,7 @@ const AI_LM_MODULE_ID = 'ai_lm';
 export class TechAdminPage extends LitElement {
     createRenderRoot() { return this; }
 
-    @state() private activeTab: 'keys' | 'ai' | 'market-check' | 'routing' | 'staff' | 'integrations' | 'health' = 'keys';
+    @state() private activeTab: 'keys' | 'ai' | 'market-check' | 'index-source' | 'routing' | 'staff' | 'integrations' | 'health' = 'keys';
 
     // API Key Manager state
     @state() private keys: APIKey[] = [];
@@ -82,6 +83,7 @@ export class TechAdminPage extends LitElement {
         // A link may name the tab to open (the Market check page links to its own card).
         const named = new URLSearchParams(window.location.search).get('tab');
         if (named === 'market-check') this.activeTab = named;
+        if (named === 'index-source') this.activeTab = named;
         this._loadKeys();
         this._loadAISettings();
         this._loadRoutingSettings();
@@ -524,6 +526,7 @@ export class TechAdminPage extends LitElement {
             { id: 'keys' as const, label: 'API Keys', iconData: Key },
             { id: 'ai' as const, label: 'AI Settings', iconData: Sparkles },
             { id: 'market-check' as const, label: 'Market check', iconData: Radar },
+            { id: 'index-source' as const, label: 'Index Source', iconData: BarChart3 },
             { id: 'routing' as const, label: 'Routing', iconData: Navigation },
             { id: 'staff' as const, label: 'Staff', iconData: Users },
             { id: 'integrations' as const, label: 'Integrations', iconData: Globe },
@@ -1214,6 +1217,7 @@ export class TechAdminPage extends LitElement {
                     ${this.activeTab === 'keys' ? this._renderAPIKeyManager() : nothing}
                     ${this.activeTab === 'ai' ? this._renderAISettingsPanel() : nothing}
                     ${this.activeTab === 'market-check' ? html`<gable-market-check-settings></gable-market-check-settings>` : nothing}
+                    ${this.activeTab === 'index-source' ? html`<gable-market-index-source-settings></gable-market-index-source-settings>` : nothing}
                     ${this.activeTab === 'routing' ? this._renderRoutingSettingsPanel() : nothing}
                     ${this.activeTab === 'staff' ? this._renderStaff() : nothing}
                     ${this.activeTab === 'integrations' ? this._renderIntegrations() : nothing}
