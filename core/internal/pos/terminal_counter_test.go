@@ -34,15 +34,10 @@ func withTerminal(outcome payment.SimulatedOutcome, wait time.Duration) func(*fi
 	}
 }
 
-// cardFor answers a card tender of the last sale's total.
-func (f *fixture) cardFor() map[string]any {
-	f.t.Helper()
-	var total int64
-	if err := f.db.Pool.QueryRow(context.Background(),
-		`SELECT ROUND(total * 100)::bigint FROM pos_transactions ORDER BY created_at DESC LIMIT 1`).Scan(&total); err != nil {
-		f.t.Fatal(err)
-	}
-	return tender("card", total)
+// cardFor answers a card tender of exactly the sale's current total.
+func (f *fixture) cardFor(t *testing.T, saleID string) map[string]any {
+	t.Helper()
+	return tender("card", f.totalOf(t, saleID))
 }
 
 // terminalIntentOf reads the one intent of a sale.
@@ -69,7 +64,7 @@ func TestCounterCardApproveEndToEnd(t *testing.T) {
 	if r := f.addLine(saleID, f.productLine("1")); r.status != http.StatusOK {
 		t.Fatalf("add line = %d: %s", r.status, r.raw)
 	}
-	r := f.completeSale(saleID, f.cardFor())
+	r := f.completeSale(saleID, f.cardFor(t, saleID))
 	if r.status != http.StatusOK {
 		t.Fatalf("complete = %d: %s", r.status, r.raw)
 	}
@@ -108,7 +103,7 @@ func TestCounterCardDeclineEndToEnd(t *testing.T) {
 	if r := f.addLine(saleID, f.productLine("1")); r.status != http.StatusOK {
 		t.Fatalf("add line = %d: %s", r.status, r.raw)
 	}
-	r := f.completeSale(saleID, f.cardFor())
+	r := f.completeSale(saleID, f.cardFor(t, saleID))
 	requireBlocker(t, r, "card_declined")
 	_, state, verdict := f.terminalIntentOf(t, saleID)
 	if state != "declined" || verdict != "declined" {
@@ -133,7 +128,7 @@ func TestCounterCardNoAnswerSweepResolveDeclined(t *testing.T) {
 	if r := f.addLine(saleID, f.productLine("1")); r.status != http.StatusOK {
 		t.Fatalf("add line = %d: %s", r.status, r.raw)
 	}
-	r := f.completeSale(saleID, f.cardFor())
+	r := f.completeSale(saleID, f.cardFor(t, saleID))
 	requireBlocker(t, r, "terminal_answer_pending")
 	id, state, _ := f.terminalIntentOf(t, saleID)
 	if state != "pending_at_device" {
