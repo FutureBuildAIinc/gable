@@ -14425,7 +14425,7 @@ paths:
       tags: [pos]
       summary: Print the sale's receipt
       description: >-
-        The sale's invoice as the invoice print route answers it (the same renderer: Content-Type application/pdf, inline), under the counter's own roles admin, owner and cashier, so the till prints its own receipt without the documents roles. The sale is read as the sale read reads it: a sale that does not exist, or that the caller's branch context, wall or bound key pin hides, answers 404, the same for both. A sale that is not completed, or has no invoice, answers 409 with the blocker no_receipt. The layout query chooses the document: invoice (the default, as it has always printed) or thermal80, the 80mm till receipt. Each print is counted against the sale (the print_count on the sale, and the X-Receipt-Print header names this print): the second and later prints of the 80mm receipt carry a REPRINT marker with the count, and the receipt prints the sale's sealed signature block when one exists. thermal80 answers 409 with the blocker layout_unavailable, counting nothing, on a server that has no 80mm renderer; any other layout is 400.
+        The sale's default document, printed as the invoice print route answers it (Content-Type application/pdf, inline), under the counter's own roles admin, owner and cashier, so the till prints its own receipt without the documents roles. The document is the receipt of a sale that took the money (CP-14): it is headed RECEIPT, it says PAID, it names the tenders that paid it and the cash rounding the branch's rule made, and it carries no total due and no remit to, because there is nothing left to remit. A sale that went on account, or one the books have not settled, keeps its invoice. The file is offered under the name of the document it carries: "inline; filename=receipt.pdf" for a receipt and "inline; filename=invoice.pdf" for an invoice. The sale is read as the sale read reads it: a sale that does not exist, or that the caller's branch context, wall or bound key pin hides, answers 404, the same for both. A sale that is not completed, or has no invoice, answers 409 with the blocker no_receipt. The layout query chooses the document: invoice (the default) or thermal80, the 80mm till receipt, which carries the same heading and the same rounding line. Each print is counted against the sale (the print_count on the sale, and the X-Receipt-Print header names this print): the second and later prints of the 80mm receipt carry a REPRINT marker with the count, and the receipt prints the sale's sealed signature block when one exists. thermal80 answers 409 with the blocker layout_unavailable, counting nothing, on a server that has no 80mm renderer; any other layout is 400.
       parameters:
         - name: id
           in: path
@@ -14466,7 +14466,7 @@ paths:
       tags: [pos]
       summary: Email the sale's receipt
       description: >-
-        Sends the sale's invoice to the account's contact exactly as the invoice email route does (the same service call, the same words, 202 and {"status":"queued"} with the queued delivery row's delivery_id; the send resolves that row to sent, logged or failed in email_deliveries), under the counter's own roles admin, owner and cashier. The sale is read as the sale read reads it (404 for a sale the caller cannot read). A sale that is not completed or has no invoice answers 409 with the blocker no_receipt; a walk in sale (no customer, or the shared walk in customer, whatever address that row holds), or an account with no email address on file, answers 409 with the blocker no_contact and words the card can show. Nothing is sent for any refusal.
+        Sends the sale's default document to the account's contact, exactly as the invoice email route does (the same service call, 202 and {"status":"queued"} with the queued delivery row's delivery_id; the send resolves that row to sent, logged or failed in email_deliveries), under the counter's own roles admin, owner and cashier. The document is the receipt of a sale that took the money (CP-14), and the words are the receipt's: the subject names the receipt, not the invoice. A sale that went on account keeps its invoice. The sale is read as the sale read reads it (404 for a sale the caller cannot read). A sale that is not completed or has no invoice answers 409 with the blocker no_receipt; a walk in sale (no customer, or the shared walk in customer, whatever address that row holds), or an account with no email address on file, answers 409 with the blocker no_contact and words the card can show. Nothing is sent for any refusal.
       parameters:
         - name: id
           in: path
@@ -35894,7 +35894,7 @@ components:
     PosTransaction:
       type: object
       description: "The full sale: the head with its lines and tenders."
-      required: [id, number, revision, branch_id, register_id, cashier_id, customer_id, currency, subtotal_cents, tax_cents, total_cents, change_cents, till_session_id, status, invoice_id, completed_at, created_at, customer_po, job_id, buyer_contact_id, print_count, exchange_return_id, delivery_type, ship_to_id, lines, tenders]
+      required: [id, number, revision, branch_id, register_id, cashier_id, customer_id, currency, subtotal_cents, tax_cents, total_cents, change_cents, rounding_cents, till_session_id, status, invoice_id, completed_at, created_at, customer_po, job_id, buyer_contact_id, print_count, exchange_return_id, delivery_type, ship_to_id, lines, tenders]
       properties:
         id: {type: string, format: uuid}
         number: {type: string, description: "POS-000001, human readable."}
@@ -35908,6 +35908,7 @@ components:
         tax_cents: {type: integer, format: int64}
         total_cents: {type: integer, format: int64}
         change_cents: {type: integer, format: int64, description: "The change given, never subtracted from the payments a second time."}
+        rounding_cents: {type: integer, format: int64, description: "The cash the branch's own rounding rule moved the cash leg by (CP-18): positive when the drawer kept more than the sale needed, negative when it kept less. Zero when the rule did not touch the sale. The stored total does not move."}
         till_session_id: {type: [string, "null"], format: uuid}
         status: {$ref: "#/components/schemas/PosStatus"}
         invoice_id: {type: [string, "null"], format: uuid, description: "The invoice the completion posted."}

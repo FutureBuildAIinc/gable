@@ -268,7 +268,7 @@ func TestThermalReceiptRoundingLine(t *testing.T) {
 		t.Fatal(err)
 	}
 	assertPDF(t, doc)
-	mustContain(t, doc, "Cash rounding: $0.02")
+	mustContain(t, doc, "Cash rounding +$0.02")
 	mustContain(t, doc, "Total: $1,073.50")
 
 	plain := sampleReceipt()
@@ -303,6 +303,30 @@ func TestThermalReceiptCardFeeLine(t *testing.T) {
 	}
 	assertPDF(t, plainDoc)
 	mustNotContain(t, plainDoc, "Card fee")
+}
+
+// The 80mm receipt is headed RECEIPT (CP-14): it is what a sale that took
+// the money leaves behind. A sale that went on account still owes the money,
+// so its 80mm document is headed INVOICE.
+func TestThermalReceiptIsHeadedReceipt(t *testing.T) {
+	svc := brandedReceiptService(t)
+
+	doc, err := svc.GenerateThermalReceiptPDF(context.Background(), yardNorth, sampleReceipt())
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertPDF(t, doc)
+	mustContain(t, doc, "RECEIPT")
+
+	onAccount := sampleReceipt()
+	onAccount.BalanceCents = httpx.Cents(25000)
+	accountDoc, err := svc.GenerateThermalReceiptPDF(context.Background(), yardNorth, onAccount)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertPDF(t, accountDoc)
+	mustContain(t, accountDoc, "INVOICE")
+	mustNotContain(t, accountDoc, "RECEIPT")
 }
 
 // The receipt renders even without a profile or a yard, the way every other
