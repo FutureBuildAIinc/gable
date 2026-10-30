@@ -37,25 +37,18 @@ test.describe('the order exposure gate on the desk', () => {
     });
     expect(policy.status(), await policy.text()).toBe(200);
 
-    // A sent quote with a commodity line (framing lumber prices on the
-    // Random Lengths framing composite), so the send snapshots an escalator.
-    type Product = { id: string; sku: string; stock_uom: string };
-    let stud: Product | undefined;
-    let cursor = '';
-    const seen: string[] = [];
-    for (let page = 0; page < 20 && !stud; page++) {
-      const res = (await (await request.get(`/api/v1/products?limit=200${cursor}`)).json()) as { items: Product[]; next_cursor: string | null };
-      seen.push(...res.items.map((p) => p.sku));
-      stud = res.items.find((p) => p.sku === 'DL_SPF_2X4_L08_S');
-      if (!res.next_cursor) break;
-      cursor = `&cursor=${encodeURIComponent(res.next_cursor)}`;
-    }
-    expect(stud, `the seed frames 2x4x8 SPF as a commodity (scanned ${seen.length} products, first ${seen.slice(0, 5).join(', ')})`).toBeDefined();
-    if (!stud) return;
+    // A sent quote with a commodity line (framing lumber, which the seed
+    // marks commodity, prices on the framing composite), so the send
+    // snapshots an escalator. The base seed stocks the 2x4x8 SPF stud as
+    // LUM-248-PREM; the opt in catalogue import stocks it as
+    // DL_SPF_2X4_L08_S. Either seed arms the gate.
+    const products = (await (await request.get('/api/v1/products?limit=200')).json()) as { items: { id: string; sku: string; stock_uom: string }[] };
+    const stud = products.items.find((p) => p.sku === 'LUM-248-PREM' || p.sku === 'DL_SPF_2X4_L08_S');
+    if (!stud) throw new Error('the seed stocks the 2x4x8 SPF stud (LUM-248-PREM or DL_SPF_2X4_L08_S)');
     const quote = await (await request.post('/api/v1/quotes', {
       data: {
         customer_id: customer.id,
-        lines: [{ product_id: stud.id, quantity: '200', uom: stud.stock_uom, unit_price_ten_thousandths: 55000 }],
+        lines: [{ product_id: stud.id, quantity: '10', uom: stud.stock_uom, unit_price_ten_thousandths: 55000 }],
       },
     })).json();
     const sent = await request.post(`/api/v1/quotes/${quote.id}/transitions`, { data: { to: 'sent', revision: 1 } });
@@ -73,8 +66,15 @@ test.describe('the order exposure gate on the desk', () => {
     const exposure = await (await request.get(`/api/v1/quotes/${quote.id}/exposure`)).json();
     expect(exposure.exposure_state).toBe('ACK_REQUIRED');
 
-    // The convert: the order is linked to the quote the gate reads.
-    const order = await (await request.post(`/api/v1/quotes/${quote.id}/convert`)).json();
+    // The convert: the order is linked to the quote the gate reads. The write
+    // is preconditioned (ADR 0001): If-Match carries the quote's revision as
+    // the quote itself last answered it, never a number typed here.
+    const fresh = await (await request.get(`/api/v1/quotes/${quote.id}`)).json();
+    const convertRes = await request.post(`/api/v1/quotes/${quote.id}/convert`, {
+      headers: { 'If-Match': `"${fresh.revision}"` },
+    });
+    expect(convertRes.status(), await convertRes.text()).toBe(201);
+    const order = await convertRes.json();
     expect(order.status).toBe('draft');
     expect(order.quote_id).toBe(quote.id);
 

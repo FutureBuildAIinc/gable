@@ -141,8 +141,13 @@ export class GableOrderDetail extends LitElement {
         this.processing = true;
         try {
             this.order = await OrderService.releaseHold(this.order.id, this.order.revision);
+            this.exposureBlock = null;
             ToastService.show('Hold released', 'success');
         } catch (error) {
+            if (this.isExposureRefusal(error)) {
+                await this.showExposureBlock();
+                return;
+            }
             ToastService.show('Failed to release hold: ' + (error instanceof Error ? error.message : error), 'error');
         } finally {
             this.processing = false;
