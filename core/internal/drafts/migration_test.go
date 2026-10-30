@@ -251,6 +251,11 @@ func TestMigration103_ReportMatchesTheGoGrammar(t *testing.T) {
 		if strings.HasPrefix(scope, "scheduling:") {
 			continue
 		}
+		// The large cash module (the manager's worklist, CP-17b) joined the
+		// Go grammar after migration 103 froze, same as the three above.
+		if strings.HasPrefix(scope, "large-cash:") {
+			continue
+		}
 		scopes = append(scopes, scope)
 	}
 	sort.Strings(scopes)
