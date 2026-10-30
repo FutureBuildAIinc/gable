@@ -42,7 +42,7 @@ describe('market index staleness banner', () => {
       threshold_days: 7,
       stale: true,
       stale_indices: [{ index_id: 'a', index_code: 'RLS', name: 'Random Lengths SYP', current_value: 100,
-        newest_date: '2026-01-01T00:00:00Z', days_old: 30, stale: true }],
+        newest_date: '2026-01-01', days_old: 30, stale: true }],
       indices: [],
     }
     const el = await open()
@@ -56,5 +56,22 @@ describe('market index staleness banner', () => {
     vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('offline') }))
     const el = await open()
     expect(el.querySelector('[data-testid="index-staleness-banner"]')).toBeNull()
+  })
+
+  it('reads the answer again when the host bumps the token', async () => {
+    const el = await open()
+    expect(el.querySelector('[data-testid="index-staleness-banner"]')).toBeNull()
+
+    // The host moved an index value, so the answer changed under the banner.
+    answer = {
+      threshold_days: 7,
+      stale: true,
+      stale_indices: [{ index_id: 'a', index_code: 'RLS', name: 'Random Lengths SYP', current_value: 100,
+        newest_date: '2026-01-01', days_old: 30, stale: true }],
+      indices: [],
+    }
+    await update(el, { refreshToken: 1 })
+    await flush()
+    expect(el.querySelector('[data-testid="index-staleness-banner"]')).not.toBeNull()
   })
 })

@@ -54,12 +54,15 @@ test.describe('market index source and import', () => {
     await expect(page.getByTestId('source-manual')).toBeChecked();
     await expect(page.getByTestId('source-feed')).not.toBeChecked();
     await expect(page.getByTestId('staleness-days')).toHaveValue('7');
-    // The two secrets are never answered, so the card has nothing to show
-    // but "Saved" and a Replace.
-    await expect(page.getByTestId('feed-url-saved')).toBeVisible();
-    await expect(page.getByTestId('feed-key-saved')).toBeVisible();
-    await expect(page.locator('input[name="feed_url"]')).toHaveCount(0);
-    await expect(page.locator('input[name="feed_key"]')).toHaveCount(0);
+    // Nothing is stored, so the two secret fields are empty and take a
+    // value: there is nothing to mask and nothing to replace.
+    await expect(page.getByTestId('feed-url-saved')).toHaveCount(0);
+    await expect(page.getByTestId('feed-key-saved')).toHaveCount(0);
+    await expect(page.locator('input[name="feed_url"]')).toHaveCount(1);
+    await expect(page.locator('input[name="feed_key"]')).toHaveCount(1);
+    await expect(page.getByTestId('feed-key-header')).toHaveValue('');
+    // No pull has run yet.
+    await expect(page.getByTestId('last-pull')).toContainText('No pull yet');
     await page.screenshot({ path: path.join(SHOTS_DIR, 'market-index-source.png'), fullPage: true });
   });
 

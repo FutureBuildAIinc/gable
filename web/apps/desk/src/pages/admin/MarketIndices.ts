@@ -26,6 +26,8 @@ export class MarketIndicesPage extends LitElement {
   /** What the last apply did. */
   @state() private importResult: MarketIndexImportResult | null = null;
   @state() private importing = false;
+  /** Bumped when an index value moves, so the staleness banner reads again. */
+  @state() private stalenessToken = 0;
 
   connectedCallback() {
     super.connectedCallback();
@@ -69,6 +71,7 @@ export class MarketIndicesPage extends LitElement {
       await ExposureService.refreshIndex(idx.id, { new_value: newValue, source: 'MANUAL' });
       ToastService.show('Index updated — exposure rescanned', 'success');
       await this._load();
+      this.stalenessToken++;
     } catch (err) {
       console.error(err);
       ToastService.show('Failed to refresh index', 'error');
@@ -111,6 +114,7 @@ export class MarketIndicesPage extends LitElement {
         'success',
       );
       await this._load();
+      this.stalenessToken++;
     } catch (err) {
       console.error(err);
       ToastService.show('Failed to apply the import', 'error');
@@ -214,7 +218,7 @@ export class MarketIndicesPage extends LitElement {
       </div>
 
       <div class="space-y-6">
-        <gable-index-staleness-banner></gable-index-staleness-banner>
+        <gable-index-staleness-banner .refreshToken=${this.stalenessToken}></gable-index-staleness-banner>
 
         ${this._renderImport()}
 

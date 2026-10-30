@@ -2,7 +2,7 @@
 // SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
 
 import { LitElement, html, nothing } from 'lit';
-import { customElement, state } from 'lit/decorators.js';
+import { customElement, property, state } from 'lit/decorators.js';
 import { icon } from '../../lib/icons.ts';
 import { ExposureService } from '../../services/ExposureService';
 import type { MarketIndexStaleness } from '../../types/exposure';
@@ -16,19 +16,36 @@ import { Clock } from 'lucide';
  * on the screen are older than the dealer agreed they may be, and the banner
  * says so. It self-hides when nothing is stale, and when the answer cannot
  * be read: a notice that cannot be fetched is not a notice about staleness.
+ *
+ * The host bumps `refreshToken` when it changes an index value, so the
+ * banner reads the answer again rather than showing what it knew before the
+ * change.
  */
 @customElement('gable-index-staleness-banner')
 export class GableIndexStalenessBanner extends LitElement {
   createRenderRoot() { return this; }
 
+  /** Bumped by the host when the index values change under the banner. */
+  @property({ attribute: false }) refreshToken = 0;
+
   @state() private staleness: MarketIndexStaleness | null = null;
+
+  /** The token the answer now on screen was read at. */
+  private _readAt = -1;
 
   connectedCallback() {
     super.connectedCallback();
     void this._load();
   }
 
+  updated(changed: Map<string, unknown>) {
+    if (changed.has('refreshToken') && this.refreshToken !== this._readAt) {
+      void this._load();
+    }
+  }
+
   private async _load() {
+    this._readAt = this.refreshToken;
     try {
       this.staleness = await ExposureService.getIndexStaleness();
     } catch {
