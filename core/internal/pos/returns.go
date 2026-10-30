@@ -811,6 +811,11 @@ func (s *Service) ReturnSale(ctx context.Context, cashierID uuid.UUID, in *Retur
 				return err
 			}
 			claim.intent.AmountCents = -st.total
+			fee, err := s.returnFeeShare(ctx, held.ID, target, -st.total)
+			if err != nil {
+				return err
+			}
+			claim.intent.FeeCents = fee
 			return s.repo.InsertRefundIntent(ctx, claim.intent)
 		}); err != nil {
 			return nil, err
@@ -818,9 +823,12 @@ func (s *Service) ReturnSale(ctx context.Context, cashierID uuid.UUID, in *Retur
 		// The call is bounded (fourteenth review P1-1): every path it can take ends inside
 		// the bound, so the claim it holds never sits in flight past its own
 		// settle path.
-		termLeg := s.terminalRefundLeg(ctx, claim.intent.SaleID, claim.intent.ID, payment.TerminalKindRefund, claim.intent.AmountCents, "")
+		// The card gets the goods and its share of the fee back (CP-15),
+		// refunded by the original transaction so the processor returns the
+		// fee it added.
+		termLeg := s.terminalRefundLeg(ctx, claim.intent.SaleID, claim.intent.ID, payment.TerminalKindRefund, claim.intent.AmountCents+claim.intent.FeeCents, "")
 		callCtx, cancel := context.WithTimeout(ctx, refundCallTimeout)
-		res, err := payment.RefundUnderKey(callCtx, s.gateway, *target.GatewayTxID, claim.intent.AmountCents, terminalRefundKey(termLeg))
+		res, err := payment.RefundUnderKey(callCtx, s.gateway, *target.GatewayTxID, claim.intent.AmountCents+claim.intent.FeeCents, terminalRefundKey(termLeg))
 		cancel()
 		if err != nil {
 			// no verdict came back (a timeout, a cancel): the terminal may
@@ -1095,6 +1103,9 @@ func (s *Service) postReturn(ctx context.Context, st *returnState, claim *refund
 						claim.tenderCap, already))
 			}
 			if err := s.repo.CompleteRefundIntent(ctx, claim.intent.SaleID, claim.intent.TenderID, claim.refundTxID); err != nil {
+				return err
+			}
+			if err := s.bookFeeRefund(ctx, claim.intent, branchID, st.actor); err != nil {
 				return err
 			}
 			if claim.resolveAudit != nil && s.auditLog != nil {
@@ -1492,7 +1503,7 @@ func (s *Service) postReturn(ctx context.Context, st *returnState, claim *refund
 		// gateway ids.
 		if claim != nil && !claim.replay && claim.refundTxID != "" {
 			s.recordOrphanRefund(ctx, gatewayRefund{gatewayTxID: claim.intent.GatewayTxID, refundTxID: claim.refundTxID,
-				amountCents: claim.intent.AmountCents, tenderID: claim.intent.TenderID, act: claim.intent.Act,
+				amountCents: claim.intent.AmountCents + claim.intent.FeeCents, tenderID: claim.intent.TenderID, act: claim.intent.Act,
 				entity: claim.intent.SaleID, actor: st.actor}, err)
 		}
 		return nil, err
@@ -1671,4 +1682,64 @@ func reasonOf(code string) string {
 		return ReasonOther
 	}
 	return code
+}
+
+// returnFeeShare is the surcharge a card return gives back with its goods
+// (CP-15): the tender's fee in proportion to the returned share of the card
+// amount, rounded half up, and the last return takes the remainder so the
+// fees returned sum to the fee charged exactly. The fee already returned or
+// held by earlier claims of the tender is read here, under the sale row lock
+// the claim holds. The share follows the money refunded: a return that keeps
+// a restocking fee refunds less than the card took, so the fee's share of
+// what the dealer kept stays with the dealer and no remainder falls due.
+func (s *Service) returnFeeShare(ctx context.Context, saleID uuid.UUID, tender *Tender, refundCents int64) (int64, error) {
+	fee := int64(tender.SurchargeCents)
+	if fee <= 0 {
+		return 0, nil
+	}
+	done, err := s.repo.CardFeeRefundedCents(ctx, saleID, tender.ID)
+	if err != nil {
+		return 0, err
+	}
+	left := fee - done
+	if left <= 0 {
+		return 0, nil
+	}
+	booked, err := s.repo.CardRefundedCents(ctx, saleID)
+	if err != nil {
+		return 0, err
+	}
+	tenderCap := int64(tender.AmountCents)
+	if refundCents >= tenderCap-booked || tenderCap <= 0 {
+		return left, nil
+	}
+	share := (fee*refundCents*2 + tenderCap) / (2 * tenderCap)
+	if share > left {
+		share = left
+	}
+	return share, nil
+}
+
+// bookFeeRefund takes the returned fee back out of the surcharge income
+// account in the return's own transaction: DR 4070 / CR cash, the card's
+// clearing as the sale's payment entry booked it.
+func (s *Service) bookFeeRefund(ctx context.Context, intent RefundIntent, branchID *uuid.UUID, actor string) error {
+	if intent.FeeCents <= 0 || branchID == nil || s.ledger == nil {
+		return nil
+	}
+	id := intent.SaleID
+	day, err := s.repo.BranchLocalDate(ctx, *branchID, s.now())
+	if err != nil {
+		return err
+	}
+	if _, err := s.ledger.PostEntry(ctx, gl.PostingInput{
+		EntryDate: day, Memo: "Card surcharge returned with card refund " + intent.ID.String(),
+		Source: gl.SourceReturn, SourceRefID: &id, BranchID: *branchID, PostedBy: actorOrSystem(actor),
+		Legs: []gl.Leg{
+			{AccountCode: gl.AccountCodeCardSurcharge, Description: "Card Surcharge Income", Debit: intent.FeeCents},
+			{AccountCode: gl.AccountCodeCash, Description: "Cash", Credit: intent.FeeCents},
+		}}); err != nil {
+		return ledgerRefusal(err, "failed to post the returned card surcharge")
+	}
+	return nil
 }

@@ -249,4 +249,38 @@ describe('Counter rules screen', () => {
     await click(el, '[data-testid="counter-rules-save"]')
     expect(q<HTMLInputElement>(el, '[data-testid="counter-rules-fee-changed_mind"]').value).toBe('15')
   })
+
+  it('does not offer the card fee while no branch is known', async () => {
+    const el = await open()
+    expect(el.querySelector('[data-testid="counter-rules-card-fee"]')).toBeNull()
+    await click(el, '[data-testid="counter-rules-save"]')
+    expect((puts[0] as { rules: Record<string, unknown> }).rules.card_surcharge).toBeUndefined()
+  })
+
+  it('shows the card fee off by default and writes it on at 3 percent with the disclosure', async () => {
+    current = { revision: 4, rules: { ...BASE.rules, card_surcharge: { branch_id: 'b-1', enabled: false, rate_bps: 0 } } }
+    const el = await open()
+    const sw = q<HTMLInputElement>(el, '[data-testid="counter-rules-card-fee-switch"] input')
+    expect(sw.checked).toBe(false)
+    expect(q<HTMLInputElement>(el, '[data-testid="counter-rules-card-fee-rate"]').disabled).toBe(true)
+    expect(text(q(el, '[data-testid="counter-rules-card-fee-disclosure"]'))).toContain('never more than 3 percent')
+    sw.checked = true
+    sw.dispatchEvent(new Event('change'))
+    await update(el, {})
+    await type(el, '[data-testid="counter-rules-card-fee-rate"]', '3')
+    await click(el, '[data-testid="counter-rules-save"]')
+    expect(puts).toHaveLength(1)
+    expect(puts[0]).toMatchObject({ rules: { card_surcharge: { enabled: true, rate_bps: 300 } } })
+    expect(q<HTMLInputElement>(el, '[data-testid="counter-rules-card-fee-switch"] input').checked).toBe(true)
+    expect(q<HTMLInputElement>(el, '[data-testid="counter-rules-card-fee-rate"]').value).toBe('3')
+  })
+
+  it('refuses a card fee above 3 percent before it is sent', async () => {
+    current = { revision: 4, rules: { ...BASE.rules, card_surcharge: { branch_id: 'b-1', enabled: true, rate_bps: 300 } } }
+    const el = await open()
+    await type(el, '[data-testid="counter-rules-card-fee-rate"]', '3.5')
+    await click(el, '[data-testid="counter-rules-save"]')
+    expect(puts).toHaveLength(0)
+    expect(text(q(el, '[data-testid="counter-rules-error"]'))).toContain('0 to 3')
+  })
 })

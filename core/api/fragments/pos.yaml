@@ -1507,6 +1507,194 @@ paths:
           $ref: "#/components/responses/WireNotFound"
         "500":
           $ref: "#/components/responses/InternalError"
+  /api/v1/pos/offline/registers/{id}/device:
+    get:
+      operationId: posOfflineRegisterDeviceGet
+      tags: [pos]
+      summary: A register's device enrolment
+      description: >-
+        The register's live enrolment (its epoch, public key, the mark and
+        chain head the server holds, the mark it confirmed), the last revoked
+        one, and next_epoch, the epoch the next enrolment must name (ADR 0011
+        section 6.1). Admin, owner and finance; a register of a branch the
+        caller may not reach is 403, an unknown register 404.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string}
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: The register's enrolment.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PosRegisterEnrolment"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "409":
+          $ref: "#/components/responses/ConflictEither"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    post:
+      operationId: posOfflineRegisterDeviceEnrol
+      tags: [pos]
+      summary: Enrol a register's device for offline selling
+      description: >-
+        Records the shell's Ed25519 public key for the register's next epoch
+        and revokes the previous key in the same transaction (ADR 0011 section
+        6.1). An owner or admin act, never a machine key: the manager proves
+        presence with their counter PIN (the step up's own check, failure count
+        and lock). device_epoch must be the register's next_epoch (409
+        epoch_moved otherwise); a key is enrolled once (409
+        public_key_reused). The register's latest epoch, live or already
+        revoked, gets an unknown_tail exception over the numbers the server
+        never recorded: the higher of the device's last reported mark and
+        previous_epoch_mark (the mark the shell's keychain kept for that
+        epoch), less the server's recorded mark, once per epoch. Audited as
+        pos.register_device.enrolled (and .revoked for the replaced key).
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string}
+        - $ref: "#/components/parameters/XBranchId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PosEnrolDeviceRequest"
+      responses:
+        "201":
+          description: The register's enrolment now in force.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PosRegisterEnrolment"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "409":
+          $ref: "#/components/responses/ConflictEither"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/pos/offline/registers/{id}/device/revoke:
+    post:
+      operationId: posOfflineRegisterDeviceRevoke
+      tags: [pos]
+      summary: Revoke a register's device
+      description: >-
+        Revokes the register's enrolment of an epoch (ADR 0011 section 6.1):
+        the old key's later sales go to the exception queue as device_revoked.
+        An owner or admin act with the counter PIN, never a machine key;
+        audited as pos.register_device.revoked. sessions says what was done to
+        the web sessions signed in on the register's shell: supported false
+        where the sign in method cannot end them from the server.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string}
+        - $ref: "#/components/parameters/XBranchId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PosRevokeDeviceRequest"
+      responses:
+        "200":
+          description: The register's enrolment after the revocation.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PosRegisterEnrolment"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "409":
+          $ref: "#/components/responses/ConflictEither"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/pos/offline/snapshot:
+    get:
+      operationId: posOfflineSnapshotGet
+      tags: [pos]
+      summary: The register's offline snapshot
+      description: >-
+        What the register may sell on offline (ADR 0011 section 5.4), for its
+        enrolled epoch and its open till session: the policy, the branch rate,
+        the products with their unit sets, the cached accounts with their room
+        at issue, and the price sheet (the engine's answer with rung 2 skipped,
+        at the session's business date: the walk-in's rows, each account's own
+        rows, each account level's rows). Stored so a signed sale can name it.
+        high_seq is the highest sequence the register has assigned: above the
+        server's recorded mark, or with an open bad copy of the epoch, the take
+        is refused 409 queue_not_drained. The ETag is the document's digest; a
+        take whose content has not moved answers the stored snapshot, and
+        If-None-Match with it answers 304. The person signed in at the counter,
+        never a machine key; a register of a branch the caller may not reach is
+        403.
+      parameters:
+        - name: register_id
+          in: query
+          required: true
+          schema: {type: string}
+        - name: high_seq
+          in: query
+          required: true
+          schema: {type: integer, format: int64, minimum: 0}
+        - name: If-None-Match
+          in: header
+          required: false
+          schema: {type: string}
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: The register's snapshot.
+          headers:
+            ETag:
+              description: The snapshot's digest in quotes. Send it back as If-None-Match.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PosOfflineSnapshot"
+        "304":
+          description: The snapshot has not moved since the ETag sent.
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "409":
+          $ref: "#/components/responses/ConflictEither"
+        "500":
+          $ref: "#/components/responses/InternalError"
   /api/v1/pos/end-of-day:
     get:
       operationId: posEndOfDayGet
@@ -3789,12 +3977,13 @@ components:
         One payment taken at the counter, stored net: the tendered amount
         less any change given from it, so the payment it became is the money
         kept.
-      required: [id, sale_id, method, amount_cents, payment_id, reference, card_last4, card_brand, gateway_tx_id, auth_code, id_checked, id_type, created_at]
+      required: [id, sale_id, method, amount_cents, surcharge_cents, payment_id, reference, card_last4, card_brand, gateway_tx_id, auth_code, id_checked, id_type, created_at]
       properties:
         id: {type: string, format: uuid}
         sale_id: {type: string, format: uuid}
         method: {$ref: "#/components/schemas/PosTenderMethod"}
         amount_cents: {type: integer, format: int64, description: "Net of change."}
+        surcharge_cents: {type: integer, format: int64, minimum: 0, description: "The card fee the processor added on top of the tender (CP-15): the device's figure, stored, never part of the sale's total or tax. Zero when none."}
         payment_id: {type: [string, "null"], format: uuid, description: "The payment the completion recorded (none for an account or store credit leg)."}
         id_checked: {type: boolean, description: "The cashier looked at the payer's ID."}
         id_type: {type: [string, "null"], description: "The kind of ID looked at, never its number."}
@@ -4078,6 +4267,207 @@ components:
         account_cap_cents: {type: integer, format: int64, minimum: 0}
         queue_total_cap_cents: {type: integer, format: int64, minimum: 0}
         max_queued: {type: integer, minimum: 0, maximum: 100000}
+    PosRegisterDevice:
+      type: object
+      required: [register_id, device_epoch, public_key, enrolled_by, enrolled_at, revoked_by, revoked_at, revoke_reason,
+        high_seq, chain_head, confirmed_seq, reported_seq]
+      properties:
+        register_id: {type: string}
+        device_epoch: {type: integer, format: int64, minimum: 1}
+        public_key: {type: string, description: "The device's Ed25519 public key, 64 hex characters."}
+        enrolled_by: {type: string, description: "The staff id of the manager whose PIN proved the enrolment."}
+        enrolled_at: {type: string, format: date-time}
+        revoked_by: {type: [string, "null"]}
+        revoked_at: {type: [string, "null"], format: date-time}
+        revoke_reason: {type: [string, "null"]}
+        high_seq: {type: integer, format: int64, minimum: 0}
+        chain_head: {type: string}
+        confirmed_seq: {type: integer, format: int64, minimum: 0}
+        reported_seq: {type: integer, format: int64, minimum: 0}
+    PosRegisterSessionsEnded:
+      type: object
+      required: [supported, ended, message]
+      properties:
+        supported: {type: boolean}
+        ended: {type: integer, minimum: 0}
+        message: {type: string}
+    PosRegisterEnrolment:
+      type: object
+      required: [register_id, branch_id, next_epoch, device, previous, unknown_tail_exception_id, sessions]
+      properties:
+        register_id: {type: string}
+        branch_id: {type: string, format: uuid}
+        next_epoch: {type: integer, format: int64, minimum: 1}
+        device:
+          oneOf:
+            - $ref: "#/components/schemas/PosRegisterDevice"
+            - type: "null"
+        previous:
+          oneOf:
+            - $ref: "#/components/schemas/PosRegisterDevice"
+            - type: "null"
+        unknown_tail_exception_id: {type: [string, "null"], format: uuid}
+        sessions:
+          oneOf:
+            - $ref: "#/components/schemas/PosRegisterSessionsEnded"
+            - type: "null"
+    PosEnrolDeviceRequest:
+      type: object
+      required: [device_epoch, public_key, manager, pin]
+      properties:
+        device_epoch: {type: integer, format: int64, minimum: 1, description: "The register's next_epoch, the epoch the shell made its key for."}
+        public_key: {type: string, description: "The device's Ed25519 public key, 64 hex characters."}
+        manager: {type: string, description: "The manager's staff id, staff number or email."}
+        pin: {type: string, description: "The manager's counter PIN."}
+        previous_epoch_mark:
+          type: object
+          required: [device_epoch, last_seq]
+          properties:
+            device_epoch: {type: integer, format: int64, minimum: 1}
+            last_seq: {type: integer, format: int64, minimum: 0}
+    PosRevokeDeviceRequest:
+      type: object
+      required: [device_epoch, reason, manager, pin]
+      properties:
+        device_epoch: {type: integer, format: int64, minimum: 1}
+        reason: {type: string, maxLength: 500}
+        manager: {type: string}
+        pin: {type: string}
+    PosOfflineSnapshot:
+      type: object
+      required: [snapshot_id, register_id, branch_id, device_epoch, issued_at, till_session, policy, tax, walk_in_customer,
+        price_sheet, products, accounts]
+      properties:
+        snapshot_id: {type: string, format: uuid}
+        register_id: {type: string}
+        branch_id: {type: string, format: uuid}
+        device_epoch: {type: integer, format: int64, minimum: 1}
+        issued_at: {type: string, format: date-time}
+        till_session:
+          type: object
+          required: [id, cashier_id, opened_at, business_date, opening_float_cents]
+          properties:
+            id: {type: string, format: uuid}
+            cashier_id: {type: string, format: uuid}
+            opened_at: {type: string, format: date-time}
+            business_date: {type: string, format: date}
+            opening_float_cents: {type: integer, format: int64}
+        policy:
+          type: object
+          required: [enabled, max_sale_cents, max_check_cents, default_check_limit_cents, account_cap_cents, max_queue_count,
+            max_queue_total_cents, allowed_tenders, require_id_for_tenders, cash_rounding_mode]
+          properties:
+            enabled: {type: boolean}
+            max_sale_cents: {type: integer, format: int64, minimum: 0}
+            max_check_cents: {type: integer, format: int64, minimum: 0}
+            default_check_limit_cents: {type: [integer, "null"], format: int64}
+            account_cap_cents: {type: integer, format: int64, minimum: 0}
+            max_queue_count: {type: integer, format: int64, minimum: 0}
+            max_queue_total_cents: {type: integer, format: int64, minimum: 0}
+            allowed_tenders:
+              type: array
+              items: {$ref: "#/components/schemas/PosOfflineTender"}
+            require_id_for_tenders:
+              type: array
+              items: {type: string}
+            cash_rounding_mode: {type: string, enum: [OFF, NEAREST_5_CENTS]}
+        tax:
+          type: object
+          required: [branch_rate, provider_configured]
+          properties:
+            branch_rate: {type: string, description: "The branch's rate as a decimal string."}
+            provider_configured: {type: boolean}
+        walk_in_customer:
+          type: object
+          required: [id, currency]
+          properties:
+            id: {type: string, format: uuid}
+            currency: {type: string}
+        price_sheet:
+          type: array
+          items:
+            type: object
+            required: [product_id, price_key, price_uom, uom_qty, price_uom_qty, unit_price_ten_thousandths, price_source, price_basis]
+            properties:
+              product_id: {type: string, format: uuid}
+              price_key: {type: string, description: "walkin, customer:<id> or level:<id>."}
+              price_uom: {type: string, description: "The unit the engine answered in."}
+              uom_qty: {type: string, description: "The exact pair the product's sale unit takes to price_uom, its sale side."}
+              price_uom_qty: {type: string, description: "The pair's price side."}
+              unit_price_ten_thousandths: {type: integer, format: int64}
+              price_source: {type: string, description: "The rung that won, lowercase."}
+              price_basis: {type: [string, "null"]}
+        products:
+          type: array
+          items:
+            type: object
+            required: [id, sku, description, taxable, is_kit, random_length, board_thickness_in, board_width_in, stock_uom,
+              sale_uom, price_uom, unit_set, barcode, category, in_stock]
+            properties:
+              id: {type: string, format: uuid}
+              sku: {type: string}
+              description: {type: string}
+              taxable: {type: boolean}
+              is_kit: {type: boolean}
+              random_length: {type: boolean}
+              board_thickness_in: {type: [string, "null"]}
+              board_width_in: {type: [string, "null"]}
+              stock_uom: {type: string}
+              sale_uom: {type: string}
+              price_uom: {type: string}
+              unit_set:
+                type: array
+                items:
+                  type: object
+                  required: [uom, unit_qty, stock_qty, sell, price]
+                  properties:
+                    uom: {type: string}
+                    unit_qty: {type: string}
+                    stock_qty: {type: string}
+                    sell: {type: boolean}
+                    price: {type: boolean}
+              barcode: {type: [string, "null"]}
+              category: {type: string}
+              in_stock: {type: string, description: "On hand less allocated at the register's branch, in the stocking unit."}
+        accounts:
+          type: array
+          items:
+            type: object
+            required: [customer_id, account_number, name, currency, tax_exempt, po_required, buyer_roster_required, credit_hold,
+              credit_limit_cents, open_receivable_cents, offline_room_cents, check_limit_cents, price_key, level_key, buyers, jobs]
+            properties:
+              customer_id: {type: string, format: uuid}
+              account_number: {type: string}
+              name: {type: string}
+              currency: {type: string}
+              tax_exempt: {type: boolean}
+              po_required: {type: boolean}
+              buyer_roster_required: {type: boolean}
+              credit_hold: {type: boolean}
+              credit_limit_cents: {type: integer, format: int64, description: "The limit; for an account with none, its open receivable plus the account cap, so the limit less the open receivable is the cap."}
+              open_receivable_cents: {type: integer, format: int64}
+              offline_room_cents: {type: integer, format: int64, minimum: 0, description: "The room at issue: the least of the credit room and the account cap, less this register's open account exceptions on the account."}
+              check_limit_cents: {type: [integer, "null"], format: int64}
+              price_key: {type: string}
+              level_key: {type: [string, "null"]}
+              buyers:
+                type: array
+                items:
+                  type: object
+                  required: [contact_id, name, per_purchase_cap_cents]
+                  properties:
+                    contact_id: {type: string, format: uuid}
+                    name: {type: string}
+                    per_purchase_cap_cents: {type: [integer, "null"], format: int64}
+              jobs:
+                type: array
+                items:
+                  type: object
+                  required: [id, code, name]
+                  properties:
+                    id: {type: string, format: uuid}
+                    code: {type: string}
+                    name: {type: string}
     PosSettings:
       type: object
       required: [revision, rules]
@@ -4085,7 +4475,7 @@ components:
         revision: {type: integer, format: int64, minimum: 1, description: "The settings resource's revision; a write names it (If-Match and/or the body's revision)."}
         rules:
           type: object
-          required: [check_limit_cents, check_id_required, restocking_fees, restocking_fee_defaults, tint_charge, tinted_no_return]
+          required: [check_limit_cents, check_id_required, restocking_fees, restocking_fee_defaults, tint_charge, tinted_no_return, card_surcharge]
           properties:
             check_limit_cents: {type: [integer, "null"], format: int64, minimum: 0, description: "The database wide check limit; null is no limit. A customer's own limit wins over it."}
             check_id_required:
@@ -4109,6 +4499,19 @@ components:
             tinted_no_return:
               type: boolean
               description: "The dealer's tinted no return policy: a tinted can is not taken back. Off unless the dealer says so, because the rule is a dealer policy and not a law."
+            card_surcharge:
+              oneOf:
+                - $ref: '#/components/schemas/PosCardSurcharge'
+                - type: "null"
+              description: "The card fee rule of the branch the caller works in (CP-15), or of the default branch in a single branch deployment; null when no branch is known. Off by default."
+    PosCardSurcharge:
+      type: object
+      description: "One branch's card fee rule (CP-15). It records the dealer's intent and the disclosure the clerk and customer see; the processor's enrolment decides the charge, and its answer's figure is what books."
+      required: [branch_id, enabled, rate_bps]
+      properties:
+        branch_id: {type: string, format: uuid}
+        enabled: {type: boolean, description: "Off by default."}
+        rate_bps: {type: integer, minimum: 0, maximum: 300, description: "The rate shown, in basis points (300 is 3 percent)."}
     PosSettingsRequest:
       type: object
       required: [rules]
@@ -4134,6 +4537,13 @@ components:
             tinted_no_return:
               type: boolean
               description: "The dealer's tinted no return policy. Absent is off (the rule is a dealer policy and not a law)." 
+            card_surcharge:
+              type: object
+              description: "The card fee rule of the branch the caller works in (CP-15). Absent leaves it as it is. A rate above 300 basis points (the card brands' 3 percent cap) is a 400 naming the field; a write with no branch known is a 409 branch_required."
+              required: [enabled, rate_bps]
+              properties:
+                enabled: {type: boolean}
+                rate_bps: {type: integer, minimum: 0, maximum: 300}
         revision: {type: integer, format: int64, minimum: 1, description: "The revision this write rides; If-Match serves the same role."}
     PosEndOfDayCloseRequest:
       type: object

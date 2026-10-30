@@ -81,6 +81,8 @@ type Repository interface {
 
 	// Tenders
 	AddTender(ctx context.Context, t *Tender) error
+	// CardFeeRefundedCents is the surcharge the tender's refund claims returned or hold.
+	CardFeeRefundedCents(ctx context.Context, saleID, tenderID uuid.UUID) (int64, error)
 	GetTenders(ctx context.Context, saleID uuid.UUID) ([]Tender, error)
 
 	// Returns
@@ -324,6 +326,10 @@ type Repository interface {
 	// BranchCashRoundingMode reads the branch's cash rounding rule (CP-18).
 	// A branch that has never set it rounds nothing.
 	BranchCashRoundingMode(ctx context.Context, branchID uuid.UUID) (RoundingMode, error)
+	// BranchCardSurcharge reads the branch's card fee rule (CP-15); off at zero when never set.
+	BranchCardSurcharge(ctx context.Context, branchID uuid.UUID) (CardSurcharge, error)
+	writeBranchCardSurcharge(ctx context.Context, cs CardSurcharge) error
+	settingsBranch(ctx context.Context) (*uuid.UUID, error)
 
 	// Offline sync (ADR 0011, slice O3)
 	LogSyncBatch(ctx context.Context, batch LogBatch) error
@@ -351,6 +357,26 @@ type Repository interface {
 	OfflineSessionFacts(ctx context.Context, id uuid.UUID) (*offlineSessionFacts, error)
 	BranchDayClosedOn(ctx context.Context, branch uuid.UUID, date time.Time) (bool, error)
 	OfflineAccountUsedSince(ctx context.Context, register string, customer uuid.UUID, since time.Time, sale uuid.UUID) (int64, error)
+
+	// Device enrolment and the snapshot (ADR 0011, slice O2)
+	LockRegisterForEnrolment(ctx context.Context, register string) (bool, error)
+	RegisterDevices(ctx context.Context, register string) (active, previous *RegisterDevice, maxEpoch int64, err error)
+	PublicKeyEnrolled(ctx context.Context, key string) (bool, error)
+	RevokeRegisterDevice(ctx context.Context, register string, epoch int64, by, reason string) (*RegisterDevice, error)
+	InsertRegisterDevice(ctx context.Context, register string, branch uuid.UUID, epoch int64, key, by string) (*RegisterDevice, error)
+	RecordedMark(ctx context.Context, register string, epoch int64) (int64, error)
+	OpenBadCopy(ctx context.Context, register string, epoch int64) (*int64, error)
+	RegisterOpenSession(ctx context.Context, register string) (*offlineOpenSession, error)
+	UnknownTailRecorded(ctx context.Context, register string, epoch int64) (bool, error)
+	InsertUnknownTail(ctx context.Context, register string, branch uuid.UUID, epoch, from, to int64,
+		session *uuid.UUID, businessDate time.Time, message string) (uuid.UUID, error)
+	SnapshotProducts(ctx context.Context, branch uuid.UUID) ([]snapshotProductRow, error)
+	SnapshotAccounts(ctx context.Context, branch, walkIn uuid.UUID) ([]snapshotAccountRow, error)
+	SnapshotJobs(ctx context.Context, customerID uuid.UUID) ([]snapshotJob, error)
+	OpenAccountExceptionCents(ctx context.Context, register string, customerID uuid.UUID) (int64, error)
+	LatestOfflineSnapshot(ctx context.Context, register string, epoch int64) (*IssuedSnapshot, error)
+	InsertOfflineSnapshot(ctx context.Context, id uuid.UUID, register string, branch uuid.UUID, epoch int64,
+		businessDate time.Time, content []byte, digest string) error
 
 	// The manager step up (CP-04 slice 3)
 	FindStepUpManager(ctx context.Context, manager string) (*StepUpManager, bool, error)
@@ -1122,12 +1148,12 @@ func (r *PostgresRepository) AddTender(ctx context.Context, t *Tender) error {
 	var created time.Time
 	err := r.ex(ctx).QueryRow(ctx, `
 		INSERT INTO pos_tenders (id, transaction_id, method, amount, payment_id, reference, card_last4, card_brand,
-			gateway_tx_id, auth_code, id_checked, id_type, created_at)
+			gateway_tx_id, auth_code, id_checked, id_type, surcharge_cents, created_at)
 		VALUES ($1, $2, $3, $4::numeric / 100, $5, NULLIF($6, ''), NULLIF($7, ''), NULLIF($8, ''), NULLIF($9, ''), NULLIF($10, ''),
-			$11, $12, NOW())
+			$11, $12, $13, NOW())
 		RETURNING created_at`,
 		t.ID, t.SaleID, string(t.Method), int64(t.AmountCents), t.PaymentID, t.Reference, t.CardLast4, t.CardBrand,
-		t.GatewayTxID, t.AuthCode, t.IDChecked, t.IDType).Scan(&created)
+		t.GatewayTxID, t.AuthCode, t.IDChecked, t.IDType, int64(t.SurchargeCents)).Scan(&created)
 	t.CreatedAt = httpx.TimestampOf(created)
 	if err != nil {
 		return fmt.Errorf("failed to record the tender: %w", mapWriteError(err))
@@ -1138,7 +1164,7 @@ func (r *PostgresRepository) AddTender(ctx context.Context, t *Tender) error {
 func (r *PostgresRepository) GetTenders(ctx context.Context, saleID uuid.UUID) ([]Tender, error) {
 	rows, err := r.ex(ctx).Query(ctx, `
 		SELECT id, method, ROUND(amount * 100)::bigint, payment_id, reference, card_last4, card_brand, gateway_tx_id,
-			auth_code, id_checked, id_type, created_at
+			auth_code, id_checked, id_type, surcharge_cents, created_at
 		FROM pos_tenders WHERE transaction_id = $1 ORDER BY created_at, method, id`, saleID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read the tenders: %w", err)
@@ -1150,7 +1176,7 @@ func (r *PostgresRepository) GetTenders(ctx context.Context, saleID uuid.UUID) (
 		var method string
 		var createdAt time.Time
 		if err := rows.Scan(&t.ID, &method, &t.AmountCents, &t.PaymentID, &t.Reference, &t.CardLast4, &t.CardBrand,
-			&t.GatewayTxID, &t.AuthCode, &t.IDChecked, &t.IDType, &createdAt); err != nil {
+			&t.GatewayTxID, &t.AuthCode, &t.IDChecked, &t.IDType, &t.SurchargeCents, &createdAt); err != nil {
 			return nil, err
 		}
 		t.Method = TenderMethod(method)
@@ -1399,6 +1425,10 @@ type RefundIntent struct {
 	TenderID    uuid.UUID
 	GatewayTxID string
 	AmountCents int64
+	// FeeCents is the card surcharge this refund returns with the goods
+	// (CP-15): the terminal is asked for AmountCents plus FeeCents, and the
+	// books take the fee back out of the surcharge income account.
+	FeeCents int64
 	// Act names the act behind the refund ("void" or "return").
 	Act string
 	// Request is the stored return request of a return claim, nil on a void.
@@ -1417,10 +1447,10 @@ func (r *PostgresRepository) InsertRefundIntent(ctx context.Context, intent Refu
 		intent.ID = uuid.New()
 	}
 	_, err := r.ex(ctx).Exec(ctx, `
-		INSERT INTO pos_refund_intents (id, sale_id, tender_id, gateway_tx_id, amount, act, state, request, answer_due_at, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5::numeric / 100, $6, 'PENDING', $7, NOW() + make_interval(secs => $8), NOW(), NOW())`,
+		INSERT INTO pos_refund_intents (id, sale_id, tender_id, gateway_tx_id, amount, act, state, request, answer_due_at, fee_cents, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5::numeric / 100, $6, 'PENDING', $7, NOW() + make_interval(secs => $8), $9, NOW(), NOW())`,
 		intent.ID, intent.SaleID, intent.TenderID, intent.GatewayTxID, intent.AmountCents, intent.Act, intent.Request,
-		int64(refundAnswerLease.Seconds()))
+		int64(refundAnswerLease.Seconds()), intent.FeeCents)
 	if err != nil {
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
@@ -1574,10 +1604,10 @@ func (r *PostgresRepository) GetRefundIntent(ctx context.Context, id uuid.UUID) 
 	var request []byte
 	err := r.ex(ctx).QueryRow(ctx, `
 		SELECT id, sale_id, tender_id, gateway_tx_id, ROUND(amount * 100)::bigint, act, state,
-			COALESCE(refund_tx_id, ''), answer_due_at, answered_at, answer_state, request, created_at, updated_at
+			COALESCE(refund_tx_id, ''), answer_due_at, answered_at, answer_state, request, created_at, updated_at, fee_cents
 		FROM pos_refund_intents WHERE id = $1`, id).
 		Scan(&rec.ID, &rec.SaleID, &rec.TenderID, &rec.GatewayTxID, &rec.AmountCents, &rec.Act, &rec.State,
-			&rec.RefundTxID, &rec.AnswerDueAt, &rec.AnsweredAt, &rec.AnswerState, &request, &rec.CreatedAt, &rec.ResolvedAt)
+			&rec.RefundTxID, &rec.AnswerDueAt, &rec.AnsweredAt, &rec.AnswerState, &request, &rec.CreatedAt, &rec.ResolvedAt, &rec.FeeCents)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, httpx.NotFound("refund claim not found")
 	}
@@ -2704,4 +2734,18 @@ func tintCentsOrZero(c *httpx.Cents) int64 {
 		return 0
 	}
 	return int64(*c)
+}
+
+// CardFeeRefundedCents sums the surcharge the tender's refund claims have
+// returned or hold (CP-15): the pending and the done ones, never a failed
+// claim. A refund's fee is the tender's fee in proportion, so this is what the
+// next refund subtracts to find what is left.
+func (r *PostgresRepository) CardFeeRefundedCents(ctx context.Context, saleID, tenderID uuid.UUID) (int64, error) {
+	var n int64
+	if err := r.ex(ctx).QueryRow(ctx, `
+		SELECT COALESCE(SUM(fee_cents), 0)::bigint FROM pos_refund_intents
+		WHERE sale_id = $1 AND tender_id = $2 AND state IN ('PENDING', 'DONE')`, saleID, tenderID).Scan(&n); err != nil {
+		return 0, fmt.Errorf("failed to read the refunded card fees: %w", err)
+	}
+	return n, nil
 }

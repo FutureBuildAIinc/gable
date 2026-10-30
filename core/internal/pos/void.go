@@ -101,7 +101,7 @@ func (s *Service) VoidSale(ctx context.Context, saleID uuid.UUID, ifMatch string
 			continue
 		}
 		intents = append(intents, RefundIntent{ID: uuid.New(), SaleID: saleID, TenderID: t.ID, GatewayTxID: *t.GatewayTxID,
-			AmountCents: int64(t.AmountCents), Act: "void"})
+			AmountCents: int64(t.AmountCents), FeeCents: int64(t.SurchargeCents), Act: "void"})
 	}
 	if len(intents) > 0 && s.gateway == nil {
 		return nil, conflict("card_terminal", "this register has no card terminal gateway to refund the card tender")
@@ -191,9 +191,9 @@ func (s *Service) VoidSale(ctx context.Context, saleID uuid.UUID, ifMatch string
 		// beside the refund claim's own, dispatched before the call, the
 		// verdict applied after; the call itself carries the intent's
 		// idempotency key, so a retry is the same leg at the device.
-		termLeg := s.terminalRefundLeg(ctx, intents[i].SaleID, intents[i].ID, payment.TerminalKindVoid, intents[i].AmountCents, "")
+		termLeg := s.terminalRefundLeg(ctx, intents[i].SaleID, intents[i].ID, payment.TerminalKindVoid, intents[i].AmountCents+intents[i].FeeCents, "")
 		callCtx, cancel := context.WithTimeout(ctx, refundCallTimeout)
-		res, err := payment.RefundUnderKey(callCtx, s.gateway, intents[i].GatewayTxID, intents[i].AmountCents, terminalRefundKey(termLeg))
+		res, err := payment.RefundUnderKey(callCtx, s.gateway, intents[i].GatewayTxID, intents[i].AmountCents+intents[i].FeeCents, terminalRefundKey(termLeg))
 		cancel()
 		refundErr := err
 		verdict := refundAccepted
@@ -246,7 +246,7 @@ func (s *Service) VoidSale(ctx context.Context, saleID uuid.UUID, ifMatch string
 				"intent_id", intents[i].ID, "sale_id", saleID, "error", err)
 		}
 		refunds = append(refunds, gatewayRefund{gatewayTxID: intents[i].GatewayTxID, refundTxID: res.TransactionID,
-			amountCents: intents[i].AmountCents, tenderID: intents[i].TenderID, act: "void", entity: saleID, actor: actor})
+			amountCents: intents[i].AmountCents + intents[i].FeeCents, tenderID: intents[i].TenderID, act: "void", entity: saleID, actor: actor})
 	}
 	out, err := s.runVoidTx(ctx, saleID, ifMatch, bodyRevision, reason, actor, refunds, nil)
 	if err != nil {
@@ -377,6 +377,12 @@ func (s *Service) runVoidTx(ctx context.Context, saleID uuid.UUID, ifMatch strin
 					return err
 				}
 				mergeEffects(&fxAll, rfx)
+				// the processor returned the fee with the card refund
+				// (CP-15): it leaves the surcharge income account too
+				if err := s.bookFeeRefund(ctx, RefundIntent{ID: uuid.New(), SaleID: saleID, FeeCents: int64(t.SurchargeCents)},
+					&sale.BranchID, actor); err != nil {
+					return err
+				}
 			}
 		}
 		// The store credit the sale paid with goes back to its credit memos

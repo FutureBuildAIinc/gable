@@ -278,10 +278,24 @@
           },
           {
             "balance": 0,
+            "code": "4070",
+            "created_at": "<ts+0d>",
+            "description": "The card fee the processor added on top of a sale: never sales revenue, never taxed",
+            "id": "<id-20>",
+            "is_active": true,
+            "name": "Card Surcharge Income",
+            "normal_balance": "CREDIT",
+            "revision": 1,
+            "subtype": "Operating",
+            "type": "REVENUE",
+            "updated_at": "<ts+0d>"
+          },
+          {
+            "balance": 0,
             "code": "4090",
             "created_at": "<ts+0d>",
             "description": "Cash received at the counter outside a sale",
-            "id": "<id-20>",
+            "id": "<id-21>",
             "is_active": true,
             "name": "Other Income",
             "normal_balance": "CREDIT",
@@ -295,7 +309,7 @@
             "code": "4095",
             "created_at": "<ts+0d>",
             "description": "Cash rounded up at the counter: the difference between the rounded cash and the exact total",
-            "id": "<id-21>",
+            "id": "<id-22>",
             "is_active": true,
             "name": "Cash Rounding Income",
             "normal_balance": "CREDIT",
@@ -309,7 +323,7 @@
             "code": "5010",
             "created_at": "<ts+0d>",
             "description": "Direct cost of materials sold",
-            "id": "<id-22>",
+            "id": "<id-23>",
             "is_active": true,
             "name": "Cost of Goods Sold",
             "normal_balance": "DEBIT",
@@ -323,7 +337,7 @@
             "code": "5020",
             "created_at": "<ts+0d>",
             "description": "Rent, utilities, wages, and general overhead",
-            "id": "<id-23>",
+            "id": "<id-24>",
             "is_active": true,
             "name": "Operating Expenses",
             "normal_balance": "DEBIT",
@@ -337,7 +351,7 @@
             "code": "5030",
             "created_at": "<ts+0d>",
             "description": "Till drawer counting variances (short = expense, over = credit)",
-            "id": "<id-24>",
+            "id": "<id-25>",
             "is_active": true,
             "name": "Cash Over/Short",
             "normal_balance": "DEBIT",
@@ -351,7 +365,7 @@
             "code": "5040",
             "created_at": "<ts+0d>",
             "description": "Receivables written off as uncollectable",
-            "id": "<id-25>",
+            "id": "<id-26>",
             "is_active": true,
             "name": "Bad Debt Expense",
             "normal_balance": "DEBIT",
@@ -365,7 +379,7 @@
             "code": "5045",
             "created_at": "<ts+0d>",
             "description": "Cash rounded down at the counter: the difference between the rounded cash and the exact total",
-            "id": "<id-26>",
+            "id": "<id-27>",
             "is_active": true,
             "name": "Cash Rounding Loss",
             "normal_balance": "DEBIT",
@@ -386,7 +400,7 @@
       "method": "POST",
       "path": "/api/v1/gl/journal-entries",
       "body": {
-        "branch_id": "<id-27>",
+        "branch_id": "<id-28>",
         "entry_date": "<day+0>",
         "lines": [
           {
@@ -409,29 +423,29 @@
       "status": 201,
       "content_type": "application/json",
       "body": {
-        "branch_id": "<id-27>",
+        "branch_id": "<id-28>",
         "created_at": "<ts+0d>",
         "entry_date": "<ts+0d>",
         "entry_number": 128,
-        "id": "<id-28>",
+        "id": "<id-29>",
         "lines": [
           {
             "account_id": "<id-1>",
-            "branch_id": "<id-29>",
+            "branch_id": "<id-30>",
             "credit": 0,
             "debit": 10000,
             "description": "golden debit",
-            "id": "<id-30>",
-            "journal_entry_id": "<id-28>"
+            "id": "<id-31>",
+            "journal_entry_id": "<id-29>"
           },
           {
             "account_id": "<id-15>",
-            "branch_id": "<id-29>",
+            "branch_id": "<id-30>",
             "credit": 10000,
             "debit": 0,
             "description": "golden credit",
-            "id": "<id-31>",
-            "journal_entry_id": "<id-28>"
+            "id": "<id-32>",
+            "journal_entry_id": "<id-29>"
           }
         ],
         "memo": "golden characterisation entry",
@@ -448,7 +462,7 @@
     "name": "gl.journal_entry.post",
     "request": {
       "method": "POST",
-      "path": "/api/v1/gl/journal-entries/<id-28>/post"
+      "path": "/api/v1/gl/journal-entries/<id-29>/post"
     },
     "response": {
       "status": 200,
@@ -464,7 +478,7 @@
       "method": "POST",
       "path": "/api/v1/gl/journal-entries",
       "body": {
-        "branch_id": "<id-27>",
+        "branch_id": "<id-28>",
         "entry_date": "<day+0>",
         "lines": [
           {
@@ -486,7 +500,7 @@
           "message": "Bad Request"
         },
         "meta": {
-          "request_id": "<id-32>"
+          "request_id": "<id-33>"
         }
       }
     }
