@@ -319,7 +319,7 @@ func (s *Service) ResolveOfflineException(ctx context.Context, id uuid.UUID, in 
 	if reoffer {
 		// the accepted gap restarts the chain: the held item at the mark
 		// plus one is re-offered now, in its own transaction (ADR 0011 3.4)
-		if _, err := s.reofferHeld(ctx, "resolve:"+id.String(), head.RegisterID, head.DeviceEpoch, actor); err != nil {
+		if _, _, err := s.reofferHeld(ctx, "resolve:"+id.String(), head.RegisterID, head.DeviceEpoch, actor); err != nil {
 			return nil, err
 		}
 	}
