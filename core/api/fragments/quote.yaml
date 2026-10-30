@@ -17,9 +17,15 @@ paths:
       description: >-
         The cursor list envelope, newest first. status filters on the
         lowercase lifecycle vocabulary (a comma separated list), customer_id
-        filters on the customer. total appears only under include=total. A
-        parameter the route does not declare, a status outside the vocabulary,
-        a malformed cursor or an out of range limit is a 400.
+        filters on the customer, follow_up narrows the page to the follow up
+        queue: due (a follow up date today in the quote's branch's calendar
+        or earlier, open quotes only), overdue (before today, open quotes
+        only) or mine (the follow ups owned by the salesperson the sign in's
+        email resolves to; a caller with no sign in, or one no salesperson
+        row carries, owns none and the page is empty). total appears only
+        under include=total. A parameter the route does not declare, a status
+        or a follow_up outside the vocabularies, a malformed cursor or an out
+        of range limit is a 400.
       parameters:
         - name: status
           in: query
@@ -33,6 +39,13 @@ paths:
           schema:
             type: string
             format: uuid
+        - name: follow_up
+          in: query
+          required: false
+          description: The follow up queue (due, overdue or mine).
+          schema:
+            type: string
+            enum: [due, overdue, mine]
         - $ref: "#/components/parameters/PageLimit"
         - $ref: "#/components/parameters/Cursor"
         - $ref: "#/components/parameters/Include"
@@ -707,7 +720,7 @@ components:
     QuoteSummary:
       type: object
       description: A quote header, used as a list item and as the head of the full document.
-      required: [id, number, branch_id, customer_id, customer_name, job_id, status, revision, total_cents, freight_cents, margin_total_cents, delivery_type, vehicle_id, vehicle_name, source, expires_at, sent_at, accepted_at, rejected_at, created_at, updated_at]
+      required: [id, number, branch_id, customer_id, customer_name, job_id, status, revision, total_cents, freight_cents, margin_total_cents, delivery_type, vehicle_id, vehicle_name, source, follow_up_at, follow_up_owner_id, follow_up_owner_name, expires_at, sent_at, accepted_at, rejected_at, created_at, updated_at]
       properties:
         id:
           type: string
@@ -754,6 +767,17 @@ components:
           type: string
           description: How the quote came to be; portal is a quote the dealer portal customer requested.
           enum: [manual, ai, portal]
+        follow_up_at:
+          type: [string, "null"]
+          format: date-time
+          description: When a salesperson promised to chase the quote; null when no follow up stands.
+        follow_up_owner_id:
+          type: [string, "null"]
+          format: uuid
+          description: The salesperson who owns the chase.
+        follow_up_owner_name:
+          type: [string, "null"]
+          description: The owner's name, joined for display as customer_name is.
         expires_at:
           type: [string, "null"]
           format: date-time
@@ -774,7 +798,7 @@ components:
           format: date-time
     Quote:
       type: object
-      required: [id, number, branch_id, customer_id, customer_name, job_id, status, revision, total_cents, freight_cents, margin_total_cents, delivery_type, vehicle_id, vehicle_name, source, expires_at, sent_at, accepted_at, rejected_at, created_at, updated_at, original_filename, original_content_type, parse_map, exposure_state, exposure_cents, exposure_last_checked_at, lines]
+      required: [id, number, branch_id, customer_id, customer_name, job_id, status, revision, total_cents, freight_cents, margin_total_cents, delivery_type, vehicle_id, vehicle_name, source, follow_up_at, follow_up_owner_id, follow_up_owner_name, expires_at, sent_at, accepted_at, rejected_at, created_at, updated_at, original_filename, original_content_type, parse_map, exposure_state, exposure_cents, exposure_last_checked_at, lines]
       properties:
         id:
           type: string
@@ -821,6 +845,17 @@ components:
           type: string
           description: How the quote came to be; portal is a quote the dealer portal customer requested.
           enum: [manual, ai, portal]
+        follow_up_at:
+          type: [string, "null"]
+          format: date-time
+          description: When a salesperson promised to chase the quote; null when no follow up stands.
+        follow_up_owner_id:
+          type: [string, "null"]
+          format: uuid
+          description: The salesperson who owns the chase.
+        follow_up_owner_name:
+          type: [string, "null"]
+          description: The owner's name, joined for display as customer_name is.
         expires_at:
           type: [string, "null"]
           format: date-time
