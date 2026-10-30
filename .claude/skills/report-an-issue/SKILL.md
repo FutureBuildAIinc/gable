@@ -176,7 +176,7 @@ If they are on a laptop with the repo, reproduce it locally so the report is gro
 make db                                    # Postgres on :5434
 make migrate
 DEMO_SEED=1 make seed                      # demo dataset (gate is required)
-cd core && go run ./cmd/server          # API on :8080
+cd core && AUTH_MODE=dev go run -tags devauth ./cmd/server   # API on :8080
 cd web/apps/desk && npm install && npm run dev       # SPA on :5173
 ```
 
