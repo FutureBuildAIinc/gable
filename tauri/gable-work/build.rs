@@ -6,7 +6,7 @@ use tauri_build::{AppManifest, Attributes};
 // Every command the webview may call is declared here, so Tauri applies an
 // ACL to it and the capability must allow it by name. An undeclared app
 // command would be open to every window. Work declares the two token
-// commands, the two sign in commands and the offline counter's commands and
+// commands, the three sign in commands and the offline counter's commands and
 // nothing else (the webview never reaches the custody slot itself): no
 // keychain command, no filesystem, no shell.
 //
@@ -20,6 +20,7 @@ const COMMANDS: &[&str] = &[
     "clear_tokens",
     "begin_sign_in",
     "refresh_tokens",
+    "sign_in_with_password",
     "offline_enrolment_status",
     "load_offline_snapshot",
     "sign_and_queue_offline_sale",

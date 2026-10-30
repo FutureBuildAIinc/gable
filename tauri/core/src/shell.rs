@@ -13,6 +13,7 @@
 use std::sync::Arc;
 
 use url::Url;
+use zeroize::Zeroizing;
 
 use crate::custody::{self, Address, Custody, CustodyError, OfflineSlot};
 use crate::fence::{BadOrigin, OriginFence};
@@ -23,16 +24,17 @@ use crate::tokens::{TokenSet, TokenStore};
 
 /// The permissions granted by the work shell's runtime capability to the
 /// configured Gable URL and `/pos` on the `main` window (ADR 0011 section 5.2):
-/// the two token commands, the two sign in commands that write and rotate the
+/// the two token commands, the three sign in commands that write and rotate the
 /// keychain token, and the seven offline counter commands, and nothing else.
 /// No page enrols the register, supplies the snapshot or writes the sync
 /// outcomes: the core takes each from the server itself (O2, C2), and the
 /// page only asks it to refresh, to price a cart or to sync.
-pub const WORK_REMOTE_PERMISSIONS: [&str; 11] = [
+pub const WORK_REMOTE_PERMISSIONS: [&str; 12] = [
     "allow-core-token",
     "allow-clear-tokens",
     "allow-begin-sign-in",
     "allow-refresh-tokens",
+    "allow-sign-in-with-password",
     "allow-offline-enrolment-status",
     "allow-load-offline-snapshot",
     "allow-sign-and-queue-offline-sale",
@@ -267,6 +269,29 @@ pub fn begin_sign_in_answer(
             open,
             timeout,
         )
+        .map_err(sign_in_code)
+}
+
+/// Signs the register in by email and password for the app's own origin:
+/// the core's shell door answers the pair and it goes to the keychain. The
+/// answer is nothing at all: no token crosses back to the page, which reads
+/// the access token through `core_token` as before. The password is dropped
+/// (and wiped) when the call ends, whatever it answers.
+pub fn sign_in_with_password_answer(
+    state: &TokenState,
+    caller_url: &str,
+    email: &str,
+    password: Zeroizing<String>,
+) -> Result<(), String> {
+    if !state.fence.allows(caller_url) {
+        return Err(ERR_ORIGIN.to_string());
+    }
+    let client = state
+        .client
+        .as_ref()
+        .ok_or_else(|| ERR_NO_SERVER.to_string())?;
+    client
+        .sign_in_password(&state.store, state.profile.identifier, email, password)
         .map_err(sign_in_code)
 }
 
@@ -577,6 +602,87 @@ mod tests {
             ),
             Err("bad_method".to_string())
         );
+    }
+
+    const PASSWORD: &str = "pw-sentinel-Kx9";
+
+    fn password() -> zeroize::Zeroizing<String> {
+        zeroize::Zeroizing::new(PASSWORD.to_string())
+    }
+
+    #[test]
+    fn the_password_command_answers_only_the_apps_own_origin() {
+        let transport = Scripted::new(vec![pair_answer("gst_x", "fam.x")]);
+        let (state, custody) = state_with_server(transport.clone());
+        for refused in [
+            "https://evil.example/",
+            "http://gable.example/work",
+            "https://gable.example:8443/work",
+            "not a url",
+        ] {
+            assert_eq!(
+                sign_in_with_password_answer(&state, refused, "a@b.example", password()),
+                Err(ERR_ORIGIN.to_string()),
+                "{refused}"
+            );
+        }
+        assert!(
+            transport.calls.lock().unwrap().is_empty(),
+            "a foreign caller never reaches the core"
+        );
+        assert_eq!(custody.snapshot_len(), 0);
+    }
+
+    #[test]
+    fn a_password_command_with_no_server_answers_its_code() {
+        let (state, custody) = state_for(profiles::work());
+        assert_eq!(
+            sign_in_with_password_answer(&state, OWN, "a@b.example", password()),
+            Err(ERR_NO_SERVER.to_string())
+        );
+        assert_eq!(custody.snapshot_len(), 0);
+    }
+
+    #[test]
+    fn the_password_command_answers_nothing_and_the_pair_lands_in_custody() {
+        let transport = Scripted::new(vec![pair_answer("gst_pw", "fam.pw")]);
+        let (state, _) = state_with_server(transport.clone());
+        assert_eq!(
+            sign_in_with_password_answer(&state, GABLE, "a@b.example", password()),
+            Ok(())
+        );
+        let calls = transport.calls.lock().unwrap().clone();
+        assert_eq!(
+            calls,
+            vec![(
+                "https://gable.example/api/v1/auth/shell/signin".to_string(),
+                None
+            )]
+        );
+        assert_eq!(core_token_answer(&state, GABLE).unwrap(), "gst_pw");
+    }
+
+    #[test]
+    fn a_password_refusal_answers_a_fixed_code_and_leaves_custody_as_it_was() {
+        for (status, want) in [
+            (401, "sign_in_refused"),
+            (403, "sign_in_not_allowed"),
+            (429, "sign_in_limited"),
+            (503, "sign_in_unavailable"),
+        ] {
+            let transport = Scripted::new(vec![Ok(signin::HttpAnswer {
+                status,
+                body: String::new(),
+            })]);
+            let (state, custody) = state_with_server(transport);
+            state.store_tokens(&pair()).unwrap();
+            let before = custody.snapshot_pairs();
+            let err =
+                sign_in_with_password_answer(&state, GABLE, "a@b.example", password()).unwrap_err();
+            assert_eq!(err, want);
+            assert!(!err.contains("pw-sentinel"));
+            assert_eq!(custody.snapshot_pairs(), before, "{want}");
+        }
     }
 
     #[test]
