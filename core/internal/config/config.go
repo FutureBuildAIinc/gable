@@ -73,6 +73,12 @@ type Config struct {
 	AppwriteTeamID    string // APPWRITE_TEAM_ID
 	AppwriteAPIKey    string // APPWRITE_API_KEY
 
+	// Staff session limits (ADR 0012 section 2); zero keeps the staffauth default.
+	StaffSessionIdle     time.Duration // STAFF_SESSION_IDLE
+	StaffSessionAbsolute time.Duration // STAFF_SESSION_ABSOLUTE
+	StaffSessionRefresh  time.Duration // STAFF_SESSION_REFRESH, membership re-read interval
+	StaffSessionSnapshot time.Duration // STAFF_SESSION_SNAPSHOT_MAX, oldest unconfirmed snapshot served
+
 	// TrustedProxies lists the reverse proxy networks whose X-Forwarded-For
 	// is believed (TRUSTED_PROXIES, comma separated CIDRs or addresses).
 	// Empty by default: no forwarding header is trusted and the client is the
@@ -250,6 +256,11 @@ func Load() (*Config, error) {
 		AppwriteProjectID: getEnv("APPWRITE_PROJECT_ID", ""),
 		AppwriteTeamID:    getEnv("APPWRITE_TEAM_ID", ""),
 		AppwriteAPIKey:    getEnv("APPWRITE_API_KEY", ""),
+
+		StaffSessionIdle:     getEnvDuration("STAFF_SESSION_IDLE", 0),
+		StaffSessionAbsolute: getEnvDuration("STAFF_SESSION_ABSOLUTE", 0),
+		StaffSessionRefresh:  getEnvDuration("STAFF_SESSION_REFRESH", 0),
+		StaffSessionSnapshot: getEnvDuration("STAFF_SESSION_SNAPSHOT_MAX", 0),
 
 		// Logging
 		LogLevel: getEnv("LOG_LEVEL", "INFO"),

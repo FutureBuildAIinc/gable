@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gablelbm/gable/internal/appwrite"
@@ -82,6 +83,53 @@ type Service struct {
 	set   Settings
 	now   func() time.Time
 	log   *slog.Logger
+
+	floor *floorWatch
+}
+
+// VersionReader reads the Appwrite server version; *appwrite.Client does.
+type VersionReader interface {
+	Version(ctx context.Context) (string, error)
+}
+
+// floorWatch re-reads the server version at most every interval. A version
+// below the floor closes every Appwrite method; a read that fails changes
+// nothing, so the last state stands.
+type floorWatch struct {
+	mu     sync.Mutex
+	reader VersionReader
+	every  time.Duration
+	last   time.Time
+	closed bool
+}
+
+// WithFloorWatch makes the service re-check the Appwrite version while it
+// runs (ADR 0012 section 8): a deployment downgraded under the core is
+// refused rather than served.
+func (s *Service) WithFloorWatch(r VersionReader, every time.Duration) *Service {
+	s.floor = &floorWatch{reader: r, every: every}
+	return s
+}
+
+// floorClosed reports whether the last version read was below the floor.
+func (s *Service) floorClosed(ctx context.Context) bool {
+	f := s.floor
+	if f == nil {
+		return false
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if now := s.now(); f.last.IsZero() || now.Sub(f.last) >= f.every {
+		f.last = now
+		if v, err := f.reader.Version(ctx); err == nil && v != "" {
+			wasClosed := f.closed
+			f.closed = appwrite.CheckFloor(v) != nil
+			if f.closed && !wasClosed {
+				s.log.Error("Appwrite is below the 2.0.0 floor; every Appwrite method is closed", "version", v)
+			}
+		}
+	}
+	return f.closed
 }
 
 // NewService returns the session service.
@@ -144,6 +192,9 @@ func (s *Service) SignIn(ctx context.Context, email, password, clientKind string
 	}
 	if email == "" || password == "" {
 		return refuse("missing_credentials", ErrRefused)
+	}
+	if s.floorClosed(ctx) {
+		return "", Identity{}, ErrUnavailable
 	}
 	aws, err := s.dir.CreateEmailPasswordSession(ctx, email, password)
 	if err != nil {
@@ -269,10 +320,16 @@ func (s *Service) Refresh(ctx context.Context, id string) (Identity, error) {
 // roles replace the snapshot. An answer that is not definite keeps the
 // session on its snapshot until the snapshot reaches its maximum age.
 func (s *Service) refresh(ctx context.Context, row Session, now time.Time) (Session, error) {
-	user, err := s.dir.GetUser(ctx, row.AppwriteUserID)
+	var user appwrite.User
+	var err error
 	var m appwrite.Membership
 	found := false
 	definite := true
+	if s.floorClosed(ctx) {
+		err = ErrUnavailable
+	} else {
+		user, err = s.dir.GetUser(ctx, row.AppwriteUserID)
+	}
 	if err != nil {
 		var ae *appwrite.Error
 		if errors.As(err, &ae) && ae.StatusCode == http.StatusNotFound {

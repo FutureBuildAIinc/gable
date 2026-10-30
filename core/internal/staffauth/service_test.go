@@ -298,3 +298,50 @@ func TestRefreshOutageUsesSnapshotUntilMaxAge(t *testing.T) {
 		t.Fatalf("a definite read did not restore the session: %v", err)
 	}
 }
+
+type fakeVersion struct {
+	mu  sync.Mutex
+	v   string
+	err error
+}
+
+func (f *fakeVersion) Version(ctx context.Context) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.v, f.err
+}
+
+// A core that read a 2.x version and later reads a 1.x one closes every
+// Appwrite method, sign in included, and keeps it closed while the version
+// stays below the floor; an unreadable version changes nothing.
+func TestFloorDowngradeUnderTheCoreClosesSignIn(t *testing.T) {
+	dir := okDir()
+	svc, _, clk := newSvc(t, dir)
+	ver := &fakeVersion{v: "2.1.0"}
+	svc.WithFloorWatch(ver, time.Minute)
+	ctx := context.Background()
+	if _, _, err := svc.SignIn(ctx, "a@x.example", "pw", "web"); err != nil {
+		t.Fatalf("at the floor: %v", err)
+	}
+	ver.mu.Lock()
+	ver.v = "1.9.0"
+	ver.mu.Unlock()
+	clk.t = clk.t.Add(2 * time.Minute)
+	if _, _, err := svc.SignIn(ctx, "a@x.example", "pw", "web"); !errors.Is(err, ErrUnavailable) {
+		t.Fatalf("below the floor: err = %v, want ErrUnavailable", err)
+	}
+	ver.mu.Lock()
+	ver.v, ver.err = "", errors.New("unreachable")
+	ver.mu.Unlock()
+	clk.t = clk.t.Add(2 * time.Minute)
+	if _, _, err := svc.SignIn(ctx, "a@x.example", "pw", "web"); !errors.Is(err, ErrUnavailable) {
+		t.Fatal("an unreadable version reopened a closed core")
+	}
+	ver.mu.Lock()
+	ver.v, ver.err = "2.1.0", nil
+	ver.mu.Unlock()
+	clk.t = clk.t.Add(2 * time.Minute)
+	if _, _, err := svc.SignIn(ctx, "a@x.example", "pw", "web"); err != nil {
+		t.Fatalf("back at the floor: %v", err)
+	}
+}
