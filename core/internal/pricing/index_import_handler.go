@@ -57,9 +57,15 @@ func (h *IndexImportHandler) HandleImportPreview(w http.ResponseWriter, r *http.
 		httputil.RespondError(w, r, ferr.message, ferr.status, ferr.cause)
 		return
 	}
+	// A file the server cannot read is the caller's mistake; a read that
+	// fails is the server's.
+	if _, err := ParseIndexCSV(data); err != nil {
+		httputil.RespondError(w, r, err.Error(), http.StatusBadRequest, err)
+		return
+	}
 	preview, err := h.imports.Preview(r.Context(), data)
 	if err != nil {
-		httputil.RespondError(w, r, "failed to read the import file", http.StatusBadRequest, err)
+		httputil.RespondError(w, r, "failed to read the import file", http.StatusInternalServerError, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, preview)
@@ -74,9 +80,13 @@ func (h *IndexImportHandler) HandleImportApply(w http.ResponseWriter, r *http.Re
 		httputil.RespondError(w, r, ferr.message, ferr.status, ferr.cause)
 		return
 	}
+	if _, err := ParseIndexCSV(data); err != nil {
+		httputil.RespondError(w, r, err.Error(), http.StatusBadRequest, err)
+		return
+	}
 	result, err := h.imports.Apply(r.Context(), data, userIDString(r))
 	if err != nil {
-		httputil.RespondError(w, r, "failed to apply the import", http.StatusBadRequest, err)
+		httputil.RespondError(w, r, "failed to apply the import", http.StatusInternalServerError, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, result)
