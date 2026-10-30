@@ -112,4 +112,103 @@ describe('the seeded demo people', () => {
       rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  // Item 351: with --core, each person signs in, then the owner links the
+  // person to the staff row and grants the yards through the core's routes,
+  // and a second run makes no new link. A stand-in curl plays the core and
+  // keeps the links it was given in a state file.
+  describe('with the core named', () => {
+    const password = 'unit-test-password-0123456789';
+    const run = (dir: string) => {
+      const config = join(dir, 'config.json');
+      writeFileSync(
+        config,
+        JSON.stringify({ endpoint: 'http://127.0.0.1:1', projectId: 'p', teamId: 't', apiKey: 'k' }),
+      );
+      return spawnSync('bash', [SEED_SCRIPT, '--config', config, '--core', 'http://core.test'], {
+        env: { PATH: `${join(dir, 'bin')}:${process.env.PATH}`, DEMO_PEOPLE_PASSWORD: password },
+        encoding: 'utf8',
+      });
+    };
+    const setup = () => {
+      const dir = mkdtempSync(join(tmpdir(), 'seed-demo-people-'));
+      const bin = join(dir, 'bin');
+      spawnSync('mkdir', [bin]);
+      const staff = seeded.map((p) => ({ id: `staff-${p.id}`, staff_no: p.id }));
+      const yardCodes = [...new Set(seeded.flatMap((p) => p.yards))];
+      const branches = yardCodes.map((c) => ({ id: `branch-${c}`, code: c }));
+      writeFileSync(join(dir, 'staff.json'), JSON.stringify({ items: staff, next_cursor: null }));
+      writeFileSync(join(dir, 'branches.json'), JSON.stringify({ items: branches, next_cursor: null }));
+      writeFileSync(join(dir, 'links.txt'), '');
+      writeFileSync(
+        join(bin, 'curl'),
+        [
+          '#!/usr/bin/env bash',
+          `D='${dir}'`,
+          'method=GET; out=/dev/null; body=""; url=""',
+          'while [ $# -gt 0 ]; do case "$1" in -X) method="$2"; shift;; -o) out="$2"; shift;; --data-binary) body="$(cat)"; shift;; http*) url="$1";; esac; shift; done',
+          'printf "%s %s %s\\n" "$method" "$url" "$body" >> "$D/calls.log"',
+          'case "$url" in',
+          '  http://127.0.0.1:1/*) echo "{}" > "$out"; [ "$method" = PATCH ] && printf 200 || printf 201;;',
+          '  */api/v1/auth/signin) id="$(printf %s "$body" | jq -r .email | cut -d@ -f1)"; echo "{\\"sub\\":\\"sub-$id\\"}" > "$out"; printf 200;;',
+          '  */api/v1/admin/staff\\?*) cp "$D/staff.json" "$out"; printf 200;;',
+          '  */api/v1/branches\\?*) cp "$D/branches.json" "$out"; printf 200;;',
+          '  */sign-in-people)',
+          '    jq -n --rawfile l "$D/links.txt" --slurpfile s "$D/staff.json" \'($l | split("\\n") | map(select(length>0) | split(" ") | {(.[0]): .[1]}) | add // {}) as $m | {items: [$s[0].items[] | {sub: ("sub-" + .staff_no), linked_staff_id: $m["sub-" + .staff_no]}]}\' > "$out"; printf 200;;',
+          '  */sign-in-link) sid="$(printf %s "$url" | sed -E \'s#.*/staff/([^/]*)/sign-in-link#\\1#\')"; printf "%s %s\\n" "$(printf %s "$body" | jq -r .sub)" "$sid" >> "$D/links.txt"; printf 204;;',
+          '  */branches) echo "{}" > "$out"; printf 200;;',
+          '  *) echo "{}" > "$out"; printf 404;;',
+          'esac',
+          '',
+        ].join('\n'),
+      );
+      chmodSync(join(bin, 'curl'), 0o755);
+      return dir;
+    };
+    const calls = (dir: string) =>
+      readFileSync(join(dir, 'calls.log'), 'utf8')
+        .split('\n')
+        .filter((l) => l.startsWith('PUT ') || l.includes('/branches '));
+
+    it('links each person to the right staff row and grants the right yards', () => {
+      const dir = setup();
+      try {
+        const r = run(dir);
+        expect(r.status, r.stderr).toBe(0);
+        const log = readFileSync(join(dir, 'calls.log'), 'utf8');
+        for (const p of seeded) {
+          expect(log, p.id).toContain(
+            `PUT http://core.test/api/v1/admin/staff/staff-${p.id}/sign-in-link {"sub":"sub-${p.id}"}`,
+          );
+          for (const y of p.yards) {
+            const home = y === p.homeYard;
+            expect(log, `${p.id} ${y}`).toContain(
+              `POST http://core.test/api/v1/users/sub-${p.id}/branches {"branch_id":"branch-${y}","is_home":${home}}`,
+            );
+          }
+          const grants = log.split('\n').filter((l) => l.includes(`/users/sub-${p.id}/branches`));
+          expect(grants.length, p.id).toBe(p.yards.length);
+        }
+        expect(r.stdout + r.stderr).not.toContain(password);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('makes no new link on a second run', () => {
+      const dir = setup();
+      try {
+        expect(run(dir).status).toBe(0);
+        const first = calls(dir).filter((l) => l.startsWith('PUT '));
+        expect(first.length).toBe(seeded.length);
+        const second = run(dir);
+        expect(second.status, second.stderr).toBe(0);
+        const puts = calls(dir).filter((l) => l.startsWith('PUT '));
+        expect(puts.length).toBe(seeded.length);
+        expect(readFileSync(join(dir, 'links.txt'), 'utf8').trim().split('\n').length).toBe(seeded.length);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+  });
 });

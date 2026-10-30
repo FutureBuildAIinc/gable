@@ -86,8 +86,12 @@ The demo adds three more, and all are data, not authentication:
 
 The demo signs in the way a customer does, through Appwrite. Seed the demo
 people once into the Appwrite project the demo points at, with
-`scripts/appwrite/seed-demo-people.sh --config <file>` and the password in
-`DEMO_PEOPLE_PASSWORD` from the vault.
+`DEMO_PEOPLE_PASSWORD=... scripts/appwrite/seed-demo-people.sh --config <file> --core https://<the demo's address>`,
+the password coming from the vault. That one run, made after the demo's first
+start has loaded the demo data, also links each person to their staff row and
+yard grants through the core's own sign in link and branch grant routes (what
+the staff screen does), so no step is left by hand. Run again it reads what is
+linked and makes no new link.
 
 `AUTH_MODE=dev` and the persona sign in (`VITE_AUTH_DEV_MODE`) are not part of
 this recipe. They belong to the local root compose stack alone, where the core
