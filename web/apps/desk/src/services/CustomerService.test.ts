@@ -64,6 +64,7 @@ const CUSTOMER: Customer = {
   payment_terms_id: 't-1',
   payment_terms: { id: 't-1', code: 'NET30', name: 'Net 30' },
   po_required: true,
+  job_required: false,
   named_buyer_required: false,
   check_limit_cents: null,
   revision: 4,
@@ -152,7 +153,7 @@ describe('customers', () => {
     const body = lastBody()
     expect(body).toEqual({
       account_number: 'A-100', name: 'Acme Lumber', email: null, phone: '555-0100', address: null, is_active: true,
-      price_profile_id: null, salesperson_id: 's-1', credit_limit_cents: 500050, currency: null, payment_terms_id: 't-1', po_required: true,
+      price_profile_id: null, salesperson_id: 's-1', credit_limit_cents: 500050, check_limit_cents: null, currency: null, payment_terms_id: 't-1', po_required: true, job_required: false,
     })
     // Read only and create only fields never travel on a PUT.
     for (const f of ['balance_cents', 'revision', 'primary_branch_id', 'id', 'effective_currency', 'payment_terms']) {
@@ -291,7 +292,7 @@ describe('error envelope', () => {
 
   it('flags a stale revision', async () => {
     fetchMock.mockResolvedValueOnce(jsonResponse({ error: { code: 'stale_revision', message: 'changed' }, meta: { request_id: 'r' } }, 409))
-    const err = await CustomerService.updateCustomer('c-1', { account_number: 'A', name: 'N', payment_terms_id: 't-1', po_required: false }, 1).catch(e => e)
+    const err = await CustomerService.updateCustomer('c-1', { account_number: 'A', name: 'N', payment_terms_id: 't-1', po_required: false, job_required: false }, 1).catch(e => e)
     expect(err.isStaleRevision).toBe(true)
     expect(err.status).toBe(409)
   })
@@ -383,5 +384,23 @@ describe('creditLimitInputText', () => {
       const r = parseCreditLimitCents(creditLimitInputText(c))
       expect(r.ok && r.cents).toBe(c)
     }
+  })
+})
+
+describe('the customer check limit beside the credit limit', () => {
+  it('parses a check limit typed in dollars, empty meaning the counter rule', async () => {
+    const { parseCheckLimitCents } = await import('./CustomerService')
+    expect(parseCheckLimitCents('')).toEqual({ ok: true, cents: null })
+    expect(parseCheckLimitCents(' 200.50 ')).toEqual({ ok: true, cents: 20050 })
+    expect(parseCheckLimitCents('0')).toEqual({ ok: true, cents: 0 })
+    expect(parseCheckLimitCents('-5')).toEqual({ ok: false, message: 'A check limit cannot be negative' })
+  })
+
+  it('rides on the header PUT beside the credit limit', () => {
+    expect(customerRequestFromCustomer(CUSTOMER)).toMatchObject({
+      credit_limit_cents: 500050,
+      check_limit_cents: null,
+    })
+    expect(customerRequestFromCustomer({ ...CUSTOMER, check_limit_cents: 20050 })).toMatchObject({ check_limit_cents: 20050 })
   })
 })

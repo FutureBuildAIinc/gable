@@ -13,7 +13,9 @@
 //! it. The device grants are Field only: camera and fine location for proof
 //! of delivery photos and drive runs; Work and Pro hold none, and each
 //! profile's own capability file, never a shared grant, is what enforces
-//! that.
+//! that. The cashier opens both the work shell and the field shell: the
+//! yard sale is the counter made touch first, so the counter's money taker
+//! also opens the handheld, and the launcher shows both.
 //!
 //! The start app names the shell app the profile opens first. Until a
 //! shell's own bundle lands, the profile's window serves the front door
@@ -116,14 +118,16 @@ pub fn work() -> &'static Profile {
 }
 
 /// The Field profile: the yard and driving roles, phone first, and the only
-/// profile with a camera or fine location.
+/// profile with a camera or fine location. The cashier opens it too: the
+/// yard sale is the counter made touch first, so the one role that may take
+/// money opens the handheld as well as the work shell; no money class moves.
 pub fn field() -> &'static Profile {
     static FIELD: OnceLock<Profile> = OnceLock::new();
     FIELD.get_or_init(|| Profile {
         identifier: "ai.futurebuild.gable.field",
         product_name: "Gable Field",
         channel: Channel::Field,
-        roles: &["warehouse", "driver"],
+        roles: &["warehouse", "driver", "cashier"],
         start_app: "field-shell",
         window: WindowDefaults {
             title: "Gable Field",
@@ -285,9 +289,16 @@ mod tests {
     }
 
     #[test]
-    fn every_role_opens_exactly_one_profile() {
+    fn every_role_opens_exactly_one_profile_except_the_cashier() {
+        // The yard sale ruling: the cashier holds the counter's money class
+        // and also opens the handheld, so cashier is the one deliberate
+        // overlap; any other role claimed twice is a mistake.
         for a in all() {
             for role in a.roles {
+                if *role == "cashier" {
+                    assert!(field().roles.contains(role));
+                    continue;
+                }
                 assert_eq!(
                     profile_for_role(role).map(|p| p.identifier),
                     Some(a.identifier),
@@ -295,6 +306,8 @@ mod tests {
                 );
             }
         }
+        assert!(work().roles.contains(&"cashier"));
+        assert!(field().roles.contains(&"cashier"));
     }
 
     #[test]

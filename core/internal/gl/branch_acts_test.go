@@ -960,5 +960,3 @@ func TestGLDetailAndAccountBalancesRespectCurrency(t *testing.T) {
 		t.Errorf("ListAccountsPage account = %+v, want balance -10000", found)
 	}
 }
-
-

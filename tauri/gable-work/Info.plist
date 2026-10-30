@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- The platform camera permission. A tablet on the Work profile can scan
+	     at the counter: the barcode scanner asks for the camera through the
+	     webview's own web API, and the OS needs the usage description before
+	     the prompt is shown. -->
+	<key>NSCameraUsageDescription</key>
+	<string>Gable scans barcodes with the camera to find products at the counter.</string>
+</dict>
+</plist>

@@ -497,6 +497,41 @@ func exemptionBodyCustomers() func(ctx context.Context, r *http.Request) ([]uuid
 	}
 }
 
+// tintSavedColorBodyCustomer resolves the customer the saved colour create's
+// body names: its customer_id. A body that names no customer names nothing and
+// the handler answers the missing field.
+func tintSavedColorBodyCustomer() func(ctx context.Context, r *http.Request) ([]uuid.UUID, error) {
+	return func(ctx context.Context, r *http.Request) ([]uuid.UUID, error) {
+		var body struct {
+			CustomerID string `json:"customer_id"`
+		}
+		if err := middleware.DecodeOneJSONBody(r, &body); err != nil {
+			return nil, err
+		}
+		if id, err := uuid.Parse(body.CustomerID); err == nil {
+			return []uuid.UUID{id}, nil
+		}
+		return nil, nil
+	}
+}
+
+// tintSavedColorQueryCustomer resolves the customer the saved colours read
+// asks for: its customer_id. A read that names none lists what the caller may
+// see, which the repository's customer predicate decides.
+func tintSavedColorQueryCustomer() func(ctx context.Context, r *http.Request) ([]uuid.UUID, error) {
+	return func(ctx context.Context, r *http.Request) ([]uuid.UUID, error) {
+		raw := r.URL.Query().Get("customer_id")
+		if raw == "" {
+			return nil, nil
+		}
+		id, err := uuid.Parse(raw)
+		if err != nil {
+			return nil, nil // the handler answers the malformed id
+		}
+		return []uuid.UUID{id}, nil
+	}
+}
+
 // exemptionRowCustomers resolves the customer the exemption delete's row
 // belongs to (the exclusive write resolver).
 func exemptionRowCustomers(db *database.DB) func(ctx context.Context, r *http.Request) ([]uuid.UUID, error) {
@@ -586,9 +621,9 @@ func userCustomerWall(db *database.DB, resolve func(ctx context.Context, r *http
 }
 
 // taxCustomerWall composes the tax role guard with the customer branch wall:
-// the exemption create's body names the customer, the delete's row belongs
-// to one, the read's path names one, and the preview's body names one when
-// it names any. Every route runs behind the branch middleware, so a user is
+// the exemption create's body names the customer, the delete's and the end's
+// row belongs to one, the read's path names one, and the preview's body
+// names one when it names any. Every route runs behind the branch middleware, so a user is
 // held to the customer's branches whether or not a header is sent
 // (userCustomerWall) and a bound key to its pin (the key wall).
 func taxCustomerWall(wall *branchWall, db *database.DB, roles ...string) func(http.Handler) http.Handler {
@@ -606,6 +641,8 @@ func taxCustomerWall(wall *branchWall, db *database.DB, roles ...string) func(ht
 			case "POST /api/v1/tax/exemptions":
 				createHandler.ServeHTTP(w, r)
 			case "DELETE /api/v1/tax/exemptions/{id}":
+				removeHandler.ServeHTTP(w, r)
+			case "POST /api/v1/tax/exemptions/{id}/end":
 				removeHandler.ServeHTTP(w, r)
 			case "GET /api/v1/tax/exemptions/{customerID}":
 				readHandler.ServeHTTP(w, r)

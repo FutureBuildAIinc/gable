@@ -8,12 +8,17 @@ import { formatDateTime } from '../../lib/dates.ts';
 import { ToastService } from '../../lib/toast-service.ts';
 import { openAuthedPdf } from '../../lib/authedPdf.ts';
 import { confirmDialog, promptDialog } from '../../components/ui/app-dialog.ts';
+import '../../components/orders/DepositModal.ts';
+import { paymentService } from '../../services/paymentService.ts';
+import type { OrderDeposit } from '../../types/order.ts';
 import { OrderService } from '../../services/OrderService.ts';
+import { CustomerService } from '../../services/CustomerService.ts';
 import { InvoiceService } from '../../services/InvoiceService.ts';
 import { SalesTeamService } from '../../services/SalesTeamService.ts';
 import { type Order, type OrderStatus, formatOrderStatus, getStatusColor } from '../../types/order.ts';
 import type { SalesPerson } from '../../types/salesteam.ts';
-import { Check, Printer, User, DollarSign, Mail, Phone, XCircle, LockOpen } from 'lucide';
+import type { Alert } from '../../types/customer.ts';
+import { Check, Printer, User, DollarSign, Mail, Phone, XCircle, LockOpen, Wallet } from 'lucide';
 import { formatCents, formatPrice4 } from '../../lib/utils.ts';
 
 
@@ -32,6 +37,9 @@ export class GableOrderDetail extends LitElement {
     @state() private pickedUpBy = '';
     @state() private fulfilOpen = false;
     @state() private pickupError = '';
+    /** The customer's alerts that speak at the order desk, read only here. */
+    @state() private alerts: Alert[] = [];
+    @state() private depositOpen = false;
 
     connectedCallback() {
         super.connectedCallback();
@@ -49,6 +57,7 @@ export class GableOrderDetail extends LitElement {
         try {
             const data = await OrderService.getOrder(orderId);
             this.order = data;
+            void this.loadAlerts(data.customer_id);
             this.loadInvoiceNumbers(data.id, data.invoice_ids);
             if (data.salesperson_id) {
                 try {
@@ -197,6 +206,42 @@ export class GableOrderDetail extends LitElement {
         }
     }
 
+    /** A deposit goes on an order that can still be billed (CP-07). */
+    private get canTakeDeposit(): boolean {
+        return ['draft', 'on_hold', 'confirmed', 'backordered'].includes(this.order?.status ?? '');
+    }
+
+    private openDeposit() {
+        this.depositOpen = true;
+    }
+
+    /**
+     * The deposit rides the payments route with the order named and no
+     * applications, so the cash is held unapplied until the order bills.
+     * A refusal (past the balance due, a cancelled or fully invoiced order)
+     * lands in the dialog's own words.
+     */
+    private async handleDeposit(detail: { amount_cents: number; method: string; reference?: string; notes?: string }) {
+        if (!this.order) return;
+        try {
+            await paymentService.createPayment({
+                customer_id: this.order.customer_id,
+                branch_id: this.order.branch_id,
+                amount_cents: detail.amount_cents,
+                method: detail.method as 'cash' | 'check' | 'ach' | 'other',
+                order_id: this.order.id,
+                reference: detail.reference,
+                notes: detail.notes,
+            });
+            ToastService.show('Deposit taken', 'success');
+            this.depositOpen = false;
+            this.loading = true;
+            this.loadOrder(this.routeId);
+        } catch (err) {
+            ToastService.show(err instanceof Error ? err.message : 'Failed to take the deposit', 'error');
+        }
+    }
+
     private getStatusBadgeClass(status: OrderStatus): string {
         const color = getStatusColor(status);
         let bg = 'bg-white/10 text-white';
@@ -205,6 +250,25 @@ export class GableOrderDetail extends LitElement {
         if (color === 'warning') bg = 'bg-amber-500/20 text-amber-400 border-amber-500/50';
         if (color === 'error') bg = 'bg-red-500/20 text-red-400 border-red-500/50';
         return bg;
+    }
+
+    /**
+     * The customer's alerts that speak at the order desk: the order page only
+     * reads them. The office leaves and ends them on the account page.
+     */
+    private async loadAlerts(customerId: string | null) {
+        if (!customerId) {
+            this.alerts = [];
+            return;
+        }
+        try {
+            const page = await CustomerService.listAlerts(customerId, { state: 'open', limit: 200 });
+            this.alerts = page.items.filter((a) => a.show_at_orders);
+        } catch {
+            // The alerts are an addition to the order page: a failed read
+            // leaves the page as it was.
+            this.alerts = [];
+        }
     }
 
     render() {
@@ -284,6 +348,15 @@ export class GableOrderDetail extends LitElement {
                                 ${icon(XCircle, 18)} Cancel
                             </button>
                         ` : nothing}
+                        ${this.canTakeDeposit ? html`
+                            <button
+                                @click=${() => this.openDeposit()}
+                                class="bg-white/10 text-white font-bold px-4 py-2 rounded whitespace-nowrap hover:bg-white/20 transition-colors flex items-center gap-2"
+                                data-testid="take-deposit"
+                            >
+                                ${icon(Wallet, 18)} Take deposit
+                            </button>
+                        ` : nothing}
                         ${(order.status === 'confirmed' || order.status === 'backordered' || order.status === 'fulfilled') ? html`
                             <button
                                 @click=${() => this.handlePrintPickTicket(order.id)}
@@ -336,6 +409,16 @@ export class GableOrderDetail extends LitElement {
                         ${order.hold_note ? html` — ${order.hold_note}` : nothing}
                     </div>
                 ` : nothing}
+
+                <gable-deposit-modal
+                    .isOpen=${this.depositOpen}
+                    .orderId=${order.id}
+                    .customerId=${order.customer_id}
+                    .branchId=${order.branch_id}
+                    .balanceDueCents=${order.balance_due_after_deposits_cents}
+                    @save=${(e: CustomEvent) => this.handleDeposit(e.detail)}
+                    @close=${() => { this.depositOpen = false; }}
+                ></gable-deposit-modal>
 
                 <div class="grid grid-cols-3 gap-6">
                     <!-- Main Content: Lines -->
@@ -425,6 +508,21 @@ export class GableOrderDetail extends LitElement {
                             </div>
                         </div>
 
+                        <!-- Customer Alerts: read only here, left and ended on the account page -->
+                        ${this.alerts.length > 0 ? html`
+                            <div class="bg-slate-steel rounded-lg border border-amber-500/20 p-6" data-testid="order-alerts">
+                                <h3 class="font-semibold text-white mb-4">Alerts</h3>
+                                <ul class="space-y-2 text-sm">
+                                    ${this.alerts.map((a) => html`
+                                        <li class="rounded border border-white/10 bg-slate-steel/40 px-3 py-2" data-testid="order-alert">
+                                            <span class="font-semibold ${a.kind === 'warning' ? 'text-amber-400' : 'text-blue-400'}">${a.kind === 'warning' ? 'Warning:' : 'Note:'}</span>
+                                            <span class="text-white">${a.text}</span>
+                                        </li>
+                                    `)}
+                                </ul>
+                            </div>
+                        ` : nothing}
+
                         <!-- Salesperson Card -->
                         <div class="bg-slate-steel rounded-lg border border-white/10 p-6">
                             <h3 class="font-semibold text-white mb-4 flex items-center gap-2">
@@ -488,6 +586,57 @@ export class GableOrderDetail extends LitElement {
                                 </div>
                             ` : html`
                                 <p class="text-sm text-zinc-500">None yet</p>
+                            `}
+                        </div>
+
+                        <!-- Deposits -->
+                        <div class="bg-slate-steel rounded-lg border border-white/10 p-6" data-testid="order-deposits">
+                            <h3 class="font-semibold text-white mb-4 flex items-center gap-2">
+                                ${icon(Wallet, 16, 'text-gable-green')} Deposits
+                            </h3>
+                            ${(order.deposits?.length ?? 0) > 0 ? html`
+                                <div class="space-y-3 text-sm">
+                                    ${order.deposits.map((d: OrderDeposit) => html`
+                                        <div class="border-b border-white/5 pb-3 last:border-0 last:pb-0" data-testid="order-deposit-row">
+                                            <div class="flex justify-between items-baseline">
+                                                <span class="text-white font-mono">${d.number}</span>
+                                                <span class="text-gable-green font-mono font-medium">${formatCents(d.amount_cents)}</span>
+                                            </div>
+                                            <div class="text-xs text-zinc-500">
+                                                ${d.received_on} · ${d.method}${d.reference ? html` · ${d.reference}` : nothing}
+                                            </div>
+                                            ${d.applications.length > 0 ? html`
+                                                <div class="mt-1 text-xs text-zinc-400">
+                                                    ${d.applications.map(a => html`
+                                                        <div>
+                                                            Applied ${formatCents(a.amount_cents)} to
+                                                            <a href="/invoices/${a.invoice_id}" class="text-gable-green hover:underline font-mono">${this.invoiceNumbers[a.invoice_id] ?? a.invoice_id.slice(0, 8)}</a>
+                                                        </div>
+                                                    `)}
+                                                </div>
+                                            ` : nothing}
+                                            ${d.unapplied_cents > 0 ? html`
+                                                <div class="mt-1 text-xs text-blue-400">Still unapplied: <span class="font-mono">${formatCents(d.unapplied_cents)}</span></div>
+                                            ` : nothing}
+                                        </div>
+                                    `)}
+                                </div>
+                                <div class="space-y-2 text-sm mt-4 pt-3 border-t border-white/10">
+                                    <div class="flex justify-between">
+                                        <span class="text-zinc-400">Total deposited</span>
+                                        <span class="text-white font-mono font-medium" data-testid="deposit-total">${formatCents(order.deposit_total_cents)}</span>
+                                    </div>
+                                    <div class="flex justify-between">
+                                        <span class="text-zinc-400">Unapplied</span>
+                                        <span class="text-white font-mono" data-testid="deposit-unapplied">${formatCents(order.deposit_unapplied_cents)}</span>
+                                    </div>
+                                    <div class="flex justify-between">
+                                        <span class="text-zinc-400">Balance due after deposits</span>
+                                        <span class="text-white font-mono" data-testid="balance-after-deposits">${formatCents(order.balance_due_after_deposits_cents)}</span>
+                                    </div>
+                                </div>
+                            ` : html`
+                                <p class="text-sm text-zinc-500">No deposits on this order</p>
                             `}
                         </div>
                     </div>

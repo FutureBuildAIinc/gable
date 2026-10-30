@@ -11,9 +11,11 @@ import (
 	"log/slog"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gablelbm/gable/internal/platform/httpx"
+	"github.com/gablelbm/gable/internal/scale"
 	"github.com/gablelbm/gable/pkg/middleware"
 	"github.com/google/uuid"
 )
@@ -24,6 +26,9 @@ import (
 type Handler struct {
 	service *Service
 	guard   BranchGuard // optional; see WithBranchGuard
+	// scaleSim, when set, is the simulated scale (CP-19): its control route
+	// mounts only with it.
+	scaleSim *scale.Simulator
 }
 
 // NewHandler creates the counter's handler.
@@ -102,6 +107,18 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux, roleGuard ...func(http.Hand
 		}
 		return resolveGuard(handler)
 	}
+	// The variance pair's own guard: every role the claims path allowed
+	// (finance and owner, the resolve mount's) plus the counter's own, so a
+	// cashier can reach the queue and spend a manager's step up approval
+	// (CP-04 slice 3) while a signed in finance manager loses nothing.
+	signoffMount := func(handler http.HandlerFunc) http.HandlerFunc {
+		if len(roleGuard) > 2 && roleGuard[2] != nil {
+			return func(w http.ResponseWriter, r *http.Request) {
+				roleGuard[2](handler).ServeHTTP(w, r)
+			}
+		}
+		return guard(handler)
+	}
 
 	// The sale lifecycle
 	mux.HandleFunc("POST /api/v1/pos/transactions", guard(h.StartTransaction))
@@ -142,12 +159,22 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux, roleGuard ...func(http.Hand
 	mux.HandleFunc("GET /api/v1/pos/zreports", guard(h.ListZReports))
 	mux.HandleFunc("POST /api/v1/pos/till/{id}/movements", guard(h.CreateMovement))
 	mux.HandleFunc("GET /api/v1/pos/till/{id}/movements", guard(h.ListMovements))
-	// The variance sign off (CP-08): the queue, the release and the policy are
-	// the managers' (finance and owner, as the resolve route).
-	mux.HandleFunc("GET /api/v1/pos/till/signoffs", resolveMount(h.ListPendingSignoffs))
-	mux.HandleFunc("POST /api/v1/pos/till/{id}/signoff", resolveMount(h.SignOffTill))
+	// The variance sign off (CP-08): the queue and the release sit behind the
+	// variance pair's own guard (the counter's roles plus finance, the claims
+	// path's own), because a manager may step up with their counter PIN at
+	// the terminal (CP-04 slice 3); the claims path keeps the finance and
+	// owner rule in the handler itself, and the policy routes keep the
+	// resolve mount's.
+	mux.HandleFunc("GET /api/v1/pos/till/signoffs", signoffMount(h.ListPendingSignoffs))
+	mux.HandleFunc("POST /api/v1/pos/till/{id}/signoff", signoffMount(h.SignOffTill))
 	mux.HandleFunc("GET /api/v1/pos/till/policy", resolveMount(h.GetVariancePolicy))
 	mux.HandleFunc("PUT /api/v1/pos/till/policy", resolveMount(h.PutVariancePolicy))
+
+	// The manager step up (CP-04 slice 3): the roster the picker shows, and
+	// the PIN verified approval one act spends. Any person at the counter may
+	// ask; the manager's PIN is the authority.
+	mux.HandleFunc("POST /api/v1/pos/step-up", guard(h.StepUpHandler))
+	mux.HandleFunc("GET /api/v1/pos/step-up/managers", guard(h.StepUpManagersHandler))
 
 	// The end of day by branch (CP-09) is the managers' (finance and owner): the
 	// summary, the close and the deposit match.
@@ -157,9 +184,30 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux, roleGuard ...func(http.Hand
 	mux.HandleFunc("POST /api/v1/pos/end-of-day/{id}/deposit-match", resolveMount(h.MatchDeposit))
 	mux.HandleFunc("POST /api/v1/pos/end-of-day/{id}/reopen", resolveMount(h.ReopenBranchDay))
 
+	// The scale (CP-19): the reading, the weigh in and weigh out, the
+	// tickets with their void, the manual entry's closed reasons, and the
+	// manual weight on a line.
+	mux.HandleFunc("GET /api/v1/pos/scale", guard(h.GetScaleStatus))
+	mux.HandleFunc("POST /api/v1/pos/scale/weigh-in", guard(h.WeighIn))
+	mux.HandleFunc("POST /api/v1/pos/scale/weigh-out", guard(h.WeighOut))
+	mux.HandleFunc("GET /api/v1/pos/scale/tickets", guard(h.ListScaleTickets))
+	mux.HandleFunc("GET /api/v1/pos/scale/tickets/{id}", guard(h.GetScaleTicket))
+	mux.HandleFunc("POST /api/v1/pos/scale/tickets/{id}/void", guard(h.VoidScaleTicket))
+	mux.HandleFunc("GET /api/v1/pos/scale/manual-reasons", guard(h.ListManualWeightReasons))
+	mux.HandleFunc("POST /api/v1/pos/transactions/{id}/items/{itemId}/weight", guard(h.EnterLineWeight))
+	if h.scaleSim != nil {
+		mux.HandleFunc("PUT /api/v1/pos/scale/simulator", guard(h.DriveScaleSimulator))
+	}
+
 	// Returns
 	mux.HandleFunc("POST /api/v1/pos/returns", guard(h.CreateReturn))
+	mux.HandleFunc("POST /api/v1/pos/returns/preview", guard(h.PreviewReturn))
 	mux.HandleFunc("GET /api/v1/pos/return-reasons", guard(h.ListReturnReasons))
+	// The counter's dealer settings (CP-04): the read is the counter's own
+	// (the terminal asks for the ID before Pay), the write the admin and
+	// owner roles', held in the handler as the override's roles are.
+	mux.HandleFunc("GET /api/v1/pos/settings", guard(h.GetPosSettingsHandler))
+	mux.HandleFunc("PUT /api/v1/pos/settings", guard(h.PutPosSettingsHandler))
 	mux.HandleFunc("POST /api/v1/pos/exchanges", guard(h.CreateExchange))
 	mux.HandleFunc("POST /api/v1/pos/exchanges/preview", guard(h.PreviewExchange))
 	mux.HandleFunc("GET /api/v1/pos/returns", guard(h.ListReturns))
@@ -173,7 +221,9 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux, roleGuard ...func(http.Hand
 	// review P1-3): the claim's sale is read through the caller's branch
 	// context, so another branch's claim is a missing row.
 	mux.HandleFunc("POST /api/v1/pos/refund-intents/{id}/resolve", resolveMount(h.ResolveRefundIntent))
-
+	// The manager's list of the claims still waiting on a person (CP-06):
+	// the resolve routes' own mount, roles and wall.
+	mux.HandleFunc("GET /api/v1/pos/refund-intents", resolveMount(h.ListRefundIntents))
 	// The card terminal's intent routes (CP-05, IX-01): the desk's waiting
 	// state and its honest cancel behind the counter's own guard, and the
 	// sweep and the manager's lost answer queue behind the finance and owner
@@ -242,14 +292,20 @@ func refuseMachineKeyCashier(w http.ResponseWriter, r *http.Request) bool {
 }
 
 // cashierOf resolves the acting cashier from the JWT, refusing a machine
-// key.
-func cashierOf(w http.ResponseWriter, r *http.Request) (uuid.UUID, bool) {
+// key. When the caller's email matches a roster row, the roster row's id is
+// the cashier id so the counter's person rules compare like with like.
+func (h *Handler) cashierOf(w http.ResponseWriter, r *http.Request) (uuid.UUID, bool) {
 	if refuseMachineKeyCashier(w, r) {
 		return uuid.Nil, false
 	}
-	if claims := middleware.ClaimsFromContext(r.Context()); claims != nil && claims.Subject != "" {
-		if id, err := uuid.Parse(claims.Subject); err == nil {
+	if claims := middleware.ClaimsFromContext(r.Context()); claims != nil {
+		if id := h.service.StaffIDByEmail(r.Context(), claims.Email); id != uuid.Nil {
 			return id, true
+		}
+		if claims.Subject != "" {
+			if id, err := uuid.Parse(claims.Subject); err == nil {
+				return id, true
+			}
 		}
 	}
 	return uuid.Nil, true
@@ -263,7 +319,7 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 
 // StartTransaction is POST /pos/transactions.
 func (h *Handler) StartTransaction(w http.ResponseWriter, r *http.Request) {
-	cashierID, ok := cashierOf(w, r)
+	cashierID, ok := h.cashierOf(w, r)
 	if !ok {
 		return
 	}
@@ -306,6 +362,21 @@ func (h *Handler) GetTransaction(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, r, err)
 		return
 	}
+	// A completed sale carries what of each line earlier returns brought
+	// back, so the return dialog can hold a fully returned line back (CP-06).
+	if sale.Status == StatusCompleted {
+		returned, err := h.service.repo.ReturnedQtyByLine(r.Context(), id)
+		if err != nil {
+			httpx.WriteError(w, r, err)
+			return
+		}
+		if len(returned) > 0 {
+			sale.ReturnedQuantities = map[string]httpx.Quantity{}
+			for lineID, qty := range returned {
+				sale.ReturnedQuantities[lineID.String()] = qty
+			}
+		}
+	}
 	httpx.WriteRevisionETag(w, sale.Revision)
 	writeJSON(w, http.StatusOK, sale)
 }
@@ -330,7 +401,7 @@ func (h *Handler) AddItem(w http.ResponseWriter, r *http.Request) {
 	// An item change carries no cashier identity of its own (ADR 0002
 	// section 4): a key holding pos scopes works it; the acting subject, if
 	// any, is the audit attribution.
-	sale, err := h.service.AddLine(r.Context(), id, parsed, actorFrom(r))
+	sale, err := h.service.AddLine(r.Context(), id, parsed, h.actorFrom(r))
 	if err != nil {
 		httpx.WriteError(w, r, err)
 		return
@@ -362,7 +433,7 @@ func (h *Handler) ChangeItemQuantity(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, r, err)
 		return
 	}
-	sale, err := h.service.ChangeLineQuantity(r.Context(), id, itemID, qty, r.Header.Get("If-Match"), revision, actorFrom(r))
+	sale, err := h.service.ChangeLineQuantity(r.Context(), id, itemID, qty, r.Header.Get("If-Match"), revision, h.actorFrom(r))
 	if err != nil {
 		httpx.WriteError(w, r, err)
 		return
@@ -405,12 +476,12 @@ func (h *Handler) CompleteTransaction(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, r, err)
 		return
 	}
-	tenders, pickedUpBy, revision, err := req.parse()
+	tenders, pickedUpBy, revision, acknowledged, err := req.parse()
 	if err != nil {
 		httpx.WriteError(w, r, err)
 		return
 	}
-	sale, err := h.service.CompleteSale(r.Context(), id, r.Header.Get("If-Match"), revision, tenders, pickedUpBy, actorFrom(r))
+	sale, err := h.service.CompleteSale(r.Context(), id, r.Header.Get("If-Match"), revision, tenders, pickedUpBy, h.actorFrom(r), acknowledged, req.payer(), req.suspectedAvoidance(), req.payerDeclined())
 	if err != nil {
 		httpx.WriteError(w, r, err)
 		return
@@ -436,7 +507,7 @@ func (h *Handler) VoidTransaction(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, r, err)
 		return
 	}
-	sale, err := h.service.VoidSale(r.Context(), id, r.Header.Get("If-Match"), revision, reason, actorFrom(r))
+	sale, err := h.service.VoidSale(r.Context(), id, r.Header.Get("If-Match"), revision, reason, h.actorFrom(r))
 	if err != nil {
 		httpx.WriteError(w, r, err)
 		return
@@ -445,20 +516,29 @@ func (h *Handler) VoidTransaction(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, sale)
 }
 
-// ListTransactions is GET /pos/transactions: the list envelope.
+// ListTransactions is GET /pos/transactions: the list envelope. q is the
+// counter's sale search (CP-06): the sale number (the receipt's barcode
+// text), the invoice number or the customer name; a search names no day
+// bound unless it carries a date, while a plain list stays the register's
+// day.
 func (h *Handler) ListTransactions(w http.ResponseWriter, r *http.Request) {
-	q, err := httpx.StrictQuery(r, "register_id", "date", "status", "limit", "cursor", "include")
+	q, err := httpx.StrictQuery(r, "register_id", "date", "status", "q", "limit", "cursor", "include")
 	if err != nil {
 		httpx.WriteError(w, r, err)
 		return
 	}
-	f := SaleFilter{RegisterID: q.Get("register_id"), Date: time.Now().Format("2006-01-02")}
+	f := SaleFilter{RegisterID: q.Get("register_id"), Query: strings.TrimSpace(q.Get("q"))}
 	if d := q.Get("date"); d != "" {
 		if _, err := time.Parse("2006-01-02", d); err != nil {
 			httpx.WriteError(w, r, httpx.BadRequest("one or more fields failed validation", httpx.FieldError{Field: "date", Message: "must be a date as YYYY-MM-DD"}))
 			return
 		}
 		f.Date = d
+	}
+	if f.Query == "" {
+		// The plain list's own day is the branch's today, computed in the
+		// branch's zone in SQL, never the server's clock.
+		f.Today = true
 	}
 	if s := q.Get("status"); s != "" {
 		switch s {
@@ -471,6 +551,23 @@ func (h *Handler) ListTransactions(w http.ResponseWriter, r *http.Request) {
 	}
 	limit := 50
 	items, err := h.service.repo.ListSales(r.Context(), f, limit)
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	httpx.WriteList(w, items, "", limit)
+}
+
+// ListRefundIntents is GET /pos/refund-intents: the manager's list of the
+// refund claims still waiting on a person (CP-06), under the resolve
+// routes' own guard.
+func (h *Handler) ListRefundIntents(w http.ResponseWriter, r *http.Request) {
+	if _, err := httpx.StrictQuery(r, "limit", "cursor", "include"); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	limit := 50
+	items, err := h.service.repo.ListOpenRefundIntents(r.Context(), limit)
 	if err != nil {
 		httpx.WriteError(w, r, err)
 		return
@@ -616,7 +713,7 @@ func (h *Handler) AttachCustomer(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, r, err)
 		return
 	}
-	sale, err := h.service.AttachCustomer(r.Context(), id, *in, actorFrom(r))
+	sale, err := h.service.AttachCustomer(r.Context(), id, *in, h.actorFrom(r))
 	if err != nil {
 		httpx.WriteError(w, r, err)
 		return
@@ -664,7 +761,7 @@ func (h *Handler) GetCatalog(w http.ResponseWriter, r *http.Request) {
 
 // OpenTill is POST /pos/till/open.
 func (h *Handler) OpenTill(w http.ResponseWriter, r *http.Request) {
-	cashierID, ok := cashierOf(w, r)
+	cashierID, ok := h.cashierOf(w, r)
 	if !ok {
 		return
 	}
@@ -784,7 +881,7 @@ func (h *Handler) CloseTill(w http.ResponseWriter, r *http.Request) {
 	}
 	// The close carries no cashier identity of its own either (ADR 0002
 	// section 4): the counted drawer is posted by the acting subject.
-	report, err := h.service.CloseTill(r.Context(), id, counted, notes, actorFrom(r))
+	report, err := h.service.CloseTill(r.Context(), id, counted, notes, h.actorFrom(r))
 	if err != nil {
 		httpx.WriteError(w, r, err)
 		return
@@ -832,7 +929,7 @@ func (h *Handler) ListZReports(w http.ResponseWriter, r *http.Request) {
 
 // CreateReturn is POST /pos/returns.
 func (h *Handler) CreateReturn(w http.ResponseWriter, r *http.Request) {
-	cashierID, ok := cashierOf(w, r)
+	cashierID, ok := h.cashierOf(w, r)
 	if !ok {
 		return
 	}
@@ -853,6 +950,32 @@ func (h *Handler) CreateReturn(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Location", "/api/v1/pos/returns/"+ret.ID.String())
 	writeJSON(w, http.StatusCreated, ret)
+}
+
+// PreviewReturn is POST /pos/returns/preview: a read-only calculation of the
+// same request's figures (the restocking fee and the money back), so the
+// counter states them before the return is taken; nothing is written.
+func (h *Handler) PreviewReturn(w http.ResponseWriter, r *http.Request) {
+	cashierID, ok := h.cashierOf(w, r)
+	if !ok {
+		return
+	}
+	var req returnRequest
+	if err := httpx.DecodeJSON(r, &req); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	in, err := req.parse()
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	fig, err := h.service.PreviewReturn(r.Context(), cashierID, in)
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, fig)
 }
 
 // GetReturn is GET /pos/returns/{id}.
@@ -921,7 +1044,7 @@ func (h *Handler) ResolveRefundIntent(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, r, err)
 		return
 	}
-	resolved, err := h.service.ResolveRefundIntent(r.Context(), id, *in, actorFrom(r))
+	resolved, err := h.service.ResolveRefundIntent(r.Context(), id, *in, h.actorFrom(r))
 	if err != nil {
 		httpx.WriteError(w, r, err)
 		return
@@ -958,7 +1081,7 @@ func (h *Handler) PaybackRefundIntent(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, r, err)
 		return
 	}
-	paid, err := h.service.PaybackRefundIntent(r.Context(), id, *in, actorFrom(r))
+	paid, err := h.service.PaybackRefundIntent(r.Context(), id, *in, h.actorFrom(r))
 	if err != nil {
 		httpx.WriteError(w, r, err)
 		return
@@ -966,9 +1089,13 @@ func (h *Handler) PaybackRefundIntent(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, paid)
 }
 
-// actorFrom reads the acting user's subject for audit rows.
-func actorFrom(r *http.Request) string {
+// actorFrom reads the acting user's identity for audit rows and person rules:
+// the roster row's id when the signed in email matches one, or the JWT subject.
+func (h *Handler) actorFrom(r *http.Request) string {
 	if claims := middleware.ClaimsFromContext(r.Context()); claims != nil {
+		if id := h.service.StaffIDByEmail(r.Context(), claims.Email); id != uuid.Nil {
+			return id.String()
+		}
 		return claims.Subject
 	}
 	return ""

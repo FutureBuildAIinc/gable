@@ -61,6 +61,7 @@ type LineRequest struct {
 	PriceUOMQty             json.RawMessage `json:"price_uom_qty"`
 	UnitPriceTenThousandths json.RawMessage `json:"unit_price_ten_thousandths"`
 	Tally                   *TallyRequest   `json:"tally"`
+	Tint                    json.RawMessage `json:"tint"`
 }
 
 // TallyRequest is the tally a line carries (ADR 0006 section 4.3): the
@@ -281,6 +282,8 @@ func (l *LineRequest) parse(v *httpx.Validator, path string) (DraftLine, bool) {
 	if l.CustomerNote != nil {
 		d.CustomerNote = *l.CustomerNote
 	}
+	v.Check(isAbsentRaw(l.Tint), path+".tint",
+		"is not accepted on a quote line: tint is recorded at the counter")
 
 	// The quantity may be omitted on a tallied line: the tally's linear feet
 	// are the quantity (ADR 0006 section 4.3). Anywhere else it is required.

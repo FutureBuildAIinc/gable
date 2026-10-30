@@ -558,8 +558,8 @@ func (s *Service) postDeposit(ctx context.Context, c *DayClose, day *BranchDay, 
 		return err
 	}
 	entry, err := s.ledger.PostEntry(ctx, gl.PostingInput{EntryDate: date,
-		Memo:     fmt.Sprintf("Branch deposit %s for %s", c.DepositSlipRef, c.BusinessDate),
-		Source:   gl.SourceAdjustment, SourceRefID: &c.ID, BranchID: c.BranchID,
+		Memo:   fmt.Sprintf("Branch deposit %s for %s", c.DepositSlipRef, c.BusinessDate),
+		Source: gl.SourceAdjustment, SourceRefID: &c.ID, BranchID: c.BranchID,
 		PostedBy: actorOrSystem(actor), Legs: legs})
 	if err != nil {
 		return ledgerRefusal(err, "failed to post the branch deposit")

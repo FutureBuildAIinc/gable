@@ -32,11 +32,11 @@ describe('the field host state (tabs by role)', () => {
     expect(state.currentPath).toBe('/driver');
   });
 
-  it('owner and dual warehouse+driver roles hold both Yard and Driver tabs in catalog order', () => {
+  it('owner and dual warehouse+driver roles hold the Yard, Sale and Driver tabs in catalog order', () => {
     const owner = signedIn(OWNER_SESSION, FIELD_APPS);
     expect(owner.phase).toBe('field');
     if (owner.phase !== 'field') return;
-    expect(owner.apps.map((a) => a.id)).toEqual(['yard', 'driver']);
+    expect(owner.apps.map((a) => a.id)).toEqual(['yard', 'sale', 'driver']);
     expect(owner.currentAppId).toBe('yard');
 
     const dual = signedIn(
@@ -45,6 +45,15 @@ describe('the field host state (tabs by role)', () => {
     );
     if (dual.phase !== 'field') return;
     expect(dual.apps.map((a) => a.id)).toEqual(['yard', 'driver']);
+  });
+
+  it('cashier holds only the Sale tab and lands on the counter at /pos', () => {
+    const state = signedIn({ name: 'Casey Ng', roleLabel: 'Cashier', roles: ['cashier'] }, FIELD_APPS);
+    expect(state.phase).toBe('field');
+    if (state.phase !== 'field') return;
+    expect(state.apps.map((a) => a.id)).toEqual(['sale']);
+    expect(state.currentAppId).toBe('sale');
+    expect(state.currentPath).toBe('/pos');
   });
 
   it('a non-field role holds no tabs and lands nowhere', () => {

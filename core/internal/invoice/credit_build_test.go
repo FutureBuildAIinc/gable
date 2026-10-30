@@ -4,6 +4,7 @@
 package invoice
 
 import (
+	"errors"
 	"math/rand"
 	"testing"
 
@@ -111,3 +112,61 @@ func TestRestockCostComesBackAtTheOriginalCost(t *testing.T) {
 		t.Errorf("last restock = %v %v, want the remaining -50 not -325", cl.CostCents, err)
 	}
 }
+
+// RULE (row CP-16): a credit memo line does not take a tint in its request
+// (a credit against a counter invoice line inherits from the invoice line); a
+// request that sends tint on a line is refused with a 400 naming lines[0].tint.
+func TestCreditMemoRefusesTintOnALine(t *testing.T) {
+	raw := []byte(`{"customer_id":"` + uuid.NewString() + `","reason_code":"price_adjustment","reason":"paint credit","lines":[{"description":"Paint","quantity":"-1","uom":"GAL","unit_price_ten_thousandths":50000,"tint":{"color_name":"Essex Green"}}]}`)
+	var req CreditRequest
+	if err := httpx.DecodeStrictJSON(raw, &req); err != nil {
+		t.Fatalf("decode credit request with tint = %v, want Parse to refuse lines[0].tint", err)
+	}
+	_, err := req.Parse()
+	var herr *httpx.Error
+	if !errors.As(err, &herr) || herr.Status != 400 || len(herr.Details) == 0 || herr.Details[0].Field != "lines[0].tint" {
+		t.Errorf("credit line with tint = %v, want 400 naming lines[0].tint", err)
+	}
+}
+
+// RULE (row CP-16): a credit memo against a tinted invoice line inherits the
+// tint and refuses restock (the same rule the counter return and void hold: a
+// tinted can does not go back into saleable stock).
+func TestCreditFromTintedInvoiceLineRefusesRestock(t *testing.T) {
+	src := creditLineOf(8000)
+	pid := uuid.New()
+	src.ProductID = &pid
+	src.Tint = &salesdoc.LineTint{
+		ColorCode:         "HC-188",
+		ColorName:         "Essex Green",
+		BaseCode:          "DEEP",
+		ContainerSizeCode: "GAL",
+	}
+
+	_, err := creditFromInvoiceLine("lines[0]", &CreditLineInput{
+		InvoiceLineID: &src.ID,
+		Quantity:      -10000,
+		Restock:       true,
+	}, &src, Credited{}, Credited{})
+	var herr *httpx.Error
+	if !errors.As(err, &herr) || herr.Status != 400 || len(herr.Details) == 0 || herr.Details[0].Field != "lines[0].restock" {
+		t.Fatalf("restocking credit against tinted invoice line = %v, want 400 naming lines[0].restock", err)
+	}
+
+	cl, err := creditFromInvoiceLine("lines[0]", &CreditLineInput{
+		InvoiceLineID: &src.ID,
+		Quantity:      -10000,
+		Restock:       false,
+	}, &src, Credited{}, Credited{})
+	if err != nil {
+		t.Fatalf("non-restocking credit against tinted invoice line = %v", err)
+	}
+	if cl.Restock {
+		t.Error("cl.Restock = true, want false")
+	}
+	if cl.Tint == nil || cl.Tint.ColorName != "Essex Green" {
+		t.Errorf("cl.Tint = %+v, want inherited Essex Green tint", cl.Tint)
+	}
+}
+
+

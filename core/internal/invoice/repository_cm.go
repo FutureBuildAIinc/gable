@@ -12,6 +12,8 @@ import (
 	"github.com/gablelbm/gable/internal/customer/customerlink"
 	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/gablelbm/gable/internal/salesdoc"
+	"github.com/gablelbm/gable/internal/tax"
+	"github.com/gablelbm/gable/pkg/database"
 	"github.com/gablelbm/gable/pkg/middleware"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -206,6 +208,9 @@ func (r *PostgresRepository) creditLines(ctx context.Context, id uuid.UUID) ([]C
 	if err := r.attachLineTallyRows(ctx, plain, "credit_memo_line_id"); err != nil {
 		return nil, err
 	}
+	if err := r.attachLineTints(ctx, plain, "credit_memo_line_id"); err != nil {
+		return nil, err
+	}
 	return out, nil
 }
 
@@ -334,6 +339,36 @@ func (r *PostgresRepository) ReplaceCreditLines(ctx context.Context, memoID uuid
 				}
 			}
 		}
+		if err := insertCreditLineTint(ctx, exec, l.ID, l.Tint); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func insertCreditLineTint(ctx context.Context, exec database.Executor, lineID uuid.UUID, t *salesdoc.LineTint) error {
+	if t == nil {
+		return nil
+	}
+	var id uuid.UUID
+	if err := exec.QueryRow(ctx, `
+		INSERT INTO paint_line_tints (credit_memo_line_id, formula_id, color_code, color_name, base_code,
+			container_size_code, rescaled, tint_charge_cents)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+		RETURNING id`,
+		lineID, t.FormulaID, t.ColorCode, t.ColorName, t.BaseCode, t.ContainerSizeCode,
+		t.Rescaled, tintCentsOrZero(t.TintChargeCents)).Scan(&id); err != nil {
+		return fmt.Errorf("failed to insert the credit memo line's tint: %w", err)
+	}
+	for i, c := range t.Components {
+		if _, err := exec.Exec(ctx, `
+			INSERT INTO paint_line_tint_components (line_tint_id, position, colorant_code, colorant_name,
+				whole_oz, increments_coarse, increments_fine, unit_denominator)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+			id, i, c.ColorantCode, c.ColorantName, c.Amount.WholeOZ, c.Amount.Coarse,
+			c.Amount.Fine, c.Amount.Denominator); err != nil {
+			return fmt.Errorf("failed to insert the tint's colorant: %w", err)
+		}
 	}
 	return nil
 }
@@ -426,20 +461,30 @@ type CreditFacts struct {
 }
 
 // CustomerCreditFacts reads the customer's effective currency (the override,
-// else the dealer default), primary branch and tax exemption.
+// else the dealer default), primary branch and tax exemption. The exemption
+// is the one window rule (tax.ExemptionCovering) on the primary branch's
+// business day, the rule the counter and the orders read, so an expired or
+// not yet effective certificate exempts no memo (CP-10).
 func (r *PostgresRepository) CustomerCreditFacts(ctx context.Context, customerID uuid.UUID) (CreditFacts, error) {
 	var f CreditFacts
+	var day time.Time
 	err := r.db.GetExecutor(ctx).QueryRow(ctx, `
 		SELECT COALESCE(c.currency, (SELECT value FROM system_settings WHERE key = 'currency.default'), 'USD'),
 		       c.primary_branch_id,
-		       EXISTS(SELECT 1 FROM tax_exemptions t WHERE t.customer_id = c.id AND t.is_active)
-		FROM customers c WHERE c.id = $1`, customerID).Scan(&f.Currency, &f.PrimaryBranchID, &f.Exempt)
+		       (SELECT (timezone(COALESCE(l.timezone, 'UTC'), now())))::date
+		FROM customers c LEFT JOIN locations l ON l.id = c.primary_branch_id WHERE c.id = $1`, customerID).
+		Scan(&f.Currency, &f.PrimaryBranchID, &day)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return f, validationFailed("a referenced record does not exist", httpx.FieldError{Field: "customer_id", Message: "no such customer"})
 	}
 	if err != nil {
 		return f, fmt.Errorf("failed to read the customer: %w", err)
 	}
+	standing, err := tax.ExemptionCovering(ctx, r.db.GetExecutor(ctx), customerID, day)
+	if err != nil {
+		return f, fmt.Errorf("failed to read the customer's exemption: %w", err)
+	}
+	f.Exempt = standing != nil
 	return f, nil
 }
 

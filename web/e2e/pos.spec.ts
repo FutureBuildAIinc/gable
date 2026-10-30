@@ -3,6 +3,8 @@
 
 import { test, expect, type APIRequestContext, type Page } from '@playwright/test';
 import { answerAppDialog, fillAppDialogPrompt, pickOptionByValue } from './app-controls';
+import { stockedProduct } from './pos-stock';
+import { openCounter } from './pos-till';
 import path from 'path';
 import fs from 'fs';
 
@@ -24,40 +26,6 @@ async function signIn(page: Page, name: string) {
   await page.getByRole('button', { name: 'Sign in', exact: true }).click();
   await catalog;
   await expect(page.getByRole('heading', { name: /good to see you/i })).toBeVisible();
-}
-
-/** A product with stock at the branch and a price, for the counter search. */
-async function stockedProduct(request: APIRequestContext): Promise<{ sku: string }> {
-  const products = (await (await request.get('/api/v1/products?limit=200')).json()) as {
-    items: { id: string; sku: string }[];
-  };
-  const list = products.items.filter((p) => !p.sku.startsWith('E2E-')).reverse();
-  for (const p of list) {
-    const page = (await (await request.get(`/api/v1/inventory?product_id=${p.id}`)).json()) as {
-      items: { location_name: string; available: string }[];
-    };
-    // The counter issues from the branch REG-01 belongs to (the seeded
-    // Kelowna branch); stock at another branch cannot serve the till.
-    const atBranch = page.items
-      .filter((r) => r.location_name === 'KEL-MAIN')
-      .reduce((n, r) => n + (Number(r.available) || 0), 0);
-    if (atBranch >= 50) return p;
-  }
-  throw new Error('no stocked product for the counter run');
-}
-
-/** Opens the counter (the Panels board) and the drawer when none is open (a run may find one open). */
-async function openCounter(page: Page) {
-  await page.goto('/pos');
-  await expect(page.getByRole('heading', { name: 'New sale', level: 1 })).toBeVisible();
-  const tillState = page.getByTestId('pos-till-state');
-  await expect(tillState).toBeVisible();
-  if ((await tillState.textContent())?.includes('No till')) {
-    await page.getByRole('button', { name: 'Open Till' }).click();
-    await page.getByTestId('till-float-amount').fill('100.00');
-    await page.getByRole('button', { name: 'Open Till' }).last().click();
-  }
-  await expect(tillState).toContainText('Till open');
 }
 
 /** Adds one unit of the product through the Items card: the exact SKU in its search, then Enter. */

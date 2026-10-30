@@ -19,8 +19,10 @@
         "active": true,
         "address": null,
         "branch_id": "<id-1>",
+        "cash_rounding_mode": "OFF",
         "city": null,
         "code": "GOLD-A-YARD",
+        "country_code": null,
         "created_at": "<ts+0d>",
         "default_tax_rate": null,
         "description": "item fixture",
@@ -35,6 +37,7 @@
         "timezone": "America/New_York",
         "type": "yard",
         "updated_at": "<ts+0d>",
+        "walk_in_identity_cents": null,
         "zip": null
       }
     }
@@ -58,8 +61,10 @@
         "active": true,
         "address": null,
         "branch_id": "<id-1>",
+        "cash_rounding_mode": "OFF",
         "city": null,
         "code": "GOLD-A-BIN",
+        "country_code": null,
         "created_at": "<ts+0d>",
         "default_tax_rate": null,
         "description": null,
@@ -74,6 +79,7 @@
         "timezone": "America/New_York",
         "type": "bin",
         "updated_at": "<ts+0d>",
+        "walk_in_identity_cents": null,
         "zip": null
       }
     }
@@ -94,8 +100,10 @@
             "active": true,
             "address": null,
             "branch_id": "<id-1>",
+            "cash_rounding_mode": "OFF",
             "city": null,
             "code": "GOLD-A-YARD",
+            "country_code": null,
             "created_at": "<ts+0d>",
             "default_tax_rate": null,
             "description": "item fixture",
@@ -110,14 +118,17 @@
             "timezone": "America/New_York",
             "type": "yard",
             "updated_at": "<ts+0d>",
+            "walk_in_identity_cents": null,
             "zip": null
           },
           {
             "active": true,
             "address": null,
             "branch_id": "<id-1>",
+            "cash_rounding_mode": "OFF",
             "city": null,
             "code": "GOLD-A-BIN",
+            "country_code": null,
             "created_at": "<ts+0d>",
             "default_tax_rate": null,
             "description": null,
@@ -132,14 +143,17 @@
             "timezone": "America/New_York",
             "type": "bin",
             "updated_at": "<ts+0d>",
+            "walk_in_identity_cents": null,
             "zip": null
           },
           {
             "active": true,
             "address": null,
             "branch_id": "<id-1>",
+            "cash_rounding_mode": "OFF",
             "city": null,
             "code": "KEL-A",
+            "country_code": null,
             "created_at": "<ts+0d>",
             "default_tax_rate": null,
             "description": "Lumber Storage Zone A",
@@ -154,14 +168,17 @@
             "timezone": "Etc/UTC",
             "type": "zone",
             "updated_at": "<ts+0d>",
+            "walk_in_identity_cents": null,
             "zip": null
           },
           {
             "active": true,
             "address": null,
             "branch_id": "<id-1>",
+            "cash_rounding_mode": "OFF",
             "city": null,
             "code": "KEL-B",
+            "country_code": null,
             "created_at": "<ts+0d>",
             "default_tax_rate": null,
             "description": "Sheet Goods Zone B",
@@ -176,14 +193,17 @@
             "timezone": "Etc/UTC",
             "type": "zone",
             "updated_at": "<ts+0d>",
+            "walk_in_identity_cents": null,
             "zip": null
           },
           {
             "active": true,
             "address": null,
             "branch_id": "<id-1>",
+            "cash_rounding_mode": "OFF",
             "city": null,
             "code": "KEL-C",
+            "country_code": null,
             "created_at": "<ts+0d>",
             "default_tax_rate": null,
             "description": "Hardware & Fasteners Zone C",
@@ -198,14 +218,17 @@
             "timezone": "Etc/UTC",
             "type": "zone",
             "updated_at": "<ts+0d>",
+            "walk_in_identity_cents": null,
             "zip": null
           },
           {
             "active": true,
             "address": null,
             "branch_id": "<id-1>",
+            "cash_rounding_mode": "OFF",
             "city": null,
             "code": "KEL-D",
+            "country_code": null,
             "created_at": "<ts+0d>",
             "default_tax_rate": null,
             "description": "Roofing & Insulation Zone D",
@@ -220,14 +243,17 @@
             "timezone": "Etc/UTC",
             "type": "zone",
             "updated_at": "<ts+0d>",
+            "walk_in_identity_cents": null,
             "zip": null
           },
           {
             "active": true,
             "address": "2450 Enterprise Way",
             "branch_id": "<id-1>",
+            "cash_rounding_mode": "OFF",
             "city": "Kelowna",
             "code": "KEL-MAIN",
+            "country_code": null,
             "created_at": "<ts+0d>",
             "default_tax_rate": 0.12,
             "description": "Kelowna Main Yard",
@@ -242,6 +268,7 @@
             "timezone": "Etc/UTC",
             "type": "branch",
             "updated_at": "<ts+0d>",
+            "walk_in_identity_cents": null,
             "zip": "V1X 7K2"
           }
         ],
@@ -373,8 +400,10 @@
         "active": true,
         "address": null,
         "branch_id": "<id-1>",
+        "cash_rounding_mode": "OFF",
         "city": null,
         "code": "GOLD-A-YARD",
+        "country_code": null,
         "created_at": "<ts+0d>",
         "default_tax_rate": null,
         "description": "renamed",
@@ -389,6 +418,7 @@
         "timezone": "America/New_York",
         "type": "yard",
         "updated_at": "<ts+0d>",
+        "walk_in_identity_cents": null,
         "zip": null
       }
     }
@@ -433,8 +463,10 @@
         "active": true,
         "address": null,
         "branch_id": "<id-1>",
+        "cash_rounding_mode": "OFF",
         "city": null,
         "code": "GOLD-A-YARD",
+        "country_code": null,
         "created_at": "<ts+0d>",
         "default_tax_rate": null,
         "description": "renamed",
@@ -449,6 +481,7 @@
         "timezone": "America/New_York",
         "type": "yard",
         "updated_at": "<ts+0d>",
+        "walk_in_identity_cents": null,
         "zip": null
       }
     }
@@ -578,8 +611,10 @@
         "active": false,
         "address": null,
         "branch_id": "<id-1>",
+        "cash_rounding_mode": "OFF",
         "city": null,
         "code": "GOLD-A-BIN",
+        "country_code": null,
         "created_at": "<ts+0d>",
         "default_tax_rate": null,
         "description": null,
@@ -594,6 +629,7 @@
         "timezone": "America/New_York",
         "type": "bin",
         "updated_at": "<ts+0d>",
+        "walk_in_identity_cents": null,
         "zip": null
       }
     }

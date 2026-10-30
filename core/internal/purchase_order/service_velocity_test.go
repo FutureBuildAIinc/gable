@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/gablelbm/gable/internal/product"
+	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/gablelbm/gable/internal/units"
 	"github.com/google/uuid"
 )
@@ -26,6 +27,10 @@ func (f *fakeVelocity) ListSalesVelocity(_ context.Context, _ int) ([]SalesVeloc
 // fakeProductRepo implements product.Repository in-memory so we can drive
 // RefreshReorderTargets without a pgx connection. Only the methods the
 // service path actually calls are non-trivial.
+func (f *fakeProductRepo) UpdateConsumerDurable(ctx context.Context, id uuid.UUID, consumerDurable bool, revision int64) (int64, error) {
+	return revision + 1, nil
+}
+
 type fakeProductRepo struct {
 	products []product.Product
 	updates  map[uuid.UUID][2]float64 // id -> {reorder_point, reorder_qty}
@@ -97,6 +102,9 @@ func (f *fakeProductRepo) UpdateVendor(_ context.Context, _ uuid.UUID, _ *string
 	return nil
 }
 func (f *fakeProductRepo) UpdateDimensions(_ context.Context, _ uuid.UUID, _ product.Geometry, _ int64) (int64, error) {
+	return 0, nil
+}
+func (f *fakeProductRepo) UpdateDensity(_ context.Context, _ uuid.UUID, _ *httpx.Quantity, _ *string, _ int64) (int64, error) {
 	return 0, nil
 }
 func (f *fakeProductRepo) UpdateLeadTime(_ context.Context, _ uuid.UUID, _ *int, _ int64) (int64, error) {

@@ -624,6 +624,50 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/admin/staff/{id}/counter-pin": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Set a staff member's counter PIN
+         * @description Admin or owner. The manager's step up secret (CP-04): 4 to 8 digits, never one repeated digit or a plain run like 1234. Hashed on the server with argon2id and a per PIN salt; the PIN is never logged and the answer says only counter_pin_set and locked. Setting a PIN clears the failures and the lock.
+         */
+        put: operations["adminSetStaffCounterPIN"];
+        post?: never;
+        /**
+         * Clear a staff member's counter PIN
+         * @description Admin or owner. The PIN, its set time, the failures and the lock all go; a cleared PIN is no PIN.
+         */
+        delete: operations["adminClearStaffCounterPIN"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/staff/{id}/counter-pin/unlock": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Unlock a staff member's counter PIN
+         * @description Admin or owner. Lifts the lock five wrong tries impose and clears the failures; the hash stands, so the manager's own PIN works again at once.
+         */
+        post: operations["adminUnlockStaffCounterPIN"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/admin/staff/{id}/modules": {
         parameters: {
             query?: never;
@@ -718,6 +762,30 @@ export interface paths {
          * @description The route guard admits admin, owner and sales; the handler then refuses all but admin and owner with a 403, judging by the first role of the token (the role claim, else the first of the roles array). In dev auth mode the caller is treated as owner. The body is ignored and optional. The scan runs synchronously to completion.
          */
         post: operations["adminExposureScan"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/large-cash/settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The dealer's large cash settings
+         * @description The dealer's default country and the Canadian dealer threshold (CP-17a): on or off and its amount. The Canadian threshold is a dealer policy, never a legal duty, and it never produces a FINTRAC report. Admin or owner.
+         */
+        get: operations["adminGetLargeCashSettings"];
+        /**
+         * Save the dealer's large cash settings
+         * @description Writes the dealer's default country and the Canadian dealer threshold (on or off, amount) as system_settings rows, one transaction (CP-17a). Admin or owner. Omitted fields keep their stored value.
+         */
+        put: operations["adminSaveLargeCashSettings"];
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -1379,6 +1447,50 @@ export interface paths {
          * @description first_name and last_name are required. can_place_orders defaults to true; order_limit_cents is the largest order the contact may place (null: no limit of their own). Writes customer.updated (part contact).
          */
         post: operations["customerCreateContact"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/customers/{id}/alerts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List a customer's alerts
+         * @description The cursor list envelope, newest first. state holds the alerts still on the customer (open, the default), the ones that have been ended (ended), or both (all). An unknown customer is a 404.
+         */
+        get: operations["customerListAlerts"];
+        put?: never;
+        /**
+         * Leave an alert on a customer
+         * @description kind is note (read it and carry on) or warning (it may stop the sale). text is the alert, at most 500 characters. show_at_counter puts it in the counter's customer panel, show_at_orders puts it on the order page. acknowledge_required asks the counter to read a warning and say so before the sale is taken; only a warning may ask, and a note that asks is a 400 validation_failed naming acknowledge_required. The author is the signed-in user, never the body. Writes customer.updated (part alert).
+         */
+        post: operations["customerCreateAlert"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/customers/{id}/alerts/{alertId}/end": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * End an alert
+         * @description An alert is ended, not deleted: the row stays for the audit trail and says who called it off. On the alert's revision, sent as If-Match, so an end of an alert that has already been ended is refused as stale. Writes customer.updated (part alert).
+         */
+        post: operations["customerEndAlert"];
         delete?: never;
         options?: never;
         head?: never;
@@ -6085,8 +6197,8 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * List the day's sales
-         * @description The list envelope over one register's day: register_id filters (absent lists every register's), date is a YYYY-MM-DD that defaults to the branch's today, status takes one lowercase value (open, held, completed, voided; an uppercase or unknown value is a 400 naming status). The page is the whole day newest first, so next_cursor is null and limit echoes the 50 the route serves; cursor, limit and include are accepted query names. An empty day is [] in the bytes.
+         * List the day's sales, or search them
+         * @description The list envelope over one register's day: register_id filters (absent lists every register's), date is a YYYY-MM-DD read against the sale's business day in its branch's own zone, defaulting to the branch's today (never the server's clock), status takes one lowercase value (open, held, completed, voided; an uppercase or unknown value is a 400 naming status). q is the return counter's sale search (CP-06): a sale matches when its number (the receipt's barcode text), its invoice's number or its customer's name contains the text, case folded; a search names no day bound unless it also carries a date. The page is the whole day or the whole search newest first, so next_cursor is null and limit echoes the 50 the route serves; cursor, limit and include are accepted query names. An empty day or a search nothing matches is [] in the bytes.
          */
         get: operations["posTransactionList"];
         put?: never;
@@ -6265,6 +6377,26 @@ export interface paths {
         patch: operations["posTransactionChangeItemQuantity"];
         trace?: never;
     };
+    "/api/v1/pos/transactions/{id}/items/{itemId}/weight": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Enter a weight by hand on a line (CP-19)
+         * @description The manual weight entry: a typed gross in pounds, an optional tare, and the reason from the closed list GET /api/v1/pos/scale/manual-reasons answers (other needs the note). The entry takes a consecutive ticket number like a scale reading, the line is repriced at the net in its sale unit (the density bridge for a volume unit, 409 density_required when the product has none), and the documents print MAN WT. Handbook 44: when the branch's scale answers and does not read zero the entry is refused (409 scale_not_zero); a scale that cannot be read is the reason scale_offline attests. The body carries the sale's revision (or If-Match); a stale one is 409 stale_revision and none is 428. A counted or otherwise unweighable unit is 409 weight_unit_mismatch, an already weighed line is 409 line_already_weighed.
+         */
+        post: operations["posTransactionEnterLineWeight"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/pos/transactions/{id}/complete": {
         parameters: {
             query?: never;
@@ -6276,9 +6408,29 @@ export interface paths {
         put?: never;
         /**
          * Tender and complete the sale
-         * @description A sale started before the open till rule, with no drawer on it, completes only into the register's open session, which it joins (409 till_not_open when there is none). The money moment, one transaction: stock out through the inventory write path, the invoice (origin POS, pickup) posted through the AR core with its tax and COGS legs, each cash, check or card tender a payment applied to it and stored net (the tendered amount less change, so the payment is the money kept), an ACCOUNT tender left open on the invoice and subject to the credit check, the card charged at the gateway in the sale's currency before the transaction opens, and the pos_transaction.completed event written last: a failing event, audit or ledger write rolls the whole sale back (no invoice, payment, stock move or entry). Tenders must cover the total (change comes only from cash). Refused with 409 and a blocker: insufficient_tender, change_from_cash, walk_in_account (an ACCOUNT tender for the walk-in customer), card_terminal, card_declined, tax_quote_stale, tax_rate_not_configured, credit_limit, credit_hold, cash_only_terms (an account tender on an account whose terms are due on receipt), buyer_required, buyer_not_authorized, buyer_cap (the account's buyer roster), check_over_limit (a check over the customer's check limit, or the database wide one, unless a manager approved it for this sale), store_credit_short, walk_in_store_credit, one_account_leg, one_store_credit_leg, insufficient_stock; 503 when the tax provider fails before any row is written. An ACCOUNT tender is held to the same verdict the standing read states, and a manager override the sale holds is spent here, once. A store_credit tender applies the customer's open credit memos to the sale's invoice through the AR core, oldest first. The completion carries the sale's revision (If-Match or the body's revision; 428 without one, 409 stale_revision on a stale one). A sale that does not exist, or that the caller's branch context or wall hides, answers 404, the same for both, and nothing is written; a caller with no branch in context who holds no grant for the sale's branch is refused 403 by name.
+         * @description A sale started before the open till rule, with no drawer on it, completes only into the register's open session, which it joins (409 till_not_open when there is none). The money moment, one transaction: stock out through the inventory write path, the invoice (origin POS, pickup) posted through the AR core with its tax and COGS legs, each cash, check or card tender a payment applied to it and stored net (the tendered amount less change, so the payment is the money kept), an ACCOUNT tender left open on the invoice and subject to the credit check, the card charged at the gateway in the sale's currency before the transaction opens, and the pos_transaction.completed event written last: a failing event, audit or ledger write rolls the whole sale back (no invoice, payment, stock move or entry). Tenders must cover the total (change comes only from cash). Refused with 409 and a blocker: insufficient_tender, change_from_cash, walk_in_account (an ACCOUNT tender for the walk-in customer), card_terminal, card_declined, tax_quote_stale, tax_rate_not_configured, credit_limit, credit_hold, cash_only_terms (an account tender on an account whose terms are due on receipt), account_hold (an account tender on an account the AR core holds: a standing credit hold record, or an override window on it that has passed or whose cap the sale is over), buyer_required, buyer_not_authorized, buyer_cap (the account's buyer roster), check_over_limit (a check over the customer's check limit, or the database wide one, unless a manager approved it for this sale), store_credit_short, walk_in_store_credit, one_account_leg, one_store_credit_leg, insufficient_stock; 503 when the tax provider fails before any row is written. An ACCOUNT tender is held to the same verdict the standing read states, and a manager override the sale holds is spent here, once. A store_credit tender applies the customer's open credit memos to the sale's invoice through the AR core, oldest first. The completion carries the sale's revision (If-Match or the body's revision; 428 without one, 409 stale_revision on a stale one). A sale that does not exist, or that the caller's branch context or wall hides, answers 404, the same for both, and nothing is written; a caller with no branch in context who holds no grant for the sale's branch is refused 403 by name.
          */
         post: operations["posTransactionComplete"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pos/large-cash/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * What the large cash rule asks of this payment
+         * @description The counter's look before Pay (CP-17a): the server classifies the named tenders against the sale it holds under the branch's country rule (the United States Form 8300 family, or the Canadian dealer threshold when the dealer has it on) and answers whether the payer's details will be required and which fields the rule needs. The branch's walk-in identity floor rides the same answer: over the floor the counter asks a walk-in who paid cash to identify themselves, so their cash sales are counted together, and the identity the counter already holds may be carried here so the preview and the completion key the same person. Writes nothing; the completion's own capture is the authority.
+         */
+        post: operations["posLargeCashPreview"];
         delete?: never;
         options?: never;
         head?: never;
@@ -6549,6 +6701,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/pos/step-up": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * A manager approves at the counter with their own PIN
+         * @description The step up (CP-04): any person at the terminal asks, the manager is picked from the roster by staff number or id, and the PIN is the authority, so the caller's own role is never checked. The server verifies the PIN in constant time (five wrong tries in a row lock it until an admin unlocks it; the answer never says which part was wrong), checks the act's approving roles and the act's own person rules (the manager is not the sale's cashier, the drawer's cashier or closer), and mints one single use approval: an opaque token, stored only as its hash, bound to the act, the target and the manager, expiring a few minutes ahead. Never a machine key.
+         */
+        post: operations["posStepUp"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pos/step-up/managers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The managers the picker offers
+         * @description The roster the step up picker shows for one act: active staff with a counter PIN whose role the act admits. Names and staff numbers only, never a hint of the PIN beyond the fact one is set. Never a machine key.
+         */
+        get: operations["posStepUpManagers"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/pos/till/policy": {
         parameters: {
             query?: never;
@@ -6693,6 +6885,163 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/pos/scale": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The branch scale's current reading (CP-19)
+         * @description Whether the register's branch has a scale wired, the device (with its certificate of conformance number), and the current indication: the weight in pounds, the unit the indicator reported, the mode, the motion flag and at_zero for the manual entry's Handbook 44 check. The reading shown here is never sold; only the ticket flow's stable read becomes money. A counter with no scale answers configured false, and the manual entry with its reason is the path.
+         */
+        get: operations["posScaleStatus"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pos/scale/weigh-in": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Weigh the empty truck in (CP-19)
+         * @description Captures the stable gross reading against the vehicle's identification and opens the ticket the weigh out closes. A reading in motion, over capacity, in a zero error, or with no weight is refused (409 scale_reading_refused): the driver never hands the number over. A counter with no scale wired is 503 scale_not_configured.
+         */
+        post: operations["posScaleWeighIn"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pos/scale/weigh-out": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Weigh the loaded truck out onto a sale line (CP-19)
+         * @description Captures the stable gross out, nets it against the weigh in's gross (double_draft: Gable's computation of two gross readings, never a scale tare operation), completes the weigh in ticket, writes the weigh out ticket and puts the weight with its consecutive ticket number on the sale line, repriced at the net in the line's sale unit (the product's density bridges a volume unit, 409 density_required without one). The weigh in is named by ticket or by vehicle (409 no_open_weigh_in when the truck never weighed in). A loaded weight at or under the weigh in's is 409 net_not_positive; the same refusals as the weigh in guard the reading. The body carries the sale's revision (or If-Match). The weigh runs as one transaction, so a retry or a race completes once.
+         */
+        post: operations["posScaleWeighOut"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pos/scale/tickets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The branch's weight tickets (CP-19)
+         * @description The register's branch's tickets in ticket number order, filtered by status (open, completed, void) and vehicle. A ticket is never deleted; a void keeps its row and its number.
+         */
+        get: operations["posScaleTicketList"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pos/scale/tickets/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** One weight ticket (CP-19) */
+        get: operations["posScaleTicketGet"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pos/scale/tickets/{id}/void": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Void a weight ticket (CP-19)
+         * @description Marks the ticket void with its reason, keeping the row and the consecutive number (the sequence is never reused and a void is never a delete). A ticket that prices a sale line cannot be voided (409 ticket_on_line); the line goes first. The body carries the ticket's revision (or If-Match): a stale one is 409 stale_revision and none is 428.
+         */
+        post: operations["posScaleTicketVoid"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pos/scale/manual-reasons": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The closed list of manual weight reasons (CP-19)
+         * @description The reasons a typed weight names; the reason is what makes the entry auditable, so it is never free text. A reason with needs_note requires the note.
+         */
+        get: operations["posScaleManualReasons"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pos/scale/simulator": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Drive the simulated scale (CP-19; demo stacks only)
+         * @description Mounted only when the counter was wired with the simulated scale (POS_SCALE_SIMULATOR, a demo configuration, never production). Puts a load on the deck in pounds or kilograms, pins the motion flag, or forces an indicator status, so the end to end walk drives the scale with no hardware.
+         */
+        put: operations["posScaleSimulatorDrive"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/pos/returns": {
         parameters: {
             query?: never;
@@ -6717,6 +7066,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/pos/returns/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * State what a return comes to
+         * @description The same request as the return, answered with the figures only: the credit the memo will state (its subtotal net of the restocking fee, the tax and the total, negative as a credit), the restocking fee itself, the money that goes back (positive) and each line's fee beside its refund, so the counter states the fee before the return is taken. Computed from the same read-only pricing the return guards with; nothing is written, no row locks, no sequences.
+         */
+        post: operations["posReturnPreview"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/pos/returns/{id}": {
         parameters: {
             query?: never;
@@ -6730,6 +7099,50 @@ export interface paths {
          */
         get: operations["posReturnGet"];
         put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pos/refund-intents": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the refund claims waiting on a manager
+         * @description The list envelope over the counter's open refund claims (CP-06), oldest first: every PENDING claim (a terminal answer still owed, or a claim waiting on the resolve route) and every void's FAILED claim whose tender's posted payment still holds the declined credit the pay back route returns to the card (held_credit_cents carries it). A settled claim and a paid back credit leave the list. Only the finance and owner roles, the resolve and pay back routes' own guard; the sale join carries the branch wall, so the list never crosses the caller's branch. The page is the oldest 50 of the open set, the route's own cap: a claim past the fiftieth shows as the queue drains, so the list never claims to be the whole set. next_cursor is null and limit echoes the 50 the route serves; cursor, limit and include are accepted query names. An empty list is [] in the bytes.
+         */
+        get: operations["posRefundIntentList"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pos/settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The counter's dealer rules
+         * @description The dealer's counter rules: the database wide check limit (system_settings pos.check_limit_cents; null is no limit), the check ID rule (pos.check_id_required_over_cents: never, every check, or checks over a figure read on the sale's checks in total, so a split check cannot pass under it; the ID's number is never taken, on this contract or at the counter), and the restocking fee each return reason withholds (pos.restocking_fee_bps.<code>, basis points; nothing set is no fee) beside the suggested figures the settings screen offers. The counter reads it to ask for the ID before Pay; the write is the admin and owner roles' own route.
+         */
+        get: operations["posSettingsGet"];
+        /**
+         * Write the counter's dealer rules
+         * @description Writes the rules as one act on the caller's revision (If-Match and/or the body's revision; a stale revision is 409 stale_revision): the check limit, the check ID rule and every reason's restocking fee (the whole closed list; a figure of 0 clears the reason's row). Admin and owner only, never a machine key; audited with the fees it wrote.
+         */
+        put: operations["posSettingsPut"];
         post?: never;
         delete?: never;
         options?: never;
@@ -6886,7 +7299,7 @@ export interface paths {
         };
         /**
          * Can this sale go on account?
-         * @description The account as the counter reads it before a sale goes on it: the credit limit (null for no limit, 0 for no credit), the open receivable the credit check reads, the open credit memos (positive store credit), the available credit, the hold flag as the counter has it today (a limit of zero), the terms kind of the payment terms, whether the account asks for a named buyer and its roster, the check limit that governs it, the payment shapes the server takes from it now, and a verdict on_account: allowed, or blocked with a reason (credit_hold, credit_limit or cash_only_terms), the amount in words, and the three ways forward: pay_down (with the amount that would clear it), manager_override and switch_tender, each with whether it is available. amount_cents is the account portion the sale would put on the account (default 0, the account as it stands); sale_id makes the read count the sale's live manager override, an allowed verdict with the reason manager_override. The completion enforces the same verdict, so the read states what the completion will do. The walk-in customer is no account: 404, as is a customer the caller may not name.
+         * @description The account as the counter reads it before a sale goes on it: the credit limit (null for no limit, 0 for no credit), the open receivable the credit check reads, the open credit memos (positive store credit), the available credit, the hold flag (a limit of zero, or a standing credit hold record the AR core placed), the terms kind of the payment terms, whether the account asks for a named buyer and its roster, the check limit that governs it, the payment shapes the server takes from it now, and a verdict on_account: allowed, or blocked with a reason (credit_hold, credit_limit, cash_only_terms or account_hold: the AR core's standing hold record, with its reason in the words and pay down unavailable, for paying the balance does not lift a hold), the amount in words, and the three ways forward: pay_down (with the amount that would clear it), manager_override and switch_tender, each with whether it is available. amount_cents is the account portion the sale would put on the account (default 0, the account as it stands); sale_id makes the read count the sale's live manager override, an allowed verdict with the reason manager_override. The alerts are the customer's own alerts that speak at the counter: a note to read, or a warning that asks to be acknowledged before the sale is taken, which the completion refuses without the acknowledgement. The completion enforces the same verdict, so the read states what the completion will do. The walk-in customer is no account: 404, as is a customer the caller may not name.
          */
         get: operations["posCustomerStanding"];
         put?: never;
@@ -6908,7 +7321,7 @@ export interface paths {
         put?: never;
         /**
          * A manager approves one sale
-         * @description One act for one sale: a manager (the admin or owner role, and a person other than the sale's own cashier) approves an on account sale the verdict blocks (kind account: credit_hold or credit_limit, never the terms of a cash only account) or a check over the customer's check limit (kind check), with a reason and a cap in cents. The completion of that sale spends it, once: of any number of racing completions exactly one does, and a later sale is blocked again. One live override per sale and kind (409 override_exists). The approval and its spending are each audited. A cashier, a machine key and a token that carries no subject are refused 403 (a request with no claims at all is the local development bypass and approves as dev-mode); a sale that does not exist or that the caller's wall hides is 404; a sale that is not open or held is 409 invalid_state_transition; an account override of a walk-in sale is 409 walk_in_account.
+         * @description One act for one sale: a manager (the admin or owner role, and a person other than the sale's own cashier) approves an on account sale the verdict blocks (kind account: credit_hold, credit_limit or account_hold, never the terms of a cash only account) or a check over the customer's check limit (kind check), with a reason and a cap in cents. The completion of that sale spends it, once: of any number of racing completions exactly one does, and a later sale is blocked again. One live override per sale and kind (409 override_exists). The approval and its spending are each audited. A cashier, a machine key and a token that carries no subject are refused 403 (a request with no claims at all is the local development bypass and approves as dev-mode); a sale that does not exist or that the caller's wall hides is 404; a sale that is not open or held is 409 invalid_state_transition; an account override of a walk-in sale is 409 walk_in_account.
          */
         post: operations["posOverrideCreate"];
         delete?: never;
@@ -6968,7 +7381,7 @@ export interface paths {
         put?: never;
         /**
          * Exchange goods in one act
-         * @description The returned lines and the replacement sale lines in one transaction, in section 11's lock order (the original sale row, the customer's credit, the inventory rows in product order, then the AR core): one credit memo and one sale that point at each other. The memo's credit (net of any restocking fee) is a leg of the replacement sale up to its total, so tender is taken only for the difference; when the return is worth more the surplus goes back in cash out of the open drawer or stays as store credit on a named account (refund_method cash or account). The restocked stock returns at the register's yard. A return worth the same takes no tender (409 no_tender_due if one is offered). When a tax provider is configured, the replacement lines are priced and quoted with the provider before the transaction opens. Refused with 409 and a blocker: insufficient_tender, exchange_card_refund (a card refund of the surplus is a card return through POST /pos/returns, today's refund path), exchange_card_token, tax_quote_stale, tax_rate_not_configured, exceeds_sold, insufficient_stock, no_open_session, walk_in_account, no_tender_due. Nothing is written when any refusal answers. The cashier is the JWT's subject; a machine key is refused 403.
+         * @description The returned lines and the replacement sale lines in one transaction, in section 11's lock order (the original sale row, the customer's credit, the inventory rows in product order, then the AR core): one credit memo and one sale that point at each other. The memo's credit (net of any restocking fee) is a leg of the replacement sale up to its total, so tender is taken only for the difference; when the return is worth more the surplus goes back in cash out of the open drawer or stays as store credit on a named account (refund_method cash or account). The restocked stock returns at the register's yard. A return worth the same takes no tender (409 no_tender_due if one is offered). When a tax provider is configured, the replacement lines are priced and quoted with the provider before the transaction opens. Refused with 409 and a blocker: insufficient_tender, exchange_card_refund (a card refund of the surplus is a card return through POST /pos/returns, today's refund path), exchange_card_token, tax_quote_stale, tax_rate_not_configured, exceeds_sold, insufficient_stock, no_open_session, walk_in_account, no_tender_due, alert_unacknowledged. Nothing is written when any refusal answers. The cashier is the JWT's subject; a machine key is refused 403.
          */
         post: operations["posExchangeCreate"];
         delete?: never;
@@ -7989,6 +8402,26 @@ export interface paths {
         patch: operations["productUpdateDimensions"];
         trace?: never;
     };
+    "/api/v1/products/{id}/density": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Set or clear the weighed sale's density (CP-19)
+         * @description The pounds per cubic yard with the volume state the figure was measured at (loose or compacted): the counter's only bridge between a scale weight and a price by the cubic yard. Both fields together, or a null pair to clear; one without the other is a 400. The body's revision or If-Match carries the precondition.
+         */
+        patch: operations["productUpdateDensity"];
+        trace?: never;
+    };
     "/api/v1/products/{id}/lead-time": {
         parameters: {
             query?: never;
@@ -8007,6 +8440,26 @@ export interface paths {
          * @description lead_time_days null is "unpublished", a different fact than zero ("available today").
          */
         patch: operations["productUpdateLeadTime"];
+        trace?: never;
+    };
+    "/api/v1/products/{id}/consumer-durable": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Set or clear the consumer durable flag
+         * @description The Form 8300 designated reporting transaction flag (CP-17a): the counter's large cash classifier counts a qualifying negotiable instrument only for a sale line of a flagged product priced over the threshold. The default is false; the flagged exceptions are the big ticket consumer goods.
+         */
+        patch: operations["productUpdateConsumerDurable"];
         trace?: never;
     };
     "/api/v1/products/{id}/units": {
@@ -9026,7 +9479,7 @@ export interface paths {
         put?: never;
         /**
          * Create a tax exemption
-         * @description Roles admin, owner, finance. customer_id and exempt_reason are required (400). The exemption is created active and effective now. expiry_date is a YYYY-MM-DD string; any other format is a 500. A customer outside the user's reach is refused 403 naming customer_id.
+         * @description Roles admin, owner, finance. customer_id, exempt_reason and certificate_number are required (400). The exemption is created active; effective_date is a YYYY-MM-DD string that defaults to the customer's primary branch's business day, expiry_date is a YYYY-MM-DD string on or after effective_date, and issuing_state is a two letter code when sent (any invalid field answers 400 naming the field). A customer outside the user's reach is refused 403 naming customer_id.
          */
         post: operations["taxExemptionCreate"];
         delete?: never;
@@ -9049,6 +9502,26 @@ export interface paths {
         get: operations["taxExemptionList"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tax/exemptions/{id}/end": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * End a tax exemption
+         * @description Roles admin, owner, finance. Sets the certificate inactive: it stays on file (the list still shows it, ended) but exempts no sale. An unknown id answers 404; a certificate that was already ended answers 409 already_ended. An exemption whose customer is outside the user's reach answers 404 and is not ended.
+         */
+        post: operations["taxExemptionEnd"];
         delete?: never;
         options?: never;
         head?: never;
@@ -9089,6 +9562,283 @@ export interface paths {
          * @description Roles admin, owner, finance. At least one line is required (400). document_type defaults to SalesInvoice. An exempt customer gets a zero tax result; otherwise Avalara is used when configured and a flat rate estimate (is_estimate true) when not. Amounts are int64 cents. A customer_id, or a ship_to_id of a customer, outside the user's reach is refused 403 naming customer_id.
          */
         post: operations["taxPreview"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tax/zones": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List tax zones
+         * @description Roles admin, owner, finance. Every zone, newest first, each with its rate parts and its boundaries. The country and jurisdiction_type filters are optional; country matches the two letter code and jurisdiction_type must be STA, CTY, CIT, STJ or PROV (400 otherwise).
+         */
+        get: operations["taxZoneList"];
+        put?: never;
+        /**
+         * Create a tax zone
+         * @description Roles admin, owner, finance. country (two letters), jurisdiction_code, jurisdiction_type (STA, CTY, CIT, STJ, PROV) and effective_from are required, with at least one rate part and, for a postal zone, at least one boundary. zone_kind defaults POSTAL; a PROVINCE zone needs province_code. sourcing defaults DESTINATION. Rates are decimal fractions between 0 and 1, such as 0.06.
+         */
+        post: operations["taxZoneCreate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tax/zones/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read a tax zone
+         * @description Roles admin, owner, finance. The zone with its rate parts and its boundaries.
+         */
+        get: operations["taxZoneGet"];
+        put?: never;
+        post?: never;
+        /**
+         * Delete a tax zone no document used
+         * @description Roles admin, owner, finance. A zone that an order or an invoice was taxed under answers 409: it is closed, never deleted, because the sale that used it must stay explainable from the records.
+         */
+        delete: operations["taxZoneDelete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tax/zones/{id}/close": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Close a tax zone
+         * @description Roles admin, owner, finance. Ends the zone's effective window on the named date, so sales before it keep the rate they were charged. A replacement rate is a new zone (or new rate parts from a later effective date), never an overwrite.
+         */
+        post: operations["taxZoneClose"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tint/systems": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List tint systems
+         * @description Every tinting system the dealer runs, with the dispense denominator that makes its colourant amount columns meaningful.
+         */
+        get: operations["tintSystemList"];
+        put?: never;
+        /**
+         * Create a tint system
+         * @description One manufacturer's tinting system. The unit_denominator is one of the trade's dispense increments (32, 48, 64, 128, 192, 384, 1024).
+         */
+        post: operations["tintSystemCreate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tint/bases": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List bases
+         * @description The base paints, optionally filtered to a tint system or to the bases whose product link is a given products row.
+         */
+        get: operations["tintBaseList"];
+        put?: never;
+        /** Create a base */
+        post: operations["tintBaseCreate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tint/colorants": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List colorants */
+        get: operations["tintColorantList"];
+        put?: never;
+        /** Create a colorant */
+        post: operations["tintColorantCreate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tint/colors": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List colours
+         * @description The colours, by name or manufacturer code fragment. A manufacturer code is an attribute, never a key.
+         */
+        get: operations["tintColorList"];
+        put?: never;
+        /**
+         * Create a colour
+         * @description A colour of a book (manufacturer_code set) or a store match (is_custom true, no manufacturer code, optionally the customer it was matched for).
+         */
+        post: operations["tintColorCreate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tint/formulas": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List formulas
+         * @description The formulas, optionally filtered to a colour, a base and a container size code, with their components in guide order.
+         */
+        get: operations["tintFormulaList"];
+        put?: never;
+        /**
+         * Create a formula
+         * @description One formula of a colour in a base at a container size. Every component's unit_denominator must be the one the colour's tint system declares.
+         */
+        post: operations["tintFormulaCreate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tint/formulas/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read a formula */
+        get: operations["tintFormulaGet"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tint/formulas/{id}/rescale": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Rescale a formula to another container size
+         * @description Each component is multiplied by the exact volume ratio and rounded independently to a whole count of its own dispense unit, half up; any_rounded reports whether at least one component was rounded, so the counter can see the value is a derived approximation and override it.
+         */
+        post: operations["tintFormulaRescale"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tint/saved-colors": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List saved colours
+         * @description The store's record of a customer's colours, optionally filtered by the free text job note (a room or a jobsite). The saved colours are customer rows, so the read is walled to the customers the caller may see: a customer of another branch reads as missing, and a key bound to a branch reads only the saved colours of the customers that hold its pin.
+         */
+        get: operations["tintSavedColorList"];
+        put?: never;
+        /**
+         * Save a colour for a customer
+         * @description The name is unique per customer, so a customer cannot accumulate two identical names. The counter dialogue offers saving a colour, so the cashier may write one; the write is walled to the customer it names, and a key bound to a branch reaches it only while that customer holds its pin.
+         */
+        post: operations["tintSavedColorCreate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tint/saved-colors/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Delete a saved colour */
+        delete: operations["tintSavedColorDelete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tint/charge": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The dealer's tint charge
+         * @description The dealer's tint charge rule (row CP-16) as the counter shows it: the charge for a tint with the colorant total and the base tier given. The rule follows the tint, not only the container: a tier covers the base tier it names and the colorant floor it names, and the flat figure covers the rest. A request with no numbers answers the flat figure, the dealer's default.
+         */
+        get: operations["tintChargeGet"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -10024,6 +10774,16 @@ export interface components {
             /** Format: int64 */
             total?: number;
         };
+        /** @description The dealer's large cash settings (CP-17a): the default country a branch with none of its own falls back to, and the Canadian dealer threshold, off by default. */
+        AdminLargeCashSettings: {
+            /** @description The dealer's default country, two letters, or empty when unset. */
+            country_default: string;
+            ca_enabled: boolean;
+            /** Format: int64 */
+            ca_threshold_cents: number;
+            /** Format: int64 */
+            ca_default_threshold_cents: number;
+        };
         /** @description Go type techadmin.APIKey. The hash field is tagged out of the JSON and never leaves the package; only the 12 character prefix identifies a key. */
         ApiKey: {
             /** Format: uuid */
@@ -10112,7 +10872,7 @@ export interface components {
             api_key: string;
             revision?: number;
         };
-        /** @description Go type staff.Staff. A member of the dealer roster, the identity AI_LM authenticates against; role is a free text label, and modules is the raw grant set, never null and not filtered by the global enable flag. */
+        /** @description Go type staff.Staff. A member of the dealer roster, the identity AI_LM authenticates against; role is a free text label, and modules is the raw grant set, never null and not filtered by the global enable flag. counter_pin_set and locked are the two facts the staff screen shows of the manager's counter PIN; the hash never leaves the server. */
         StaffMember: {
             /** Format: uuid */
             id: string;
@@ -10127,6 +10887,17 @@ export interface components {
             /** Format: date-time */
             updated_at: string;
             modules: string[];
+            counter_pin_set: boolean;
+            locked: boolean;
+        };
+        /** @description The PIN the admin typed. It rides the request once and never logs. */
+        AdminCounterPINRequest: {
+            pin: string;
+        };
+        /** @description The two facts the staff screen shows of a counter PIN, and nothing else. */
+        CounterPINAnswer: {
+            counter_pin_set: boolean;
+            locked: boolean;
         };
         /** @description The list envelope of ADR 0001 section 1. items is never null; total is present only under include=total. */
         StaffPage: {
@@ -10757,6 +11528,8 @@ export interface components {
             payment_terms: components["schemas"]["PaymentTermsRef"];
             /** @description Whether an order of this customer must carry a purchase order number. */
             po_required: boolean;
+            /** @description Whether every charge sale at the counter for this customer names a job. */
+            job_required: boolean;
             /** @description Whether every sale on account at the counter names a buyer from the contacts flagged authorized_buyer. */
             named_buyer_required: boolean;
             /**
@@ -10816,6 +11589,7 @@ export interface components {
              */
             payment_terms_id?: string;
             po_required?: boolean;
+            job_required?: boolean;
             /** @description Optional; left out keeps the value on a PUT (false on create). */
             named_buyer_required?: boolean;
             /**
@@ -10829,7 +11603,7 @@ export interface components {
              */
             revision?: number;
         };
-        /** @description The body of PUT. A PUT replaces the header: a field left out takes its default (null for an optional one, retail, true), except the two required controls (payment_terms_id and po_required) and the two optional counter controls (named_buyer_required and check_limit_cents, which keep their stored value when omitted so a left out field cannot reset them). primary_branch_id is refused. */
+        /** @description The body of PUT. A PUT replaces the header: a field left out takes its default (null for an optional one, retail, true), except the three required controls (payment_terms_id, po_required and job_required) and the two optional counter controls (named_buyer_required and check_limit_cents, which keep their stored value when omitted so a left out field cannot reset them). primary_branch_id is refused. */
         CustomerUpdateRequest: {
             account_number: string;
             name: string;
@@ -10862,6 +11636,7 @@ export interface components {
              */
             payment_terms_id: string;
             po_required: boolean;
+            job_required: boolean;
             /** @description Optional; left out keeps the value on a PUT (false on create). */
             named_buyer_required?: boolean;
             /**
@@ -11008,6 +11783,58 @@ export interface components {
             created_at: string;
             /** Format: date-time */
             updated_at: string;
+        };
+        Alert: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            customer_id: string;
+            /** @enum {string} */
+            kind: "note" | "warning";
+            text: string;
+            /** @description The alert speaks in the counter's customer panel. */
+            show_at_counter: boolean;
+            /** @description The alert speaks on the order page. */
+            show_at_orders: boolean;
+            /** @description A warning only: the counter has to read it and say so before the sale is taken. */
+            acknowledge_required: boolean;
+            /** @description The signed-in user who left the alert. */
+            created_by: string;
+            /** Format: date-time */
+            created_at: string;
+            /** @description The signed-in user who called the alert off; null while it is open. */
+            ended_by: string | null;
+            /**
+             * Format: date-time
+             * @description When the alert was called off; null while it is open.
+             */
+            ended_at: string | null;
+            /**
+             * Format: int64
+             * @description Moves when the alert is ended.
+             */
+            revision: number;
+        };
+        /** @description The list envelope of ADR 0001 section 1. items is never null; total is present only under include=total. */
+        AlertPage: {
+            items: components["schemas"]["Alert"][];
+            /** @description Opaque; pass it back verbatim as cursor. Null on the last page. */
+            next_cursor: string | null;
+            limit: number;
+            /** Format: int64 */
+            total?: number;
+        };
+        /** @description The body of an alert to leave. The author is the signed-in user, never the body. */
+        AlertRequest: {
+            /** @enum {string} */
+            kind: "note" | "warning";
+            text: string;
+            /** @description Defaults to false: the alert speaks only where it is told to. */
+            show_at_counter?: boolean;
+            /** @description Defaults to false: the alert speaks only where it is told to. */
+            show_at_orders?: boolean;
+            /** @description Defaults to false; only a warning may ask to be acknowledged. */
+            acknowledge_required?: boolean;
         };
         /** @description The list envelope of ADR 0001 section 1. items is never null; total is present only under include=total. */
         ContactPage: {
@@ -13350,6 +14177,8 @@ export interface components {
             stock_quantity: string | null;
             /** @description The pieces by length a random length line carries (ADR 0006 section 4); null on every other line. */
             tally: components["schemas"]["Tally"] | null;
+            /** @description The paint line's tint record (row CP-16); null on every other line. */
+            tint: components["schemas"]["LineTint"] | null;
             /**
              * Format: int64
              * @description The price charged per price unit, after any override, before any discount.
@@ -13392,6 +14221,30 @@ export interface components {
              * @description A unit cost at scale 4.
              */
             special_order_unit_cost_ten_thousandths: number | null;
+            /** @description Where the line's weight came from (CP-19); null on a line that was not weighed. Only a counter line weighs. */
+            weight_source: ("scale" | "manual") | null;
+            /** @description The gross reading in pounds, a decimal string. */
+            weight_gross_lb: string | null;
+            /** @description The tare used, whether read or stored. */
+            weight_tare_lb: string | null;
+            /** @description The net the quantity was priced from. */
+            weight_net_lb: string | null;
+            /** @description Gable computes the net as the difference of two gross readings (double_draft), never as a scale tare operation. */
+            weight_net_basis: ("single_draft" | "double_draft") | null;
+            /**
+             * Format: uuid
+             * @description The certified scale that produced the reading; null on a manual weight.
+             */
+            scale_device_id: string | null;
+            /** Format: uuid */
+            scale_ticket_id: string | null;
+            /** @description The ticket's consecutive number (WT-000001). */
+            scale_ticket_number: string | null;
+            /** @description The closed-list reason a typed weight carries; the documents print MAN WT. */
+            manual_weight_reason: string | null;
+            weight_captured_by: string | null;
+            /** Format: date-time */
+            weight_captured_at: string | null;
             /** Format: date-time */
             created_at: string;
             /**
@@ -13619,6 +14472,8 @@ export interface components {
             stock_quantity: string | null;
             /** @description The pieces by length a random length line carries (ADR 0006 section 4); null on every other line. */
             tally: components["schemas"]["Tally"] | null;
+            /** @description The paint line's tint record (row CP-16); null on every other line. */
+            tint: components["schemas"]["LineTint"] | null;
             /**
              * Format: int64
              * @description The price charged per price unit, after any override, before any discount.
@@ -13661,6 +14516,30 @@ export interface components {
              * @description A unit cost at scale 4.
              */
             special_order_unit_cost_ten_thousandths: number | null;
+            /** @description Where the line's weight came from (CP-19); null on a line that was not weighed. Only a counter line weighs. */
+            weight_source: ("scale" | "manual") | null;
+            /** @description The gross reading in pounds, a decimal string. */
+            weight_gross_lb: string | null;
+            /** @description The tare used, whether read or stored. */
+            weight_tare_lb: string | null;
+            /** @description The net the quantity was priced from. */
+            weight_net_lb: string | null;
+            /** @description Gable computes the net as the difference of two gross readings (double_draft), never as a scale tare operation. */
+            weight_net_basis: ("single_draft" | "double_draft") | null;
+            /**
+             * Format: uuid
+             * @description The certified scale that produced the reading; null on a manual weight.
+             */
+            scale_device_id: string | null;
+            /** Format: uuid */
+            scale_ticket_id: string | null;
+            /** @description The ticket's consecutive number (WT-000001). */
+            scale_ticket_number: string | null;
+            /** @description The closed-list reason a typed weight carries; the documents print MAN WT. */
+            manual_weight_reason: string | null;
+            weight_captured_by: string | null;
+            /** Format: date-time */
+            weight_captured_at: string | null;
             /** Format: date-time */
             created_at: string;
             /**
@@ -13819,7 +14698,15 @@ export interface components {
             phone: string | null;
             tax_jurisdiction_code: string | null;
             default_tax_rate: number | null;
+            cash_rounding_mode: components["schemas"]["CashRoundingMode"];
             timezone: string | null;
+            /** @description The branch's country, two letters (CP-17a): the country picks the branch's large cash rule. Null falls back to the dealer's country.default; a branch with neither cannot be saved. */
+            country_code: string | null;
+            /**
+             * Format: int64
+             * @description The branch's floor for asking a walk-in's identity on a cash sale over it (CP-17a), so the walk-in's cash sales are counted together. Null is the branch country's default: 3,000 dollars on a United States branch, off on a Canadian one. Zero is the dealer saying off.
+             */
+            walk_in_identity_cents: number | null;
             active: boolean;
             /** Format: uuid */
             branch_id: string | null;
@@ -13850,7 +14737,15 @@ export interface components {
             phone?: string | null;
             tax_jurisdiction_code?: string | null;
             default_tax_rate?: number | null;
+            cash_rounding_mode?: components["schemas"]["CashRoundingMode"];
             timezone?: string | null;
+            /** @description The branch's country, two letters (CP-17a): the country picks the branch's large cash rule. Null falls back to the dealer's country.default; a branch with neither cannot be saved. */
+            country_code?: string | null;
+            /**
+             * Format: int64
+             * @description The branch's floor for asking a walk-in's identity on a cash sale over it (CP-17a), so the walk-in's cash sales are counted together. Null is the branch country's default: 3,000 dollars on a United States branch, off on a Canadian one. Zero is the dealer saying off.
+             */
+            walk_in_identity_cents?: number | null;
             active?: boolean;
             /** Format: int64 */
             revision?: number;
@@ -13871,7 +14766,15 @@ export interface components {
             phone?: string;
             tax_jurisdiction_code?: string;
             default_tax_rate?: number;
+            cash_rounding_mode?: components["schemas"]["CashRoundingMode"];
             timezone?: string;
+            /** @description The branch's country, two letters (CP-17a); null falls back to the dealer's country.default. */
+            country_code?: string | null;
+            /**
+             * Format: int64
+             * @description The branch's floor for asking a walk-in's identity on a cash sale over it (CP-17a), so the walk-in's cash sales are counted together. Null is the branch country's default: 3,000 dollars on a United States branch, off on a Canadian one. Zero is the dealer saying off.
+             */
+            walk_in_identity_cents?: number | null;
             /** @description Defaults to true when absent; an explicit false is honored. */
             active?: boolean | null;
         };
@@ -13883,7 +14786,13 @@ export interface components {
             active: boolean;
             is_home?: boolean;
             timezone?: string;
+            cash_rounding_mode?: components["schemas"]["CashRoundingMode"];
         };
+        /**
+         * @description The branch's own cash rounding rule (CP-18): the rule off, or the nearest five cents. The Government of Canada elected symmetric rounding to the nearest five cents for cash, and the rounding touches the cash leg only.
+         * @enum {string}
+         */
+        CashRoundingMode: "OFF" | "NEAREST_5_CENTS";
         BranchSummaryList: components["schemas"]["BranchSummary"][];
         UserLocation: {
             user_sub: string;
@@ -14165,6 +15074,8 @@ export interface components {
             stock_quantity: string | null;
             /** @description The pieces by length a random length line carries (ADR 0006 section 4); null on every other line. */
             tally: components["schemas"]["Tally"] | null;
+            /** @description The paint line's tint record (row CP-16); null on every other line. */
+            tint: components["schemas"]["LineTint"] | null;
             /**
              * Format: int64
              * @description The price charged per price unit, after any override, before any discount.
@@ -14207,6 +15118,30 @@ export interface components {
              * @description A unit cost at scale 4.
              */
             special_order_unit_cost_ten_thousandths: number | null;
+            /** @description Where the line's weight came from (CP-19); null on a line that was not weighed. Only a counter line weighs. */
+            weight_source: ("scale" | "manual") | null;
+            /** @description The gross reading in pounds, a decimal string. */
+            weight_gross_lb: string | null;
+            /** @description The tare used, whether read or stored. */
+            weight_tare_lb: string | null;
+            /** @description The net the quantity was priced from. */
+            weight_net_lb: string | null;
+            /** @description Gable computes the net as the difference of two gross readings (double_draft), never as a scale tare operation. */
+            weight_net_basis: ("single_draft" | "double_draft") | null;
+            /**
+             * Format: uuid
+             * @description The certified scale that produced the reading; null on a manual weight.
+             */
+            scale_device_id: string | null;
+            /** Format: uuid */
+            scale_ticket_id: string | null;
+            /** @description The ticket's consecutive number (WT-000001). */
+            scale_ticket_number: string | null;
+            /** @description The closed-list reason a typed weight carries; the documents print MAN WT. */
+            manual_weight_reason: string | null;
+            weight_captured_by: string | null;
+            /** Format: date-time */
+            weight_captured_at: string | null;
             /** Format: date-time */
             created_at: string;
         };
@@ -14254,6 +15189,8 @@ export interface components {
             stock_quantity: string | null;
             /** @description The pieces by length a random length line carries (ADR 0006 section 4); null on every other line. */
             tally: components["schemas"]["Tally"] | null;
+            /** @description The paint line's tint record (row CP-16); null on every other line. */
+            tint: components["schemas"]["LineTint"] | null;
             /**
              * Format: int64
              * @description The price charged per price unit, after any override, before any discount.
@@ -14296,6 +15233,30 @@ export interface components {
              * @description A unit cost at scale 4.
              */
             special_order_unit_cost_ten_thousandths: number | null;
+            /** @description Where the line's weight came from (CP-19); null on a line that was not weighed. Only a counter line weighs. */
+            weight_source: ("scale" | "manual") | null;
+            /** @description The gross reading in pounds, a decimal string. */
+            weight_gross_lb: string | null;
+            /** @description The tare used, whether read or stored. */
+            weight_tare_lb: string | null;
+            /** @description The net the quantity was priced from. */
+            weight_net_lb: string | null;
+            /** @description Gable computes the net as the difference of two gross readings (double_draft), never as a scale tare operation. */
+            weight_net_basis: ("single_draft" | "double_draft") | null;
+            /**
+             * Format: uuid
+             * @description The certified scale that produced the reading; null on a manual weight.
+             */
+            scale_device_id: string | null;
+            /** Format: uuid */
+            scale_ticket_id: string | null;
+            /** @description The ticket's consecutive number (WT-000001). */
+            scale_ticket_number: string | null;
+            /** @description The closed-list reason a typed weight carries; the documents print MAN WT. */
+            manual_weight_reason: string | null;
+            weight_captured_by: string | null;
+            /** Format: date-time */
+            weight_captured_at: string | null;
             /** Format: date-time */
             created_at: string;
             /**
@@ -14491,6 +15452,40 @@ export interface components {
              * @description The unapplied cash of the posted payments taken against this order (deposits), applied to its invoices as they are billed.
              */
             deposit_unapplied_cents: number;
+            /**
+             * Format: int64
+             * @description Everything taken on the order (deposits), applied and unapplied both.
+             */
+            deposit_total_cents: number;
+            /**
+             * Format: int64
+             * @description The order total less everything taken on it: what the customer still owes on the order.
+             */
+            balance_due_after_deposits_cents: number;
+            /** @description The posted payments taken against this order (deposits), oldest first, each with the invoices it settled. */
+            deposits: {
+                /** Format: uuid */
+                id: string;
+                /** @description PAY-000001, the payment's own number. */
+                number: string;
+                /** Format: date */
+                received_on: string;
+                /** @enum {string} */
+                method: "cash" | "check" | "ach" | "other" | "card";
+                /** Format: int64 */
+                amount_cents: number;
+                /** Format: int64 */
+                unapplied_cents: number;
+                reference: string | null;
+                applications: {
+                    /** Format: uuid */
+                    invoice_id: string;
+                    /** Format: int64 */
+                    amount_cents: number;
+                    /** Format: date */
+                    applied_on: string;
+                }[];
+            }[];
             /** @description The delivery address captured at confirm (ADR 0005 section 5.1); null on an order that never confirmed or a pickup without one. */
             ship_to: {
                 /** Format: uuid */
@@ -14889,6 +15884,11 @@ export interface components {
             order_id?: string;
             /** Format: uuid */
             job_id?: string;
+            /**
+             * Format: uuid
+             * @description The open counter till session a cash or check counter deposit rides.
+             */
+            till_session_id?: string;
             applications?: components["schemas"]["PaymentApplicationRequest"][];
         };
         CardPaymentRequest: {
@@ -15991,6 +16991,16 @@ export interface components {
              * @description Absent means the walk-in customer.
              */
             customer_id?: string | null;
+            /**
+             * Format: uuid
+             * @description The ship to a delivered sale carries. Needs the customer named and delivery_type delivery; 400 otherwise, and 400 when the ship to is another customer's.
+             */
+            ship_to_id?: string | null;
+            /**
+             * @description pickup is the default; a delivery is sourced to the ship to's zone for tax.
+             * @enum {string}
+             */
+            delivery_type?: "pickup" | "delivery";
         };
         PosAddLineRequest: {
             line: components["schemas"]["PosLineRequest"];
@@ -16010,6 +17020,36 @@ export interface components {
              * @description The sale's revision; or send If-Match.
              */
             revision?: number;
+            /** @description The payer's details the counter captured for a large cash crossing (CP-17a); required when this payment takes the payer over the branch's threshold, refused 409 payer_details_required without them. */
+            payer?: components["schemas"]["PosPayerCapture"];
+            /** @description The counter's record that the walk-in declined to identify over the branch's walk-in identity floor (CP-17a); the sale goes ahead and the fact is recorded for the manager's worklist as an identity declined. */
+            payer_declined?: boolean;
+            /** @description The manager's mark that an instrument may be being used to avoid reporting (CP-17a); it makes a qualifying instrument count as cash whatever was sold. */
+            suspected_avoidance?: boolean;
+        };
+        /** @description The payer identity a large cash crossing captures at the counter (CP-17a). The taxpayer identification number and the ID number are sensitive: sealed at rest, never logged, never printed on a receipt and never in an audit row's body. */
+        PosPayerCapture: {
+            /** @description The payer's name. */
+            name?: string;
+            /** @description The payer's address. */
+            address?: string;
+            /** @description The payer's occupation, or the nature of a sole proprietor's principal business. */
+            occupation?: string;
+            /** @description The payer's date of birth, as YYYY-MM-DD. */
+            date_of_birth?: string;
+            /**
+             * @description The kind of identification looked at.
+             * @enum {string}
+             */
+            id_type?: "drivers_license" | "state_id" | "passport" | "military_id" | "other";
+            /** @description The identification number; sealed at rest. */
+            id_number?: string;
+            /** @description The taxpayer identification number (the United States rule); sealed at rest. */
+            taxpayer_id?: string;
+            /** @description Whether the person paying acts on behalf of someone else. */
+            third_party_payer?: boolean;
+            /** @description The customer's counter alerts the clerk read and acknowledged before taking the sale. A warning that asks to be acknowledged must be named here, or the completion is refused with 409 alert_unacknowledged and nothing is taken. */
+            acknowledged_alert_ids?: string[];
         };
         PosTenderRequest: {
             method: components["schemas"]["PosTenderMethod"];
@@ -16026,6 +17066,63 @@ export interface components {
              * @enum {string|null}
              */
             id_type?: "drivers_license" | "state_id" | "passport" | "military_id" | "other" | null;
+            /**
+             * @description The kind of check the tender is (CP-17a); on a check tender only. A personal check never counts as cash; a cashier's check, bank draft, traveler's check or money order at or under the threshold face value counts only for a consumer durable sale line or under the suspected avoidance mark.
+             * @enum {string|null}
+             */
+            instrument?: "personal_check" | "cashiers_check" | "bank_draft" | "travelers_check" | "money_order" | null;
+        };
+        PosLargeCashPreviewRequest: {
+            /**
+             * Format: uuid
+             * @description The sale the payment panel holds.
+             */
+            transaction_id: string;
+            /** @description The manager's suspected avoidance mark. */
+            suspected_avoidance?: boolean;
+            /** @description The identity the counter already holds for this payer (the walk-in identified earlier in this till session). The preview keys the same person the completion will, so the two agree on whose cash this is. */
+            payer?: components["schemas"]["PosPayerCapture"];
+            tenders: {
+                /** @description The tender method: cash, check, card, account or store_credit. */
+                method: string;
+                /** @enum {string|null} */
+                instrument?: "personal_check" | "cashiers_check" | "bank_draft" | "travelers_check" | "money_order" | null;
+                /** Format: int64 */
+                amount_cents: number;
+            }[];
+        };
+        /** @description What the counter asks before Pay (CP-17a): the branch's country and rule family, this sale's counted cash, the aggregate it comes to, the threshold with its comparator shape, whether the payer's details are required and the fields the rule needs. A Canadian branch carries the note that the capture is for the dealer's own records and is not a FINTRAC report. The walk-in floor is the branch's own amount over which the counter asks a walk-in who paid cash to identify themselves; a branch with it off says on the counter that the walk-in's cash is not aggregated. */
+        PosLargeCashPreview: {
+            /** @description The branch's country, two letters. */
+            country: string;
+            /** @enum {string} */
+            rule_family: "" | "US_8300" | "CA_DEALER";
+            /** Format: int64 */
+            counted_cents: number;
+            /** Format: int64 */
+            aggregate_cents: number;
+            /** Format: int64 */
+            threshold_cents: number;
+            /** @enum {string} */
+            comparator: "greater" | "at_or_above";
+            asks_details: boolean;
+            fields: string[];
+            note?: string;
+            /** @description True for the Canadian dealer policy threshold (never a legal duty). */
+            dealer_threshold?: boolean;
+            /**
+             * Format: int64
+             * @description The branch's walk-in identity floor in cents; zero when the branch has it off.
+             */
+            walk_in_floor_cents: number;
+            /** @description True when this walk-in's cash sale passes the branch's floor and no identity is captured yet: the counter asks before Pay. */
+            asks_floor: boolean;
+            /** @description True when the branch counts a walk-in's cash sales together once the walk-in is identified. */
+            walk_in_aggregated: boolean;
+            /** @description The plain sentence the counter shows when the branch's floor is off: the walk-in's cash is not aggregated. */
+            walk_in_note?: string;
+            /** @description True when this sale's counted cash crosses the rule's threshold: the payer's details are required and no decline answers it. */
+            threshold_crossed: boolean;
         };
         PosVoidRequest: {
             reason: string;
@@ -16047,6 +17144,46 @@ export interface components {
             reconciliation_reference?: string;
             /** @description Why the record was made */
             reason: string;
+        };
+        /** @description One open refund claim in the manager's list (CP-06). */
+        PosRefundIntentSummary: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            sale_id: string;
+            /** @description The claim's sale, POS-000001. */
+            sale_number: string;
+            /** Format: uuid */
+            tender_id: string;
+            /** @enum {string} */
+            tender_method: "cash" | "check" | "card" | "account" | "store_credit";
+            /**
+             * Format: int64
+             * @description The claim's amount.
+             */
+            amount_cents: number;
+            /** @enum {string} */
+            act: "void" | "return" | "payback";
+            /**
+             * @description PENDING waits on the terminal's answer or the resolve route; FAILED is a void's declined claim whose credit the pay back route returns.
+             * @enum {string}
+             */
+            state: "PENDING" | "FAILED";
+            /**
+             * Format: int64
+             * @description What the tender's posted payment still holds unapplied; the credit a pay back returns.
+             */
+            held_credit_cents: number;
+            /** Format: date-time */
+            created_at: string;
+        };
+        PosRefundIntentPage: {
+            items: components["schemas"]["PosRefundIntentSummary"][];
+            /** @description Null: the page is the whole open set. */
+            next_cursor: string | null;
+            limit: number;
+            /** @description Only under include=total. */
+            total?: number;
         };
         PosRefundIntentResolved: {
             /** Format: uuid */
@@ -16142,7 +17279,7 @@ export interface components {
          * @description The closed lowercase list of return reasons; an absent reason is other.
          * @enum {string}
          */
-        PosReturnReasonCode: "defective" | "damaged" | "wrong_item" | "ordered_wrong" | "changed_mind" | "overbought" | "other";
+        PosReturnReasonCode: "defective" | "damaged" | "wrong_item" | "ordered_wrong" | "changed_mind" | "overbought" | "mis_tint" | "other";
         PosWayForward: {
             /** @enum {string} */
             kind: "pay_down" | "manager_override" | "switch_tender";
@@ -16158,10 +17295,10 @@ export interface components {
             /** @enum {string} */
             verdict: "allowed" | "blocked";
             /**
-             * @description Empty when plainly allowed; the blocker code the completion refuses with when blocked; manager_override when allowed by a live override.
+             * @description Empty when plainly allowed; the blocker code the completion refuses with when blocked (account_hold: the AR core's standing hold record); manager_override when allowed by a live override.
              * @enum {string}
              */
-            reason: "" | "credit_hold" | "credit_limit" | "cash_only_terms" | "manager_override";
+            reason: "" | "credit_hold" | "credit_limit" | "cash_only_terms" | "account_hold" | "manager_override";
             /** @description The verdict in plain words, with the amount. */
             message: string;
             /**
@@ -16214,6 +17351,17 @@ export interface components {
             /** @description The payment shapes the server takes from this customer now, in the order the counter shows them. */
             payment_options: components["schemas"]["PosTenderMethod"][];
             on_account: components["schemas"]["PosOnAccountVerdict"];
+            /** @description The customer's alerts that speak at the counter, oldest first: a note to read, or a warning that asks to be acknowledged before the sale is taken. */
+            alerts: components["schemas"]["PosCounterAlert"][];
+        };
+        PosCounterAlert: {
+            /** Format: uuid */
+            id: string;
+            /** @enum {string} */
+            kind: "note" | "warning";
+            text: string;
+            /** @description The counter has to read this warning and say so before the sale is taken. */
+            acknowledge_required: boolean;
         };
         PosOverrideRequest: {
             /** @enum {string} */
@@ -16224,6 +17372,8 @@ export interface components {
              * @description The most the manager approves: the account portion, or the largest check.
              */
             cap_cents: number;
+            /** @description A manager's step up approval (POST /pos/step-up), spent by this one override: the manager it names is the approver, recorded by name. Absent on the signed in manager's own path. */
+            approval_token?: string;
         };
         PosOverride: {
             /** Format: uuid */
@@ -16294,6 +17444,64 @@ export interface components {
             /** @description Tender for the difference only. Not store_credit (the returned credit is applied itself). */
             tenders?: components["schemas"]["PosTenderRequest"][];
             picked_up_by?: string | null;
+            /** @description The customer's counter alerts the clerk read and acknowledged before taking the exchange's replacement sale. A warning that asks to be acknowledged must be named here, or the exchange is refused with 409 alert_unacknowledged and nothing is written. */
+            acknowledged_alert_ids?: string[];
+            /** @description The payer's details the counter captured for a large cash crossing (CP-17a); required when this exchange's cash difference takes the payer over the branch's threshold, refused 409 payer_details_required without them. */
+            payer?: components["schemas"]["PosPayerCapture"];
+            /** @description The counter's record that the walk-in declined to identify over the branch's walk-in identity floor (CP-17a); the exchange goes ahead and the fact is recorded for the manager's worklist as an identity declined. */
+            payer_declined?: boolean;
+            /** @description The manager's suspected avoidance mark (CP-17a); it makes a qualifying instrument count as cash whatever was sold. */
+            suspected_avoidance?: boolean;
+            /**
+             * @description The preview only: the method the counter will tender for the difference, so the server can say what the branch's large cash rule needs of this exchange before it is rung. The exchange takes the tender itself in tenders.
+             * @enum {string}
+             */
+            tender_method?: "cash" | "check" | "card";
+        };
+        PosReturnFigures: {
+            /**
+             * Format: int64
+             * @description The credit memo's subtotal net of the fee, negative as the memo states it.
+             */
+            subtotal_cents: number;
+            /**
+             * Format: int64
+             * @description The tax refunded, negative; the fee is not taxed.
+             */
+            tax_cents: number;
+            /**
+             * Format: int64
+             * @description The restocking fee withheld, positive, half even to the cent on each line's own refund and never more than it.
+             */
+            restocking_fee_cents: number;
+            /**
+             * Format: int64
+             * @description The memo's total, negative (a credit).
+             */
+            total_cents: number;
+            /**
+             * Format: int64
+             * @description The money that goes back, positive: the total's other sign.
+             */
+            refund_cents: number;
+            /** @description The request's lines in order, each with the fee its reason withholds. */
+            lines: components["schemas"]["PosReturnFigureLine"][];
+        };
+        PosReturnFigureLine: {
+            /**
+             * Format: uuid
+             * @description The sale line a linked return names; null on a free line.
+             */
+            line_id: string | null;
+            /** @description The line's reason from the closed list; other when the request named none. */
+            reason_code: string;
+            /**
+             * Format: int64
+             * @description The line's refund, negative (the memo line's shape).
+             */
+            line_total_cents: number;
+            /** Format: int64 */
+            restocking_fee_cents: number;
         };
         PosExchangeFigures: {
             /**
@@ -16313,6 +17521,8 @@ export interface components {
              * @description Replacement less return: positive is what the customer pays, negative what goes back.
              */
             difference_cents: number;
+            /** @description The branch country's large cash answer for this exchange (CP-17a): whether the payer's details are required and which fields the rule needs. */
+            large_cash?: components["schemas"]["PosLargeCashPreview"];
         };
         PosExchange: {
             return: components["schemas"]["PosReturn"];
@@ -16408,6 +17618,8 @@ export interface components {
             /** Format: int64 */
             discount_cents?: number | null;
             discount_reason?: string | null;
+            /** @description The paint line's tint record (row CP-16), null or omitted on every other line. */
+            tint?: components["schemas"]["LineTint"] | null;
         };
         /** @description A sale's head, a list item. */
         PosTransactionSummary: {
@@ -16439,6 +17651,12 @@ export interface components {
             /** Format: date-time */
             created_at: string;
             item_count: number;
+            /** @description The account the sale names; null on a walk-in. */
+            customer_name: string | null;
+            /** @description The invoice's number; null until the sale completes. */
+            invoice_number: string | null;
+            /** @description The day the sale was made on in its branch's own zone, YYYY-MM-DD (the date a search bounds by); never the UTC slice of the timestamp. */
+            business_day: string;
         };
         /** @description The full sale: the head with its lines and tenders. */
         PosTransaction: {
@@ -16499,6 +17717,27 @@ export interface components {
              * @description The return an exchange's replacement sale stands against.
              */
             exchange_return_id: string | null;
+            /**
+             * @description The sale's own delivery answer: a delivery is taxed at the ship to's zone rate, a pickup at the branch rate.
+             * @enum {string}
+             */
+            delivery_type: "pickup" | "delivery";
+            /**
+             * Format: uuid
+             * @description The ship to a delivered sale carries.
+             */
+            ship_to_id: string | null;
+            /** @description Per sale line id, the quantity every earlier return brought back (a decimal string), on a completed sale that has returns; absent otherwise. The return dialog holds a fully returned line back with it. */
+            returned_quantities?: {
+                [key: string]: string;
+            };
+            /** @description Why there is no tax: the certificate that exempts this sale on the branch's business day (CP-10). Null when no certificate covers the day. */
+            tax_exemption?: {
+                /** @description The certificate's number as the counter shows it. */
+                certificate_number?: string;
+                /** @description The certificate's last day, YYYY-MM-DD; absent when it does not expire. */
+                expiry_day?: string;
+            } | null;
             lines: components["schemas"]["PosLineItem"][];
             tenders: components["schemas"]["PosTender"][];
         };
@@ -16514,6 +17753,8 @@ export interface components {
             name: string;
             /** @description The account asks for a purchase order on a charge sale (409 po_required at completion without one). */
             po_required: boolean;
+            /** @description The account asks for a job on a charge sale (409 job_required at completion without one). */
+            job_required: boolean;
             /**
              * Format: int64
              * @description Null: no limit. 0: no credit.
@@ -16544,6 +17785,16 @@ export interface components {
              * @description A buyer from the account's roster (an authorized, active contact of the customer); 400 otherwise. Needs the customer named.
              */
             buyer_contact_id?: string | null;
+            /**
+             * Format: uuid
+             * @description The ship to the goods are delivered to: the sale's tax comes from that zone (CP-10). Needs the customer named and delivery_type delivery; the ship to must be the customer's own.
+             */
+            ship_to_id?: string | null;
+            /**
+             * @description Pickup, the default, taxes at the branch rate; a delivery at the ship to's zone.
+             * @enum {string}
+             */
+            delivery_type?: "pickup" | "delivery";
         };
         PosTransactionPage: {
             items: components["schemas"]["PosTransactionSummary"][];
@@ -16617,8 +17868,188 @@ export interface components {
             vendor_id: string | null;
             /** Format: int64 */
             special_order_unit_cost_ten_thousandths: number | null;
+            /** @description The paint line's tint record (row CP-16), null on every other line. */
+            tint: components["schemas"]["LineTint"] | null;
+            /** @description Where the line's weight came from; null on a line that was not weighed (CP-19). */
+            weight_source: ("scale" | "manual") | null;
+            /** @description The gross reading in pounds, a decimal string. */
+            weight_gross_lb: string | null;
+            /** @description The tare used: the weigh in's gross on a double draft ticket. */
+            weight_tare_lb: string | null;
+            /** @description The net the quantity was priced from. */
+            weight_net_lb: string | null;
+            /** @description Gable computes the net as the difference of two gross readings (double_draft), never as a scale tare operation. */
+            weight_net_basis: ("single_draft" | "double_draft") | null;
+            /**
+             * Format: uuid
+             * @description The certified scale that produced the reading; null on a manual weight.
+             */
+            scale_device_id: string | null;
+            /** Format: uuid */
+            scale_ticket_id: string | null;
+            /** @description The ticket's consecutive number (WT-000001). */
+            scale_ticket_number: string | null;
+            /** @description The closed-list reason a typed weight carries; the documents print MAN WT. */
+            manual_weight_reason: string | null;
+            weight_captured_by: string | null;
+            /** Format: date-time */
+            weight_captured_at: string | null;
             /** Format: date-time */
             created_at: string;
+        };
+        /** @description One weight ticket (CP-19): the consecutive never reused number, the device that produced the reading, the gross, tare and net, the vehicle, the source and the net basis, and the void state that replaces a delete. */
+        PosScaleTicket: {
+            /** Format: uuid */
+            id: string;
+            /** @description WT-000001, consecutive and never reused; a void keeps it. */
+            ticket_number: string;
+            /** Format: int64 */
+            revision: number;
+            /** Format: uuid */
+            branch_id: string;
+            /**
+             * Format: uuid
+             * @description The certified scale that produced the reading; null on a manual weight.
+             */
+            scale_device_id: string | null;
+            /** @description The truck's plate or number. */
+            vehicle_ref: string | null;
+            /** @enum {string} */
+            direction: "weigh_in" | "weigh_out" | "single";
+            /** @enum {string} */
+            status: "open" | "completed" | "void";
+            /** @description A decimal string of pounds. */
+            gross_lb: string | null;
+            /** @description The weigh in's gross on a double draft ticket. */
+            tare_lb: string | null;
+            net_lb: string | null;
+            /**
+             * @description The unit the indicator reported; the weights are pounds.
+             * @enum {string}
+             */
+            reading_unit: "lb" | "kg";
+            /** @enum {string} */
+            source: "scale" | "manual";
+            /** @description The closed-list reason; set on every manual weight. */
+            manual_reason: string | null;
+            manual_note: string | null;
+            net_basis: ("single_draft" | "double_draft") | null;
+            /** Format: uuid */
+            weigh_in_ticket_id: string | null;
+            /** Format: uuid */
+            sale_line_id: string | null;
+            captured_by: string;
+            /** Format: date-time */
+            captured_at: string;
+            void_reason: string | null;
+            /** Format: date-time */
+            created_at: string;
+        };
+        PosScaleDevice: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            branch_id: string;
+            name: string;
+            /** @description SMA: the Scale Manufacturers Association standard. */
+            protocol: string;
+            endpoint: string;
+            /** @description The certificate of conformance number the ticket can prove. */
+            certificate_no: string | null;
+            location_note: string | null;
+        };
+        PosScaleReading: {
+            /** @description A decimal string of pounds; null when the indicator sent no weight. */
+            weight_lb: string | null;
+            /** @enum {string} */
+            unit: "lb" | "kg";
+            /** @enum {string} */
+            mode: "gross" | "tare" | "net";
+            motion: boolean;
+            /** @description The manual entry's Handbook 44 check reads this. */
+            at_zero: boolean;
+        };
+        PosScaleStatus: {
+            configured: boolean;
+            device: components["schemas"]["PosScaleDevice"] | null;
+            reading: components["schemas"]["PosScaleReading"] | null;
+            /** @description Why the scale cannot be read, when it cannot. */
+            detail?: string;
+        };
+        PosScaleWeighInRequest: {
+            register_id: string;
+            /** @description The truck's plate or number; the ticket carries it. */
+            vehicle_ref: string;
+        };
+        PosScaleWeighOutRequest: {
+            /** Format: uuid */
+            sale_id: string;
+            /** Format: uuid */
+            line_id: string;
+            /**
+             * Format: uuid
+             * @description The weigh in to net against; else the vehicle's latest open one.
+             */
+            weigh_in_ticket_id?: string | null;
+            vehicle_ref?: string;
+            /**
+             * Format: int64
+             * @description The sale's revision; the If-Match header carries it instead.
+             */
+            revision?: number | null;
+        };
+        PosScaleWeighOutResponse: {
+            sale: components["schemas"]["PosTransaction"];
+            ticket: components["schemas"]["PosScaleTicket"];
+        };
+        PosManualWeightRequest: {
+            /** @description The gross weight in pounds, a decimal string. */
+            weight_lb: string;
+            /** @description The tare in pounds when the entry carries one. */
+            tare_lb?: string | null;
+            /** @description One of the closed list GET /api/v1/pos/scale/manual-reasons answers. */
+            reason: string;
+            /** @description Required when the reason is other. */
+            note?: string;
+            /**
+             * Format: int64
+             * @description The sale's revision; the If-Match header carries it instead.
+             */
+            revision?: number | null;
+        };
+        PosScaleTicketVoidRequest: {
+            /** @description A void says why. */
+            reason: string;
+            /**
+             * Format: int64
+             * @description The ticket's revision; the If-Match header carries it instead.
+             */
+            revision?: number | null;
+        };
+        PosScaleTicketList: {
+            items: components["schemas"]["PosScaleTicket"][];
+        };
+        PosScaleManualReason: {
+            /** @enum {string} */
+            code: "scale_offline" | "scale_error" | "preweighed" | "other";
+            label: string;
+            needs_note: boolean;
+        };
+        PosScaleManualReasonList: {
+            items: components["schemas"]["PosScaleManualReason"][];
+        };
+        PosScaleSimulatorRequest: {
+            /** @description The load on the deck, a decimal string of the unit named. */
+            weight_lb?: string | null;
+            /** @enum {string} */
+            unit?: "lb" | "kg";
+            /** @description Pin the motion flag. */
+            motion?: boolean | null;
+            /**
+             * @description Force an indicator status; absent leaves it.
+             * @enum {string}
+             */
+            status?: "none" | "over_capacity" | "under_capacity" | "zero_error" | "initial_zero_error" | "tare_error";
         };
         /** @description One payment taken at the counter, stored net: the tendered amount less any change given from it, so the payment it became is the money kept. */
         PosTender: {
@@ -16718,6 +18149,10 @@ export interface components {
              * @description The fee this line's reason withheld from its refund, half even to the cent.
              */
             restocking_fee_cents: number;
+            /** @description The mis tint return (row CP-16): the store mixed the wrong colour, so the tinted line returned. */
+            mis_tint: boolean;
+            /** @description A returned line whose sale carried a tint: the can goes to the mistint rack, never back into saleable stock. */
+            tinted_return: boolean;
         };
         /** @description One drawer shift. The expected cash is the sum of the session's cash payments (already net of change) plus the opening float less cash refunds. */
         PosTillSession: {
@@ -16775,8 +18210,10 @@ export interface components {
             reason_code?: components["schemas"]["PosTillReasonCode"] | null;
             /** @description Required, not blank, when the reason_code is other. */
             note?: string | null;
-            /** @description A pickup's second person, required there and absent for any other kind. */
+            /** @description A pickup's second person, required there and absent for any other kind. With an approval_token the manager is named by their approval, not typed. */
             taken_by?: string | null;
+            /** @description A manager's step up approval (POST /pos/step-up), spent by this one pickup: the manager it names is the taker. Only a pickup carries one. */
+            approval_token?: string;
         };
         /** @enum {string} */
         PosTillMovementKind: "safe_drop" | "pickup" | "paid_in" | "paid_out";
@@ -16812,7 +18249,52 @@ export interface components {
             next_cursor: string | null;
             limit: number;
         };
+        PosStepUpRequest: {
+            /** @enum {string} */
+            act: "override" | "pickup" | "signoff";
+            /**
+             * @description The override's kind; required when the act is an override, absent otherwise. The approval binds it.
+             * @enum {string}
+             */
+            kind?: "account" | "check" | "refund_method";
+            /** @description The manager's staff number or staff id. */
+            manager: string;
+            /** @description The manager's counter PIN. Verified in constant time, never logged. */
+            pin: string;
+            /**
+             * Format: uuid
+             * @description The act's target: the sale (an override) or the till session (a pickup, a sign off).
+             */
+            target_id: string;
+            /**
+             * Format: int64
+             * @description The amount the manager approves: the override's cap or the pickup's amount; required for an override or a pickup, absent for a sign off. The approval binds it.
+             */
+            amount_cents?: number;
+        } & (unknown & unknown & unknown);
+        PosStepUpApproval: {
+            /** @description The opaque token the one act spends as approval_token. Stored only as its SHA-256 hash. */
+            token: string;
+            /** @description The manager's name, for the screen to say who approved. */
+            manager_name: string;
+            /** Format: date-time */
+            expires_at: string;
+        };
+        PosStepUpManager: {
+            /** Format: uuid */
+            id: string;
+            full_name: string;
+            staff_no: string;
+            role: string;
+        };
+        PosStepUpManagerPage: {
+            items: components["schemas"]["PosStepUpManager"][];
+            next_cursor: string | null;
+            limit: number;
+        };
         PosTillSignoffRequest: {
+            /** @description A manager's step up approval (POST /pos/step-up), spent by this one sign off: the manager it names is the signer. Absent, the signed in caller needs the finance or owner role. */
+            approval_token?: string;
             /** @description Why the variance is accepted; not blank. */
             reason: string;
         };
@@ -16851,6 +18333,73 @@ export interface components {
              * @description Null clears the branch's override.
              */
             variance_threshold_cents: number | null;
+        };
+        PosSettings: {
+            /**
+             * Format: int64
+             * @description The settings resource's revision; a write names it (If-Match and/or the body's revision).
+             */
+            revision: number;
+            rules: {
+                /**
+                 * Format: int64
+                 * @description The database wide check limit; null is no limit. A customer's own limit wins over it.
+                 */
+                check_limit_cents: number | null;
+                check_id_required: {
+                    /**
+                     * @description Never asks for an ID; every_check asks on every check; over_amount asks once the sale's checks total over the figure, and then on every check of the sale.
+                     * @enum {string}
+                     */
+                    mode: "never" | "every_check" | "over_amount";
+                    /**
+                     * Format: int64
+                     * @description The figure an over_amount rule names, read against the sale's checks in total; null on the other two.
+                     */
+                    over_cents: number | null;
+                };
+                /** @description The fee each return reason withholds, in basis points: the whole closed list (defective, damaged, wrong_item, ordered_wrong, changed_mind, overbought, other), a reason never set carrying none. The return takes it half even to the cent from each line's own refund, never more than the line. */
+                restocking_fees: {
+                    [key: string]: number;
+                };
+                /** @description The suggested fee for each reason, read only: what the settings screen offers a dealer who has set nothing. The reasons that are the customer's own doing carry a figure; the dealer's own and the catch all carry none. Never a fee in force until written. */
+                restocking_fee_defaults: {
+                    [key: string]: number;
+                };
+                tint_charge: components["schemas"]["TintChargeRule"];
+                /** @description The dealer's tinted no return policy: a tinted can is not taken back. Off unless the dealer says so, because the rule is a dealer policy and not a law. */
+                tinted_no_return: boolean;
+            };
+        };
+        PosSettingsRequest: {
+            rules: {
+                /**
+                 * Format: int64
+                 * @description Null clears the limit (no limit).
+                 */
+                check_limit_cents: number | null;
+                check_id_required: {
+                    /** @enum {string} */
+                    mode: "never" | "every_check" | "over_amount";
+                    /**
+                     * Format: int64
+                     * @description Read only when mode is over_amount; dropped otherwise.
+                     */
+                    over_cents?: number | null;
+                };
+                /** @description Every reason's fee, the whole closed list: a code outside the list, a figure outside 0 to 10000 basis points, or a reason left out is a 400 naming the field. A figure of 0 clears the reason's row (no fee). */
+                restocking_fees: {
+                    [key: string]: number;
+                };
+                tint_charge?: components["schemas"]["TintChargeRule"];
+                /** @description The dealer's tinted no return policy. Absent is off (the rule is a dealer policy and not a law). */
+                tinted_no_return?: boolean;
+            };
+            /**
+             * Format: int64
+             * @description The revision this write rides; If-Match serves the same role.
+             */
+            revision?: number;
         };
         PosEndOfDayCloseRequest: {
             /** Format: uuid */
@@ -17998,6 +19547,8 @@ export interface components {
             stackable: boolean | null;
             geometry_source: string | null;
             lead_time_days: number | null;
+            /** @description The Form 8300 designated reporting transaction flag (CP-17a); a lumber yard's default is false. */
+            consumer_durable: boolean;
             /** @description A decimal string at scale 4. */
             reorder_point: string;
             reorder_qty: string;
@@ -18021,6 +19572,10 @@ export interface components {
             random_length: boolean;
             /** @description The product's unit set (ADR 0006 sections 3.1 and 3.2). */
             units: components["schemas"]["UnitSetRow"][];
+            /** @description The weighed sale's density (CP-19): pounds per cubic yard, the only bridge between a scale weight and a price by the yard. */
+            density_lb_per_cy: components["schemas"]["Quantity"] | null;
+            /** @description The volume state the density was measured at. */
+            density_volume_state: ("LOOSE" | "COMPACTED") | null;
             /** @description The product's picture path while the catalog.product_images setting is on; null while it is off or the product has none. */
             image_url: string | null;
             /** Format: date-time */
@@ -18053,6 +19608,11 @@ export interface components {
             board_length_ft?: number | null;
             /** @description The product is sold by tally; it stocks in LF and carries no fixed length. */
             random_length?: boolean;
+            /** @description The Form 8300 designated reporting transaction flag (CP-17a); false when absent. */
+            consumer_durable?: boolean | null;
+            /** @description The weighed sale's density (CP-19); both fields together or neither. */
+            density_lb_per_cy?: components["schemas"]["Quantity"] | null;
+            density_volume_state?: ("loose" | "compacted") | null;
         };
         /** @description The list envelope of ADR 0001 section 1. items is never null; total is present only under include=total. */
         ProductPage: {
@@ -18102,6 +19662,13 @@ export interface components {
             /** Format: int64 */
             revision?: number;
         };
+        /** @description The density pair, both fields or a null pair to clear. */
+        ProductDensityUpdate: {
+            density_lb_per_cy?: components["schemas"]["Quantity"] | null;
+            density_volume_state?: ("loose" | "compacted") | null;
+            /** Format: int64 */
+            revision?: number | null;
+        };
         ProductDimensionsUpdate: {
             length_in?: number | null;
             width_in?: number | null;
@@ -18113,6 +19680,12 @@ export interface components {
         };
         ProductLeadTimeUpdate: {
             lead_time_days?: number | null;
+            /** Format: int64 */
+            revision?: number;
+        };
+        ProductConsumerDurableUpdate: {
+            /** @description The Form 8300 designated reporting transaction flag (CP-17a). */
+            consumer_durable: boolean;
             /** Format: int64 */
             revision?: number;
         };
@@ -19257,13 +20830,23 @@ export interface components {
             is_active: boolean;
             /** Format: date-time */
             created_at: string;
+            /**
+             * @description The certificate's standing on the customer's branch's business day, said by the server (the same window rule the counter and the orders read), so no screen computes a day of its own.
+             * @enum {string}
+             */
+            status?: "active" | "expired" | "future" | "ended";
         };
         TaxExemptionCreateRequest: {
             /** Format: uuid */
             customer_id: string;
             exempt_reason: string;
-            certificate_number?: string;
+            certificate_number: string;
             issuing_state?: string;
+            /**
+             * Format: date
+             * @description The certificate's first day, YYYY-MM-DD; defaults to today.
+             */
+            effective_date?: string;
             /**
              * Format: date
              * @description YYYY-MM-DD.
@@ -19342,6 +20925,326 @@ export interface components {
             lines: components["schemas"]["TaxLine"][];
             /** @description True when the flat rate fallback was used. */
             is_estimate: boolean;
+        };
+        TaxZoneRatePart: {
+            /** @enum {string} */
+            name: "STATE" | "COUNTY" | "CITY" | "DISTRICT" | "GOODS_TAX" | "PROVINCIAL_SALES_TAX";
+            /** @description The decimal fraction, such as 0.060000. */
+            rate: string;
+            /** @description YYYY-MM-DD */
+            effective_from: string;
+            /** @description YYYY-MM-DD */
+            effective_to?: string;
+        };
+        TaxZoneBoundary: {
+            /** @description ISO 3166-1 alpha-2 */
+            country: string;
+            postal_code_low: string;
+            /** @description Equals postal_code_low for an exact code */
+            postal_code_high: string;
+            /** @description The plus four the boundary narrows to */
+            extension_low?: string;
+            extension_high?: string;
+        };
+        TaxZone: {
+            /** Format: uuid */
+            id: string;
+            country: string;
+            jurisdiction_code: string;
+            /** @enum {string} */
+            jurisdiction_type: "STA" | "CTY" | "CIT" | "STJ" | "PROV";
+            jurisdiction_name: string;
+            state_code?: string;
+            county_code?: string;
+            place_code?: string;
+            /** @description Set on a province zone */
+            province_code?: string;
+            /** @enum {string} */
+            zone_kind: "POSTAL" | "PROVINCE";
+            /** @enum {string} */
+            sourcing: "ORIGIN" | "DESTINATION" | "BOTH";
+            /** @description YYYY-MM-DD */
+            effective_from: string;
+            /** @description YYYY-MM-DD while the zone lives */
+            effective_to?: string | null;
+            /** @description Where the rate came from */
+            data_source: string;
+            /** @description Which version of the published data */
+            data_version: string;
+            rates: components["schemas"]["TaxZoneRatePart"][];
+            boundaries: components["schemas"]["TaxZoneBoundary"][];
+        };
+        TaxZoneCreateRequest: {
+            /** @description Two letter code */
+            country: string;
+            jurisdiction_code: string;
+            /** @enum {string} */
+            jurisdiction_type?: "STA" | "CTY" | "CIT" | "STJ" | "PROV";
+            jurisdiction_name?: string;
+            state_code?: string;
+            county_code?: string;
+            place_code?: string;
+            /** @description Required on a PROVINCE zone */
+            province_code?: string;
+            /**
+             * @description Defaults POSTAL
+             * @enum {string}
+             */
+            zone_kind?: "POSTAL" | "PROVINCE";
+            /**
+             * @description Defaults DESTINATION
+             * @enum {string}
+             */
+            sourcing?: "ORIGIN" | "DESTINATION" | "BOTH";
+            /** @description YYYY-MM-DD */
+            effective_from: string;
+            data_source?: string;
+            data_version?: string;
+            rates: components["schemas"]["TaxZoneRatePart"][];
+            /** @description Required on a POSTAL zone; a boundary's country defaults to the zone's when omitted. */
+            boundaries?: components["schemas"]["TaxZoneBoundary"][];
+        };
+        TaxZoneCloseRequest: {
+            /** @description YYYY-MM-DD */
+            effective_to: string;
+        };
+        TintSystem: {
+            /** Format: uuid */
+            id?: string;
+            code?: string;
+            name?: string;
+            manufacturer?: string;
+            unit_denominator?: number;
+            unit_label?: string;
+            /** Format: date-time */
+            created_at?: string;
+        };
+        TintSystemCreate: {
+            code: string;
+            name: string;
+            manufacturer?: string;
+            /** @enum {integer} */
+            unit_denominator: 32 | 48 | 64 | 128 | 192 | 384 | 1024;
+            unit_label?: string;
+        };
+        TintSystemPage: {
+            items?: components["schemas"]["TintSystem"][];
+        };
+        TintBase: {
+            /** Format: uuid */
+            id?: string;
+            /** Format: uuid */
+            tint_system_id?: string;
+            code?: string;
+            name?: string;
+            manufacturer_base_code?: string;
+            /** Format: uuid */
+            product_id?: string | null;
+            fill_volume_oz?: number;
+            is_deepest?: boolean;
+            /** Format: date-time */
+            created_at?: string;
+        };
+        TintBaseCreate: {
+            /** Format: uuid */
+            tint_system_id: string;
+            code: string;
+            name: string;
+            manufacturer_base_code?: string;
+            /** Format: uuid */
+            product_id?: string;
+            fill_volume_oz: number;
+            is_deepest?: boolean;
+        };
+        TintBasePage: {
+            items?: components["schemas"]["TintBase"][];
+        };
+        TintColorant: {
+            /** Format: uuid */
+            id?: string;
+            /** Format: uuid */
+            tint_system_id?: string;
+            code?: string;
+            name?: string;
+            manufacturer_code?: string;
+            manufacturer_upc?: string | null;
+            /** Format: date-time */
+            created_at?: string;
+        };
+        TintColorantCreate: {
+            /** Format: uuid */
+            tint_system_id: string;
+            code: string;
+            name: string;
+            manufacturer_code?: string;
+            manufacturer_upc?: string;
+        };
+        TintColorantPage: {
+            items?: components["schemas"]["TintColorant"][];
+        };
+        TintColor: {
+            /** Format: uuid */
+            id?: string;
+            /** Format: uuid */
+            tint_system_id?: string;
+            manufacturer_code?: string | null;
+            name?: string;
+            is_custom?: boolean;
+            /** Format: uuid */
+            customer_id?: string | null;
+            note?: string;
+            /** Format: date-time */
+            created_at?: string;
+        };
+        TintColorCreate: {
+            /** Format: uuid */
+            tint_system_id: string;
+            manufacturer_code?: string;
+            name: string;
+            is_custom?: boolean;
+            /** Format: uuid */
+            customer_id?: string;
+            note?: string;
+        };
+        TintColorPage: {
+            items?: components["schemas"]["TintColor"][];
+        };
+        TintAmount: {
+            whole_oz: number;
+            /** @description The count of the coarse 1/32 step. */
+            increments_coarse: number;
+            /** @description The count of the fine 1/denominator step. */
+            increments_fine: number;
+            /** @enum {integer} */
+            unit_denominator: 32 | 48 | 64 | 128 | 192 | 384 | 1024;
+        };
+        TintComponent: {
+            /** Format: uuid */
+            colorant_id?: string;
+            colorant_code?: string;
+            colorant_name?: string;
+            amount?: components["schemas"]["TintAmount"];
+        };
+        TintFormula: {
+            /** Format: uuid */
+            id?: string;
+            /** Format: uuid */
+            color_id?: string;
+            /** Format: uuid */
+            base_id?: string;
+            /** Format: uuid */
+            product_id?: string | null;
+            container_size_code?: string;
+            container_volume_oz?: number;
+            total_colorant_oz?: string;
+            /** @enum {string} */
+            source?: "book" | "match" | "manual";
+            components?: components["schemas"]["TintComponent"][];
+            /** Format: date-time */
+            created_at?: string;
+        };
+        TintFormulaCreate: {
+            /** Format: uuid */
+            color_id: string;
+            /** Format: uuid */
+            base_id: string;
+            /** Format: uuid */
+            product_id?: string;
+            container_size_code: string;
+            container_volume_oz: number;
+            /** @enum {string} */
+            source?: "book" | "match" | "manual";
+            components?: {
+                /** Format: uuid */
+                colorant_id: string;
+                whole_oz: number;
+                increments_coarse: number;
+                increments_fine: number;
+                /** @enum {integer} */
+                unit_denominator: 32 | 48 | 64 | 128 | 192 | 384 | 1024;
+            }[];
+        };
+        TintFormulaPage: {
+            items?: components["schemas"]["TintFormula"][];
+        };
+        TintRescaleRequest: {
+            /** @description The target container volume in whole fluid ounces. */
+            target_volume_oz: number;
+        };
+        TintRescaledComponent: {
+            colorant_code?: string;
+            colorant_name?: string;
+            amount?: components["schemas"]["TintAmount"];
+            rounded?: boolean;
+        };
+        TintRescale: {
+            formula?: components["schemas"]["TintFormula"];
+            target_volume_oz?: number;
+            components?: components["schemas"]["TintRescaledComponent"][];
+            any_rounded?: boolean;
+        };
+        TintSavedColor: {
+            /** Format: uuid */
+            id?: string;
+            /** Format: uuid */
+            customer_id?: string;
+            /** Format: uuid */
+            color_id?: string;
+            name?: string;
+            job_note?: string;
+            note?: string;
+            /** Format: uuid */
+            project_id?: string | null;
+            created_by?: string;
+            /** Format: date-time */
+            created_at?: string;
+        };
+        TintSavedColorCreate: {
+            /** Format: uuid */
+            customer_id: string;
+            /** Format: uuid */
+            color_id: string;
+            name: string;
+            job_note?: string;
+            note?: string;
+            /** Format: uuid */
+            project_id?: string;
+        };
+        TintSavedColorPage: {
+            items?: components["schemas"]["TintSavedColor"][];
+        };
+        TintCharge: {
+            tint_charge_cents?: number;
+        };
+        /** @description One tier of the dealer's tint charge rule: the base tier it covers (empty is any base), the lowest colorant total in fluid ounces it covers (empty is any total) and the charge in cents. */
+        TintChargeTier: {
+            /** @enum {string} */
+            base_tier: "" | "flat" | "deep";
+            min_colorant_oz: string;
+            charge_cents: number;
+        };
+        /** @description The dealer's tint charge rule: the flat figure per container and the tiers that may cover it. */
+        TintChargeRule: {
+            flat_cents: number;
+            tiers: components["schemas"]["TintChargeTier"][];
+        };
+        /** @description A paint line's tint record (row CP-16), the base, the colour and the formula frozen on the sale, the amounts as actually mixed. */
+        LineTint: {
+            /** Format: uuid */
+            formula_id: string | null;
+            color_code: string;
+            color_name: string;
+            base_code: string;
+            container_size_code: string;
+            /** @description True when the amounts were rescaled to this size; the counter may override any of them. */
+            rescaled: boolean;
+            /** Format: int64 */
+            tint_charge_cents: number | null;
+            components: {
+                colorant_code: string;
+                colorant_name: string;
+                amount: components["schemas"]["TintAmount"];
+            }[];
         };
         /** @description One unit of the catalogue. The standard size is the pair std_unit_qty of this unit = std_ref_qty of its dimension's reference unit, stored in the canonical form of ADR 0006 section 1 (GAL is 576 = 77 CF); both fields are null for a unit whose size is per product (a box, a bundle). */
         Unit: {
@@ -21367,6 +23270,98 @@ export interface operations {
             500: components["responses"]["WireInternalError"];
         };
     };
+    adminSetStaffCounterPIN: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AdminCounterPINRequest"];
+            };
+        };
+        responses: {
+            /** @description The two PIN facts. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CounterPINAnswer"];
+                };
+            };
+            400: components["responses"]["WireBadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["WireNotFound"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
+            500: components["responses"]["WireInternalError"];
+        };
+    };
+    adminClearStaffCounterPIN: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The two PIN facts. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CounterPINAnswer"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["WireNotFound"];
+            500: components["responses"]["WireInternalError"];
+        };
+    };
+    adminUnlockStaffCounterPIN: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The two PIN facts. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CounterPINAnswer"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["WireNotFound"];
+            422: components["responses"]["UnprocessableEntity"];
+            500: components["responses"]["WireInternalError"];
+        };
+    };
     adminGrantModule: {
         parameters: {
             query?: never;
@@ -21539,6 +23534,63 @@ export interface operations {
                 };
             };
             400: components["responses"]["IdempotencyBadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["ConflictEither"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    adminGetLargeCashSettings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The dealer's large cash settings. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminLargeCashSettings"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    adminSaveLargeCashSettings: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AdminLargeCashSettings"];
+            };
+        };
+        responses: {
+            /** @description The saved settings. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminLargeCashSettings"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             409: components["responses"]["ConflictEither"];
@@ -23136,6 +25188,127 @@ export interface operations {
             409: components["responses"]["WireConflict"];
             413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
+            500: components["responses"]["InternalErrorEither"];
+        };
+    };
+    customerListAlerts: {
+        parameters: {
+            query?: {
+                state?: "open" | "ended" | "all";
+                /** @description Page size of a converted list, 1 to 200, default 50. Anything else is a 400 naming limit (ADR 0001 section 2); it is never clamped. */
+                limit?: components["parameters"]["PageLimit"];
+                /** @description The opaque cursor of the previous page's next_cursor, passed back verbatim. A malformed cursor, or one minted for another ordering, is a 400 naming cursor. */
+                cursor?: components["parameters"]["Cursor"];
+                /** @description A comma separated list of expansions. total adds the count of rows matching the filters, which costs a second query and is therefore opt in. */
+                include?: components["parameters"]["Include"];
+            };
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The page of alerts. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AlertPage"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["WireNotFound"];
+            500: components["responses"]["InternalErrorEither"];
+        };
+    };
+    customerCreateAlert: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AlertRequest"];
+            };
+        };
+        responses: {
+            /** @description The created alert. */
+            201: {
+                headers: {
+                    /** @description The record's revision in quotes, for example "3". Send it back as If-Match. */
+                    ETag?: string;
+                    Location?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Alert"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["WireConflict"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
+            500: components["responses"]["InternalErrorEither"];
+        };
+    };
+    customerEndAlert: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description The document revision the client read, in quotes ("3"; the weak form W/"3" is accepted too). The body's revision field is the alternative; a write carrying neither is 428, a stale one 409 stale_revision, and * or a list of tags is a 400. */
+                "If-Match"?: components["parameters"]["IfMatch"];
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                id: string;
+                alertId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The ended alert. */
+            200: {
+                headers: {
+                    /** @description The record's revision in quotes, for example "3". Send it back as If-Match. */
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Alert"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["WireConflict"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
+            428: components["responses"]["WirePreconditionRequired"];
             500: components["responses"]["InternalErrorEither"];
         };
     };
@@ -32485,6 +34658,7 @@ export interface operations {
                 register_id?: string;
                 date?: string;
                 status?: "open" | "held" | "completed" | "voided";
+                q?: string;
                 /** @description The opaque cursor of the previous page's next_cursor, passed back verbatim. A malformed cursor, or one minted for another ordering, is a 400 naming cursor. */
                 cursor?: components["parameters"]["Cursor"];
                 /** @description Page size of a converted list, 1 to 200, default 50. Anything else is a 400 naming limit (ADR 0001 section 2); it is never clamped. */
@@ -32861,6 +35035,47 @@ export interface operations {
             500: components["responses"]["InternalError"];
         };
     };
+    posTransactionEnterLineWeight: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+                /** @description The document revision the client read, in quotes ("3"; the weak form W/"3" is accepted too). The body's revision field is the alternative; a write carrying neither is 428, a stale one 409 stale_revision, and * or a list of tags is a 400. */
+                "If-Match"?: components["parameters"]["IfMatch"];
+            };
+            path: {
+                id: string;
+                itemId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PosManualWeightRequest"];
+            };
+        };
+        responses: {
+            /** @description The whole sale with the weighed line. */
+            200: {
+                headers: {
+                    /** @description The document's new revision. */
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PosTransaction"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["ConflictEither"];
+            428: components["responses"]["WirePreconditionRequired"];
+            500: components["responses"]["InternalError"];
+        };
+    };
     posTransactionComplete: {
         parameters: {
             query?: never;
@@ -32900,6 +35115,35 @@ export interface operations {
             428: components["responses"]["WirePreconditionRequired"];
             500: components["responses"]["InternalError"];
             503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    posLargeCashPreview: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PosLargeCashPreviewRequest"];
+            };
+        };
+        responses: {
+            /** @description The rule family's view of this payment. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PosLargeCashPreview"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["WireNotFound"];
+            500: components["responses"]["InternalError"];
         };
     };
     posTransactionVoid: {
@@ -33371,6 +35615,72 @@ export interface operations {
             500: components["responses"]["InternalError"];
         };
     };
+    posStepUp: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PosStepUpRequest"];
+            };
+        };
+        responses: {
+            /** @description The approval the one act spends, naming the manager. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PosStepUpApproval"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["WireNotFound"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    posStepUpManagers: {
+        parameters: {
+            query: {
+                /** @description The act the approval is for. */
+                act: "override" | "pickup" | "signoff";
+            };
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The managers, by name. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PosStepUpManagerPage"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            500: components["responses"]["InternalError"];
+        };
+    };
     posTillPolicyGet: {
         parameters: {
             query: {
@@ -33636,6 +35946,275 @@ export interface operations {
             500: components["responses"]["InternalError"];
         };
     };
+    posScaleStatus: {
+        parameters: {
+            query: {
+                register_id: string;
+            };
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The scale status. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PosScaleStatus"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["WireNotFound"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    posScaleWeighIn: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PosScaleWeighInRequest"];
+            };
+        };
+        responses: {
+            /** @description The open weigh in ticket. */
+            201: {
+                headers: {
+                    /** @description The ticket's path. */
+                    Location?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PosScaleTicket"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["ConflictEither"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    posScaleWeighOut: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+                /** @description The document revision the client read, in quotes ("3"; the weak form W/"3" is accepted too). The body's revision field is the alternative; a write carrying neither is 428, a stale one 409 stale_revision, and * or a list of tags is a 400. */
+                "If-Match"?: components["parameters"]["IfMatch"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PosScaleWeighOutRequest"];
+            };
+        };
+        responses: {
+            /** @description The sale with the weighed line, and the weigh out ticket. */
+            200: {
+                headers: {
+                    /** @description The sale's new revision. */
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PosScaleWeighOutResponse"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["ConflictEither"];
+            428: components["responses"]["WirePreconditionRequired"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    posScaleTicketList: {
+        parameters: {
+            query: {
+                register_id: string;
+                status?: "open" | "completed" | "void";
+                vehicle_ref?: string;
+            };
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The tickets. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PosScaleTicketList"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["WireNotFound"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    posScaleTicketGet: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The ticket. */
+            200: {
+                headers: {
+                    /** @description The ticket's revision. */
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PosScaleTicket"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["WireNotFound"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    posScaleTicketVoid: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+                /** @description The document revision the client read, in quotes ("3"; the weak form W/"3" is accepted too). The body's revision field is the alternative; a write carrying neither is 428, a stale one 409 stale_revision, and * or a list of tags is a 400. */
+                "If-Match"?: components["parameters"]["IfMatch"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PosScaleTicketVoidRequest"];
+            };
+        };
+        responses: {
+            /** @description The voided ticket. */
+            200: {
+                headers: {
+                    /** @description The ticket's new revision. */
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PosScaleTicket"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["ConflictEither"];
+            428: components["responses"]["WirePreconditionRequired"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    posScaleManualReasons: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The reasons. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PosScaleManualReasonList"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    posScaleSimulatorDrive: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PosScaleSimulatorRequest"];
+            };
+        };
+        responses: {
+            /** @description The simulator took the state. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        ok: boolean;
+                    };
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["WireNotFound"];
+            500: components["responses"]["InternalError"];
+        };
+    };
     posReturnList: {
         parameters: {
             query?: {
@@ -33703,6 +36282,41 @@ export interface operations {
             500: components["responses"]["InternalError"];
         };
     };
+    posReturnPreview: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PosReturnRequest"];
+            };
+        };
+        responses: {
+            /** @description The figures. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PosReturnFigures"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["ConflictEither"];
+            500: components["responses"]["InternalError"];
+        };
+    };
     posReturnGet: {
         parameters: {
             query?: never;
@@ -33730,6 +36344,100 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["ForbiddenEither"];
             404: components["responses"]["WireNotFound"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    posRefundIntentList: {
+        parameters: {
+            query?: {
+                /** @description The opaque cursor of the previous page's next_cursor, passed back verbatim. A malformed cursor, or one minted for another ordering, is a 400 naming cursor. */
+                cursor?: components["parameters"]["Cursor"];
+                /** @description Page size of a converted list, 1 to 200, default 50. Anything else is a 400 naming limit (ADR 0001 section 2); it is never clamped. */
+                limit?: components["parameters"]["PageLimit"];
+                /** @description A comma separated list of expansions. total adds the count of rows matching the filters, which costs a second query and is therefore opt in. */
+                include?: components["parameters"]["Include"];
+            };
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The open claims. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PosRefundIntentPage"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    posSettingsGet: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The rules and their revision. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PosSettings"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    posSettingsPut: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PosSettingsRequest"];
+            };
+        };
+        responses: {
+            /** @description The rules now in force, with the revision the write made. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PosSettings"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -36348,6 +39056,46 @@ export interface operations {
             500: components["responses"]["InternalError"];
         };
     };
+    productUpdateDensity: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+                /** @description The quoted revision; required unless the body carries it. */
+                "If-Match"?: string;
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProductDensityUpdate"];
+            };
+        };
+        responses: {
+            /** @description The product with the persisted density, the new revision and its ETag. */
+            200: {
+                headers: {
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProductView"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["WireConflict"];
+            413: components["responses"]["PayloadTooLarge"];
+            428: components["responses"]["WirePreconditionRequired"];
+            500: components["responses"]["InternalError"];
+        };
+    };
     productUpdateLeadTime: {
         parameters: {
             query?: never;
@@ -36365,6 +39113,47 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["ProductLeadTimeUpdate"];
+            };
+        };
+        responses: {
+            /** @description The product with the new revision and its ETag. */
+            200: {
+                headers: {
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProductView"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["WireConflict"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
+            428: components["responses"]["WirePreconditionRequired"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    productUpdateConsumerDurable: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+                /** @description The quoted revision; required unless the body carries it. */
+                "If-Match"?: string;
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProductConsumerDurableUpdate"];
             };
         };
         responses: {
@@ -38503,6 +41292,31 @@ export interface operations {
             500: components["responses"]["InternalError"];
         };
     };
+    taxExemptionEnd: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The certificate is ended. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["InternalError"];
+        };
+    };
     taxExemptionDelete: {
         parameters: {
             query?: never;
@@ -38525,6 +41339,7 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -38559,6 +41374,598 @@ export interface operations {
             409: components["responses"]["IdempotencyConflict"];
             413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    taxZoneList: {
+        parameters: {
+            query?: {
+                country?: string;
+                jurisdiction_type?: "STA" | "CTY" | "CIT" | "STJ" | "PROV";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The zones. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TaxZone"][];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    taxZoneCreate: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TaxZoneCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description The created zone. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TaxZone"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["IdempotencyConflict"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    taxZoneGet: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The zone. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TaxZone"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    taxZoneDelete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The zone is gone. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    taxZoneClose: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TaxZoneCloseRequest"];
+            };
+        };
+        responses: {
+            /** @description The closed zone. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TaxZone"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    tintSystemList: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The tint systems. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TintSystemPage"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    tintSystemCreate: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TintSystemCreate"];
+            };
+        };
+        responses: {
+            /** @description The created system. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TintSystem"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["Conflict"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    tintBaseList: {
+        parameters: {
+            query?: {
+                /** @description Filter by tint system. */
+                tint_system_id?: string;
+                /** @description Only the bases whose product link names this product. */
+                product_id?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The bases. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TintBasePage"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    tintBaseCreate: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TintBaseCreate"];
+            };
+        };
+        responses: {
+            /** @description The created base. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TintBase"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    tintColorantList: {
+        parameters: {
+            query?: {
+                /** @description Filter by tint system. */
+                tint_system_id?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The colorants. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TintColorantPage"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    tintColorantCreate: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TintColorantCreate"];
+            };
+        };
+        responses: {
+            /** @description The created colorant. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TintColorant"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    tintColorList: {
+        parameters: {
+            query?: {
+                /** @description Filter by tint system. */
+                tint_system_id?: string;
+                /** @description A name or manufacturer code fragment. */
+                q?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The colours. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TintColorPage"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    tintColorCreate: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TintColorCreate"];
+            };
+        };
+        responses: {
+            /** @description The created colour. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TintColor"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    tintFormulaList: {
+        parameters: {
+            query?: {
+                /** @description Filter by colour. */
+                color_id?: string;
+                /** @description Filter by base. */
+                base_id?: string;
+                /** @description Filter by container size code. */
+                container_size_code?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The formulas. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TintFormulaPage"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    tintFormulaCreate: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TintFormulaCreate"];
+            };
+        };
+        responses: {
+            /** @description The created formula. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TintFormula"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["Conflict"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    tintFormulaGet: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The formula with its components. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TintFormula"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    tintFormulaRescale: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TintRescaleRequest"];
+            };
+        };
+        responses: {
+            /** @description The source formula, the rescaled components and the rounding flag. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TintRescale"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    tintSavedColorList: {
+        parameters: {
+            query?: {
+                /** @description Filter by customer. */
+                customer_id?: string;
+                /** @description A job note fragment. */
+                job_note?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The saved colours. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TintSavedColorPage"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    tintSavedColorCreate: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TintSavedColorCreate"];
+            };
+        };
+        responses: {
+            /** @description The saved colour. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TintSavedColor"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["Conflict"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    tintSavedColorDelete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The saved colour is gone. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    tintChargeGet: {
+        parameters: {
+            query?: {
+                /** @description The tint's colorant total in the system's whole dispense units. */
+                colorant_units?: number;
+                /** @description The dispense grid the tint's units are counted on (the colour system's unit denominator). */
+                unit_denominator?: number;
+                /** @description The base tier the tint is mixed in: flat is the ordinary base of a system, deep is the deepest one. */
+                base_tier?: "flat" | "deep";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The charge in cents. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TintCharge"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             500: components["responses"]["InternalError"];
         };
     };

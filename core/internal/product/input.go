@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"regexp"
+	"strings"
 
 	"github.com/gablelbm/gable/internal/platform/httpx"
 )
@@ -47,6 +48,14 @@ type createRequest struct {
 	BoardWidthIn     *json.RawMessage `json:"board_width_in"`
 	BoardLengthFT    *json.RawMessage `json:"board_length_ft"`
 	RandomLength     *bool            `json:"random_length"`
+
+	// ConsumerDurable is the Form 8300 designated reporting transaction
+	// flag (CP-17a); false when the create does not name it.
+	ConsumerDurable *bool `json:"consumer_durable"`
+	// The weighed sale's density (CP-19): pounds per cubic yard as a
+	// decimal string and the volume state, both or neither.
+	DensityLbPerCY     *json.RawMessage `json:"density_lb_per_cy"`
+	DensityVolumeState *string          `json:"density_volume_state"`
 }
 
 // ParseCreate validates the create body and fills the domain row to hand the
@@ -86,6 +95,17 @@ func ParseCreate(r *http.Request) (*Product, error) {
 		v.Check(false, "board_length_ft", "a random length product carries no fixed length: its lengths live on its tallies")
 	}
 
+	// The density (CP-19): pounds per cubic yard, both halves or neither,
+	// the volume state one of the named two.
+	p.DensityLbPerCY = optQuantity(v, "density_lb_per_cy", req.DensityLbPerCY)
+	if req.DensityVolumeState != nil {
+		state := strings.ToUpper(strings.TrimSpace(*req.DensityVolumeState))
+		v.Check(state == "LOOSE" || state == "COMPACTED", "density_volume_state", "is loose or compacted")
+		p.DensityVolumeState = &state
+	}
+	v.Check((p.DensityLbPerCY == nil) == (p.DensityVolumeState == nil), "density_lb_per_cy",
+		"a density is pounds per cubic yard and its volume state together")
+
 	if req.BasePrice != nil {
 		if n, ok := v.Int("base_price_ten_thousandths", *req.BasePrice, true); ok {
 			p.BasePriceScaled = httpx.Price(n)
@@ -119,6 +139,9 @@ func ParseCreate(r *http.Request) (*Product, error) {
 	}
 	p.LengthIn, p.WidthIn, p.HeightIn = req.LengthIn, req.WidthIn, req.HeightIn
 	p.Stackable, p.GeometrySource = req.Stackable, req.GeometrySource
+	if req.ConsumerDurable != nil {
+		p.ConsumerDurable = *req.ConsumerDurable
+	}
 
 	if err := v.Err(); err != nil {
 		return nil, err
@@ -144,7 +167,8 @@ func optQuantity(v *httpx.Validator, field string, raw *json.RawMessage) *httpx.
 type marginsRequest struct {
 	TargetMargin   *float64 `json:"target_margin"`
 	CommissionRate *float64 `json:"commission_rate"`
-	Revision       *int64   `json:"revision"`
+
+	Revision *int64 `json:"revision"`
 }
 
 func parseMargins(r *http.Request) (targetMargin, commissionRate float64, revision *int64, err error) {
@@ -179,7 +203,25 @@ func parseLeadTime(r *http.Request) (days *int, revision *int64, err error) {
 	return req.LeadTimeDays, req.Revision, nil
 }
 
-// dimensionsRequest is the PATCH /products/{id}/dimensions body. Every field
+// consumerDurableRequest is the PATCH /products/{id}/consumer-durable body.
+type consumerDurableRequest struct {
+	ConsumerDurable *bool  `json:"consumer_durable"`
+	Revision        *int64 `json:"revision"`
+}
+
+func parseConsumerDurable(r *http.Request) (flag bool, revision *int64, err error) {
+	var req consumerDurableRequest
+	if err := httpx.DecodeJSON(r, &req); err != nil {
+		return false, nil, err
+	}
+	if req.ConsumerDurable == nil {
+		return false, req.Revision, httpx.BadRequest("one or more fields failed validation",
+			httpx.FieldError{Field: "consumer_durable", Message: "is required"})
+	}
+	return *req.ConsumerDurable, req.Revision, nil
+}
+
+// dimensionsRequest is the PATCH /products/{id}/dimensions body.// dimensionsRequest is the PATCH /products/{id}/dimensions body. Every field
 // is a pointer so a null reaches the column as SQL NULL (the geometry
 // contract).
 type dimensionsRequest struct {
@@ -212,4 +254,36 @@ func parseDimensions(r *http.Request) (Geometry, *int64, error) {
 		Stackable:      req.Stackable,
 		GeometrySource: req.GeometrySource,
 	}, req.Revision, v.Err()
+}
+
+// densityRequest is the PATCH /products/{id}/density body (CP-19): the
+// pounds per cubic yard with its volume state, both or neither, and a null
+// pair clears the density.
+type densityRequest struct {
+	DensityLbPerCY     *json.RawMessage `json:"density_lb_per_cy"`
+	DensityVolumeState *string          `json:"density_volume_state"`
+	Revision           *int64           `json:"revision"`
+}
+
+// parseDensity parses the density PATCH body: null null clears, a value
+// pair sets, one without the other is a 400.
+func parseDensity(r *http.Request) (*httpx.Quantity, *string, *int64, error) {
+	var req densityRequest
+	if err := httpx.DecodeJSON(r, &req); err != nil {
+		return nil, nil, nil, err
+	}
+	v := &httpx.Validator{}
+	var density *httpx.Quantity
+	var state *string
+	if req.DensityLbPerCY != nil && string(*req.DensityLbPerCY) != "null" {
+		density = optQuantity(v, "density_lb_per_cy", req.DensityLbPerCY)
+	}
+	if req.DensityVolumeState != nil {
+		upper := strings.ToUpper(strings.TrimSpace(*req.DensityVolumeState))
+		v.Check(upper == "LOOSE" || upper == "COMPACTED", "density_volume_state", "is loose or compacted")
+		state = &upper
+	}
+	v.Check((density == nil) == (state == nil), "density_lb_per_cy",
+		"a density is pounds per cubic yard and its volume state together")
+	return density, state, req.Revision, v.Err()
 }

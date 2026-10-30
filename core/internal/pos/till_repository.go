@@ -197,9 +197,13 @@ func (r *PostgresRepository) AggregateTillSession(ctx context.Context, sessionID
 	rows, err := r.ex(ctx).Query(ctx, `
 		SELECT p.method, COALESCE(SUM(ROUND(p.amount * 100)::bigint), 0)
 		FROM payments p
-		JOIN pos_tenders pt ON pt.payment_id = p.id
-		JOIN pos_transactions t ON t.id = pt.transaction_id
-		WHERE t.till_session_id = $1 AND t.status = 'COMPLETED' AND p.status = 'POSTED'
+		WHERE p.status = 'POSTED'
+			AND (p.till_session_id = $1
+				OR EXISTS (
+					SELECT 1 FROM pos_tenders pt
+					JOIN pos_transactions t ON t.id = pt.transaction_id
+					WHERE pt.payment_id = p.id AND t.till_session_id = $1 AND t.status = 'COMPLETED'
+				))
 		GROUP BY p.method`, sessionID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to aggregate the session's payments: %w", err)
@@ -216,12 +220,23 @@ func (r *PostgresRepository) AggregateTillSession(ctx context.Context, sessionID
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
-	// The session's cash refunds, through its returns' credit memos.
+	// The session's cash refunds, through its returns' credit memos. The cash
+	// that left the drawer is the refund entry's cash leg: a cash refund of a
+	// rounded sale pays the rounded figure (CP-18), while the refund row
+	// carries the exact credit the customer's account was given. A refund with
+	// no entry (no ledger wired) falls back to the row's own amount.
 	if err := r.ex(ctx).QueryRow(ctx, `
-		SELECT COALESCE(SUM(ROUND(rf.amount * 100)::bigint), 0)
+		SELECT COALESCE(SUM(ROUND(COALESCE(cash.cents, rf.amount * 100))::bigint), 0)
 		FROM payment_refunds rf
 		JOIN credit_memos cm ON cm.id = rf.credit_memo_id
 		JOIN pos_returns pr ON pr.credit_memo_id = cm.id
+		LEFT JOIN LATERAL (
+			SELECT SUM(ROUND(l.credit * 100)::bigint) AS cents
+			FROM gl_journal_entries e
+			JOIN gl_journal_lines l ON l.journal_entry_id = e.id
+			JOIN gl_accounts a ON a.id = l.account_id AND a.code = '1010'
+			WHERE e.id = rf.gl_entry_id
+		) cash ON true
 		WHERE pr.till_session_id = $1 AND rf.method = 'CASH'`, sessionID).Scan(&agg.CashRefundsCents); err != nil {
 		return nil, fmt.Errorf("failed to aggregate the session's cash refunds: %w", err)
 	}

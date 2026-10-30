@@ -18,8 +18,10 @@
         "active": true,
         "address": null,
         "branch_id": "<id-1>",
+        "cash_rounding_mode": "OFF",
         "city": null,
         "code": "GOLD-T-FROM",
+        "country_code": null,
         "created_at": "<ts+0d>",
         "default_tax_rate": null,
         "description": null,
@@ -34,6 +36,7 @@
         "timezone": "America/New_York",
         "type": "yard",
         "updated_at": "<ts+0d>",
+        "walk_in_identity_cents": null,
         "zip": null
       }
     }
@@ -57,8 +60,10 @@
         "active": true,
         "address": null,
         "branch_id": "<id-1>",
+        "cash_rounding_mode": "OFF",
         "city": null,
         "code": "GOLD-T-TO",
+        "country_code": null,
         "created_at": "<ts+0d>",
         "default_tax_rate": null,
         "description": null,
@@ -73,6 +78,7 @@
         "timezone": "America/New_York",
         "type": "yard",
         "updated_at": "<ts+0d>",
+        "walk_in_identity_cents": null,
         "zip": null
       }
     }

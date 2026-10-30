@@ -76,6 +76,9 @@ export interface StaffMember {
     created_at: string;
     updated_at: string;
     modules: string[];
+    /** The two facts of the manager's counter PIN (CP-04); the hash never leaves the server. */
+    counter_pin_set: boolean;
+    locked: boolean;
 }
 
 /** Global state of an integration module — the kill switch, not a grant. */
@@ -276,6 +279,35 @@ export const techAdminService = {
 
     async listStaff(): Promise<StaffMember[]> {
         return walkList<StaffMember>('/api/v1/admin/staff');
+    },
+
+    /** Sets a staff member's counter PIN (4 to 8 digits, no plain run); the answer says only the two facts. */
+    async setCounterPin(staffId: string, pin: string): Promise<void> {
+        const response = await fetchWithAuth(`${API_URL}/api/v1/admin/staff/${staffId}/counter-pin`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ pin }),
+        });
+        if (!response.ok) {
+            const data = (await response.json().catch(() => null)) as { error?: { message?: string } } | null;
+            throw new Error(data?.error?.message ?? 'Failed to set the counter PIN');
+        }
+    },
+
+    /** Clears a staff member's counter PIN whole. */
+    async clearCounterPin(staffId: string): Promise<void> {
+        const response = await fetchWithAuth(`${API_URL}/api/v1/admin/staff/${staffId}/counter-pin`, { method: 'DELETE' });
+        if (!response.ok) throw new Error('Failed to clear the counter PIN');
+    },
+
+    /** Lifts the lock five wrong tries impose; the PIN itself stands. */
+    async unlockCounterPin(staffId: string): Promise<void> {
+        const response = await fetchWithAuth(`${API_URL}/api/v1/admin/staff/${staffId}/counter-pin/unlock`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({}),
+        });
+        if (!response.ok) throw new Error('Failed to unlock the counter PIN');
     },
 
     async listModules(): Promise<ModuleInfo[]> {

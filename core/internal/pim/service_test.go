@@ -17,11 +17,16 @@ import (
 
 	"github.com/gablelbm/gable/internal/ai"
 	"github.com/gablelbm/gable/internal/product"
+	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/gablelbm/gable/internal/units"
 	"github.com/google/uuid"
 )
 
 // --- test doubles ---
+
+func (r *stubProductRepo) UpdateConsumerDurable(ctx context.Context, id uuid.UUID, consumerDurable bool, revision int64) (int64, error) {
+	return revision + 1, nil
+}
 
 type stubProductRepo struct{ p *product.Product }
 
@@ -76,6 +81,9 @@ func (r *stubProductRepo) UpdateVendor(context.Context, uuid.UUID, *string, *uui
 	return nil
 }
 func (r *stubProductRepo) UpdateDimensions(context.Context, uuid.UUID, product.Geometry, int64) (int64, error) {
+	return 0, nil
+}
+func (r *stubProductRepo) UpdateDensity(context.Context, uuid.UUID, *httpx.Quantity, *string, int64) (int64, error) {
 	return 0, nil
 }
 func (r *stubProductRepo) UpdateLeadTime(context.Context, uuid.UUID, *int, int64) (int64, error) {

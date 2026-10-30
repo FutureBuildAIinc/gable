@@ -135,6 +135,11 @@ export const ProductService = {
         return patch(id, 'margins', margins, revision, 'Failed to update margins');
     },
 
+    /** Sets or clears the Form 8300 consumer durable flag on the revision the page loaded. */
+    async updateConsumerDurable(id: string, consumerDurable: boolean, revision: number): Promise<Product> {
+        return patch(id, 'consumer-durable', { consumer_durable: consumerDurable }, revision, 'Failed to update the consumer durable flag');
+    },
+
     /** Publishes (days) or clears (null) the lead time on the revision the page loaded. */
     async updateLeadTime(id: string, leadTimeDays: number | null, revision: number): Promise<Product> {
         return patch(id, 'lead-time', { lead_time_days: leadTimeDays }, revision, 'Failed to update lead time');

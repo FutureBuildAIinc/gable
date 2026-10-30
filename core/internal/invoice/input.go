@@ -57,6 +57,7 @@ type CreditLineRequest struct {
 	UnitPriceTenThou json.RawMessage `json:"unit_price_ten_thousandths"`
 	Taxable          *bool           `json:"taxable"`
 	Restock          *bool           `json:"restock"`
+	Tint             json.RawMessage `json:"tint"`
 }
 
 // CreditInput is a validated request ready for the service to build.
@@ -192,6 +193,9 @@ func (l *CreditLineRequest) parse(v *httpx.Validator, path string) (CreditLineIn
 	}
 	if l.Description != nil {
 		d.Description = strings.TrimSpace(*l.Description)
+	}
+	if !isAbsentRaw(l.Tint) {
+		fail("tint", "is not accepted on a credit memo line: tint comes from the counter sale")
 	}
 
 	// A line that names an invoice line: everything but the quantity, the

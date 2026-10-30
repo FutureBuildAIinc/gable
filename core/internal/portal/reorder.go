@@ -354,4 +354,3 @@ func (s *Service) repriceReorderedDraft(ctx context.Context, customerID, orderID
 	}
 	return nil
 }
-

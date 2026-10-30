@@ -38,7 +38,7 @@ func NewUserRepository(db *database.DB) *PostgresUserRepository {
 // to keep the selector clean.
 func (r *PostgresUserRepository) ListUserBranches(ctx context.Context, userSub string) ([]BranchSummary, error) {
 	query := `
-		SELECT l.id, l.code, l.name, l.active, ul.is_home, l.timezone
+		SELECT l.id, l.code, l.name, l.active, ul.is_home, l.timezone, l.cash_rounding_mode
 		  FROM user_locations ul
 		  JOIN locations l ON l.id = ul.branch_id
 		 WHERE ul.user_sub = $1
@@ -55,7 +55,7 @@ func (r *PostgresUserRepository) ListUserBranches(ctx context.Context, userSub s
 	var out []BranchSummary
 	for rows.Next() {
 		var b BranchSummary
-		if err := rows.Scan(&b.ID, &b.Code, &b.Name, &b.Active, &b.IsHome, &b.Timezone); err != nil {
+		if err := rows.Scan(&b.ID, &b.Code, &b.Name, &b.Active, &b.IsHome, &b.Timezone, &b.CashRoundingMode); err != nil {
 			return nil, fmt.Errorf("scan branch summary: %w", err)
 		}
 		out = append(out, b)
