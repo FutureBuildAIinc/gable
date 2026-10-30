@@ -91,8 +91,8 @@ func TestTheSaleNamesABuyerFromTheRosterOnly(t *testing.T) {
 
 	// another customer's roster buyer
 	other := uuid.New()
-	mustExec(t, f.db, `INSERT INTO customers (id, name, account_number, primary_branch_id) VALUES ($1, 'Other Co', $2, `+defaultBranch+`)`,
-		other, "OTH-"+uuid.NewString()[:8])
+	mustExec(t, f.db, `INSERT INTO customers (id, name, account_number, primary_branch_id) VALUES ($1, 'Other Co', $2, $3)`,
+		other, "OTH-"+uuid.NewString()[:8], f.branchID)
 	stranger := uuid.New()
 	mustExec(t, f.db, `INSERT INTO customer_contacts (id, customer_id, first_name, last_name, authorized_buyer) VALUES ($1, $2, 'Dee', 'Other', TRUE)`, stranger, other)
 	t.Cleanup(func() { mustExec(t, f.db, `DELETE FROM customers WHERE id = $1`, other) })

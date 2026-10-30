@@ -60,6 +60,15 @@ const WalkInFloorNote = "Walk-in cash is not aggregated at this branch: each wal
 // reviews it.
 const StateIdentityDeclined = "identity declined"
 
+// The crossing's own states (migration 139 and 148). Reportable is the
+// United States duty, recorded is the Canadian dealer policy, and identity
+// declined is the walk-in who would not say who they were.
+const (
+	EventStateReportable      = "reportable"
+	EventStateRecorded        = "recorded"
+	EventStateIdentityDeclined = StateIdentityDeclined
+)
+
 // ResolveWalkInFloor answers the floor a branch runs: the branch's own
 // amount, else the branch country's default (3,000 dollars on a United
 // States branch, off on a Canadian one, and off in any country with no rule
@@ -539,9 +548,9 @@ func (s *Service) Capture(ctx context.Context, f *CompletionFacts) error {
 				uniq = append(uniq, id)
 			}
 		}
-		state := "reportable"
+		state := EventStateReportable
 		if c.agg.rule == RuleCA {
-			state = "recorded"
+			state = EventStateRecorded
 		}
 		if err := s.repo.InsertEvent(ctx, s.payerKey(f), f.CustomerID, f.BranchID, c.agg.rule, f.Currency,
 			c.counted, c.agg.base+c.counted, uniq, c.agg.tenderCount+1, state); err != nil {

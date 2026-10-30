@@ -41,35 +41,31 @@ type fixture struct {
 	productID  uuid.UUID
 	sku        string
 	branchRate string
+	// branchID is the branch the fixture owns: a locations row of its own,
+	// carrying the fixture's own tax rate. The orders it creates name it, so
+	// the order lands on a branch no other package's fixture can move.
+	branchID uuid.UUID
 }
 
 // newFixture builds the module the way serve does (repository, service with
 // the outbox, handler) behind the global idempotency layer, with a customer,
-// a product and a branch tax rate of its own. The fixture sets the default
-// branch's default_tax_rate so the order create lands on a configured branch,
-// and restores the value it read in cleanup so the fixture's write does not
-// leak to a neighbouring test in any package.
+// a product and a branch of its own. The fixture owns that branch: a
+// locations row of its own carrying its own tax rate, which the orders it
+// creates name, so the order lands on a branch no other package's fixture
+// writes and no other package's fixture can move.
 func newFixture(t *testing.T, db *database.DB) *fixture {
 	t.Helper()
 	t.Setenv("AUTH_MODE", "dev")
 	ctx := context.Background()
 	f := &fixture{t: t, db: db, customerID: uuid.New(), productID: uuid.New(), sku: "WIRE-" + uuid.NewString()[:8], branchRate: "0.088750"}
-	branch := `(SELECT value::uuid FROM system_settings WHERE key = 'default_branch_id')`
+	f.branchID = testutil.OwnBranch(t, db, f.branchRate)
 	if _, err := db.Pool.Exec(ctx, `INSERT INTO customers (id, name, account_number, primary_branch_id)
-		VALUES ($1, 'Wire Order Co', $2, `+branch+`)`, f.customerID, "WORD-"+uuid.NewString()[:8]); err != nil {
+		VALUES ($1, 'Wire Order Co', $2, $3)`, f.customerID, "WORD-"+uuid.NewString()[:8], f.branchID); err != nil {
 		t.Fatalf("seed customer: %v", err)
 	}
 	if _, err := db.Pool.Exec(ctx, `INSERT INTO products (id, sku, description, uom_primary, base_price)
 		VALUES ($1, $2, '2x4x8 SPF', 'PCS', 5.5)`, f.productID, f.sku); err != nil {
 		t.Fatalf("seed product: %v", err)
-	}
-	var oldRate *string
-	if err := db.Pool.QueryRow(ctx, `SELECT default_tax_rate::text FROM locations WHERE id = `+branch).Scan(&oldRate); err != nil {
-		t.Fatalf("read default branch rate: %v", err)
-	}
-	if _, err := db.Pool.Exec(ctx, `UPDATE locations SET default_tax_rate = $1
-		WHERE id = `+branch, f.branchRate); err != nil {
-		t.Fatalf("seed branch rate: %v", err)
 	}
 
 	repo := order.NewRepository(db)
@@ -81,9 +77,6 @@ func newFixture(t *testing.T, db *database.DB) *fixture {
 
 	t.Cleanup(func() {
 		f.srv.Close()
-		if _, err := db.Pool.Exec(ctx, `UPDATE locations SET default_tax_rate = $1 WHERE id = `+branch, oldRate); err != nil {
-			t.Errorf("restore default branch rate to %v: %v", oldRate, err)
-		}
 		_, _ = db.Pool.Exec(ctx, `DELETE FROM events_outbox WHERE entity_type = 'order' AND entity_id IN (SELECT id FROM orders WHERE customer_id = $1)`, f.customerID)
 		_, _ = db.Pool.Exec(ctx, `DELETE FROM order_lines WHERE order_id IN (SELECT id FROM orders WHERE customer_id = $1)`, f.customerID)
 		_, _ = db.Pool.Exec(ctx, `DELETE FROM orders WHERE customer_id = $1`, f.customerID)
@@ -146,7 +139,7 @@ func (f *fixture) createBody(lines ...map[string]any) map[string]any {
 	if len(lines) == 0 {
 		lines = []map[string]any{f.line("10")}
 	}
-	return map[string]any{"customer_id": f.customerID.String(), "delivery_type": "pickup", "lines": lines}
+	return map[string]any{"customer_id": f.customerID.String(), "branch_id": f.branchID.String(), "delivery_type": "pickup", "lines": lines}
 }
 
 func (f *fixture) create(lines ...map[string]any) resp {
@@ -303,7 +296,7 @@ func TestOrderCreateValidation(t *testing.T) {
 	db := testutil.RequireDB(t)
 	f := newFixture(t, db)
 	r := f.do("POST", "/api/v1/orders", map[string]any{
-		"customer_id": f.customerID.String(), "delivery_type": "pickup",
+		"customer_id": f.customerID.String(), "branch_id": f.branchID.String(), "delivery_type": "pickup",
 		"lines": []map[string]any{
 			{"product_id": f.productID.String(), "quantity": "0"},
 			{"product_id": f.productID.String(), "quantity": "1", "unit_price_ten_thousandths": 100000},
@@ -328,7 +321,7 @@ func TestOrderCreateValidation(t *testing.T) {
 
 	// An unknown body field is refused, never a silent no-op.
 	r = f.do("POST", "/api/v1/orders", map[string]any{
-		"customer_id": f.customerID.String(), "delivery_type": "pickup",
+		"customer_id": f.customerID.String(), "branch_id": f.branchID.String(), "delivery_type": "pickup",
 		"lines": []map[string]any{f.line("1")}, "currency": "EUR",
 	})
 	if r.status != 400 {
@@ -412,7 +405,7 @@ func TestOrderCreateStockingUnitRule(t *testing.T) {
 	db := testutil.RequireDB(t)
 	f := newFixture(t, db)
 	r := f.do("POST", "/api/v1/orders", map[string]any{
-		"customer_id": f.customerID.String(), "delivery_type": "pickup",
+		"customer_id": f.customerID.String(), "branch_id": f.branchID.String(), "delivery_type": "pickup",
 		"lines": []map[string]any{{"product_id": f.productID.String(), "quantity": "10", "uom": "MBF"}},
 	})
 	if r.status != 400 {
@@ -433,7 +426,7 @@ func TestOrderCreateOverrideAndDiscountAudit(t *testing.T) {
 	db := testutil.RequireDB(t)
 	f := newFixture(t, db)
 	r := f.do("POST", "/api/v1/orders", map[string]any{
-		"customer_id": f.customerID.String(), "delivery_type": "pickup",
+		"customer_id": f.customerID.String(), "branch_id": f.branchID.String(), "delivery_type": "pickup",
 		"lines": []map[string]any{{
 			"product_id": f.productID.String(), "quantity": "10",
 			"unit_price_ten_thousandths": 40000, "override_reason": "match the walk-in ask",
@@ -468,7 +461,7 @@ func TestOrderCreateOverrideAndDiscountAudit(t *testing.T) {
 	// A percent discount: the extension through ExtendDiscounted, its reason
 	// kept, its audit row written.
 	r = f.do("POST", "/api/v1/orders", map[string]any{
-		"customer_id": f.customerID.String(), "delivery_type": "pickup",
+		"customer_id": f.customerID.String(), "branch_id": f.branchID.String(), "delivery_type": "pickup",
 		"lines": []map[string]any{{
 			"product_id": f.productID.String(), "quantity": "10",
 			"discount_percent": "10", "discount_reason": "good customer",
@@ -494,7 +487,7 @@ func TestOrderCreateOverrideAndDiscountAudit(t *testing.T) {
 
 	// An amount discount past the extension is refused naming the line.
 	r = f.do("POST", "/api/v1/orders", map[string]any{
-		"customer_id": f.customerID.String(), "delivery_type": "pickup",
+		"customer_id": f.customerID.String(), "branch_id": f.branchID.String(), "delivery_type": "pickup",
 		"lines": []map[string]any{{
 			"product_id": f.productID.String(), "quantity": "1",
 			"discount_cents": 99999, "discount_reason": "too much",
@@ -518,7 +511,7 @@ func TestOrderCreateChargeAndTextLines(t *testing.T) {
 	db := testutil.RequireDB(t)
 	f := newFixture(t, db)
 	r := f.do("POST", "/api/v1/orders", map[string]any{
-		"customer_id": f.customerID.String(), "delivery_type": "pickup",
+		"customer_id": f.customerID.String(), "branch_id": f.branchID.String(), "delivery_type": "pickup",
 		"lines": []map[string]any{
 			f.line("10"),
 			{"charge_code": "FREIGHT", "description": "Delivery to site", "quantity": "1", "unit_price_ten_thousandths": 15000},
@@ -594,7 +587,7 @@ func TestOrderCreateKitExplodes(t *testing.T) {
 	})
 
 	r := f.do("POST", "/api/v1/orders", map[string]any{
-		"customer_id": f.customerID.String(), "delivery_type": "pickup",
+		"customer_id": f.customerID.String(), "branch_id": f.branchID.String(), "delivery_type": "pickup",
 		"lines": []map[string]any{{"product_id": kit.String(), "quantity": "2"}},
 	})
 	if r.status != http.StatusCreated {
@@ -1000,7 +993,7 @@ func TestOrderTaxResolution(t *testing.T) {
 	t.Cleanup(func() { _, _ = db.Pool.Exec(ctx, `DELETE FROM customer_ship_tos WHERE id = $1`, shipTo) })
 
 	r := f.do("POST", "/api/v1/orders", map[string]any{
-		"customer_id": f.customerID.String(), "delivery_type": "delivery", "lines": []map[string]any{f.line("10")},
+		"customer_id": f.customerID.String(), "branch_id": f.branchID.String(), "delivery_type": "delivery", "lines": []map[string]any{f.line("10")},
 	})
 	if r.status != http.StatusCreated {
 		t.Fatalf("delivery create = %d: %s", r.status, r.raw)
@@ -1022,7 +1015,7 @@ func TestOrderTaxResolution(t *testing.T) {
 	}
 	t.Cleanup(func() { _, _ = db.Pool.Exec(ctx, `DELETE FROM tax_exemptions WHERE customer_id = $1`, f.customerID) })
 	r = f.do("POST", "/api/v1/orders", map[string]any{
-		"customer_id": f.customerID.String(), "delivery_type": "delivery", "lines": []map[string]any{f.line("10")},
+		"customer_id": f.customerID.String(), "branch_id": f.branchID.String(), "delivery_type": "delivery", "lines": []map[string]any{f.line("10")},
 	})
 	if r.status != http.StatusCreated {
 		t.Fatalf("exempt create = %d: %s", r.status, r.raw)
@@ -1038,16 +1031,16 @@ func TestOrderTaxResolution(t *testing.T) {
 	}
 	_, _ = db.Pool.Exec(ctx, `DELETE FROM tax_exemptions WHERE customer_id = $1`, f.customerID)
 
-	// A branch with no configured rate refuses the act.
-	branch := `(SELECT value::uuid FROM system_settings WHERE key = 'default_branch_id')`
-	if _, err := db.Pool.Exec(ctx, `UPDATE locations SET default_tax_rate = NULL WHERE id = `+branch); err != nil {
+	// A branch with no configured rate refuses the act. The rate moves on
+	// the branch the fixture owns, never on the deployment's default branch.
+	if _, err := db.Pool.Exec(ctx, `UPDATE locations SET default_tax_rate = NULL WHERE id = $1`, f.branchID); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
-		_, _ = db.Pool.Exec(ctx, `UPDATE locations SET default_tax_rate = $1 WHERE id = `+branch, f.branchRate)
+		_, _ = db.Pool.Exec(ctx, `UPDATE locations SET default_tax_rate = $1 WHERE id = $2`, f.branchRate, f.branchID)
 	})
 	r = f.do("POST", "/api/v1/orders", map[string]any{
-		"customer_id": f.customerID.String(), "delivery_type": "pickup", "lines": []map[string]any{f.line("10")},
+		"customer_id": f.customerID.String(), "branch_id": f.branchID.String(), "delivery_type": "pickup", "lines": []map[string]any{f.line("10")},
 	})
 	if r.status != 409 {
 		t.Fatalf("create with no configured rate = %d: %s", r.status, r.raw)
@@ -1146,7 +1139,7 @@ func TestOrderDiscountErrorNamesTheRequestLine(t *testing.T) {
 		_, _ = db.Pool.Exec(ctx, `DELETE FROM products WHERE id IN ($1, $2)`, kit, comp)
 	})
 	r := f.do("POST", "/api/v1/orders", map[string]any{
-		"customer_id": f.customerID.String(), "delivery_type": "pickup",
+		"customer_id": f.customerID.String(), "branch_id": f.branchID.String(), "delivery_type": "pickup",
 		"lines": []map[string]any{
 			{"product_id": kit.String(), "quantity": "1"},
 			{"product_id": f.productID.String(), "quantity": "1", "discount_cents": 99999, "discount_reason": "too much"},

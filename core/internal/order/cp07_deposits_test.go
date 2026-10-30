@@ -73,11 +73,11 @@ func (f *fixture) serveOrdersAndPayments() *spyGateway {
 		WithAuditLog(audit.NewLogger(f.db)).WithInvoices(inv).WithDeposits(acct)
 	osvc = osvc.WithInventory(inventory.NewService(inventory.NewRepository(f.db)))
 	gw := &spyGateway{}
-	psvc := payment.NewService(f.db, payment.NewRepository(f.db), acct).WithGateway(gw, "pk_test").
-		WithAuditLog(audit.NewLogger(f.db)).WithOutbox(outbox.NewWriter(f.db, ""))
 	posSvc := pos.NewService(f.db, pos.NewRepository(f.db), slog.Default()).
 		WithAR(acct).WithLedger(glSvc).WithInvoices(inv).WithTxRunner(f.db).
 		WithAuditLog(audit.NewLogger(f.db)).WithOutbox(outbox.NewWriter(f.db, ""))
+	psvc := payment.NewService(f.db, payment.NewRepository(f.db), acct).WithGateway(gw, "pk_test").
+		WithAuditLog(audit.NewLogger(f.db)).WithOutbox(outbox.NewWriter(f.db, "")).WithTillCheckGuard(posSvc)
 	mux := http.NewServeMux()
 	order.NewHandler(osvc).RegisterRoutes(mux)
 	payment.NewHandler(psvc).RegisterRoutes(mux)
@@ -785,10 +785,7 @@ func TestCP07_CounterDepositRidesTheOpenTillSession(t *testing.T) {
 	f.serveOrdersAndPayments()
 	f.cleanMoney()
 	regID := "REG-CP07-" + uuid.NewString()[:8]
-	var branchID string
-	if err := db.Pool.QueryRow(context.Background(), `SELECT value FROM system_settings WHERE key = 'default_branch_id'`).Scan(&branchID); err != nil {
-		t.Fatal(err)
-	}
+	branchID := f.branchID.String()
 	if _, err := db.Pool.Exec(context.Background(), `INSERT INTO pos_registers (id, name, location_id, branch_id) VALUES ($1, $2, $3::uuid, $3::uuid)`, regID, "Counter "+regID, branchID); err != nil {
 		t.Fatal(err)
 	}
@@ -953,10 +950,7 @@ func TestCP07_VoidOfAnotherBranchesTillRidingPaymentIsRefusedAtTheWall(t *testin
 	f.serveOrdersAndPayments()
 	f.cleanMoney()
 	regID := "REG-CP07-" + uuid.NewString()[:8]
-	var branchID string
-	if err := db.Pool.QueryRow(context.Background(), `SELECT value FROM system_settings WHERE key = 'default_branch_id'`).Scan(&branchID); err != nil {
-		t.Fatal(err)
-	}
+	branchID := f.branchID.String()
 	if _, err := db.Pool.Exec(context.Background(), `INSERT INTO pos_registers (id, name, location_id, branch_id) VALUES ($1, $2, $3::uuid, $3::uuid)`, regID, "Counter "+regID, branchID); err != nil {
 		t.Fatal(err)
 	}
@@ -1089,10 +1083,7 @@ func TestCP07_CounterDepositRacingTheTillCloseIsCountedOrRefused(t *testing.T) {
 	f.serveOrdersAndPayments()
 	f.cleanMoney()
 	regID := "REG-CP07-" + uuid.NewString()[:8]
-	var branchID string
-	if err := db.Pool.QueryRow(context.Background(), `SELECT value FROM system_settings WHERE key = 'default_branch_id'`).Scan(&branchID); err != nil {
-		t.Fatal(err)
-	}
+	branchID := f.branchID.String()
 	if _, err := db.Pool.Exec(context.Background(), `INSERT INTO pos_registers (id, name, location_id, branch_id) VALUES ($1, $2, $3::uuid, $3::uuid)`, regID, "Counter "+regID, branchID); err != nil {
 		t.Fatal(err)
 	}
@@ -1297,10 +1288,7 @@ func TestCP07_Migration147UpgradeFromV1AndDown(t *testing.T) {
 	f.serveOrdersAndPayments()
 	f.cleanMoney()
 	regID := "REG-UPG-" + uuid.NewString()[:8]
-	var branchID string
-	if err := upgradedDB.Pool.QueryRow(ctx, `SELECT value FROM system_settings WHERE key = 'default_branch_id'`).Scan(&branchID); err != nil {
-		t.Fatal(err)
-	}
+	branchID := f.branchID.String()
 	if _, err := upgradedDB.Pool.Exec(ctx, `INSERT INTO pos_registers (id, name, location_id, branch_id) VALUES ($1, $2, $3::uuid, $3::uuid)`, regID, "Upgrade "+regID, branchID); err != nil {
 		t.Fatal(err)
 	}

@@ -244,6 +244,19 @@ func TestPosReceipt_CashierPrintsAndEmailsTheSalesInvoice(t *testing.T) {
 		if status != http.StatusAccepted || !strings.Contains(string(buf), `"status":"queued"`) {
 			t.Fatalf("email: %d %s, want 202 queued", status, buf)
 		}
+		var queued struct {
+			DeliveryID string `json:"delivery_id"`
+		}
+		if err := json.Unmarshal(buf, &queued); err != nil || queued.DeliveryID == "" {
+			t.Fatalf("email: %s, want the queued delivery_id", buf)
+		}
+		var docID uuid.UUID
+		if err := f.db.Pool.QueryRow(ctx, `SELECT document_id FROM email_deliveries WHERE id = $1`, queued.DeliveryID).Scan(&docID); err != nil {
+			t.Fatalf("the delivery_id names no row: %v", err)
+		}
+		if docID != inv {
+			t.Errorf("delivery row is for document %s, want the sale's invoice %s", docID, inv)
+		}
 		got := f.mail.recipients(1)
 		if len(got) != 1 || got[0] != "receipt-contact@example.test" {
 			t.Errorf("sent to %v, want the account's address once", got)

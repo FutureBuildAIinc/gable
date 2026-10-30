@@ -58,21 +58,22 @@ func TestWorkerOrderServiceBillsWithTheConfiguredTaxProvider(t *testing.T) {
 	// Seed: a customer on the default branch (whose rate is 8.25 percent, a
 	// figure the provider never answers), a product at 5.50 costing 2, and
 	// 100 on hand at a yard.
-	branch := `(SELECT value::uuid FROM system_settings WHERE key = 'default_branch_id')`
 	customer, product, yard := uuid.New(), uuid.New(), uuid.New()
+	// The branch the fixture owns: a locations row of its own carrying the
+	// rate the order needs (8.25 percent, a figure the provider never
+	// answers). The order names it, so it stands on a branch no other
+	// package's fixture writes and no other package's fixture can move.
+	branch := testutil.OwnBranch(t, db, "0.0825")
 	if _, err := db.Pool.Exec(ctx, `INSERT INTO customers (id, name, account_number, primary_branch_id)
-		VALUES ($1, 'Worker Wiring Co', 'WWIR-' || $2, `+branch+`)`, customer, uuid.NewString()[:8]); err != nil {
+		VALUES ($1, 'Worker Wiring Co', 'WWIR-' || $2, $3)`, customer, uuid.NewString()[:8], branch); err != nil {
 		t.Fatalf("seed customer: %v", err)
 	}
 	if _, err := db.Pool.Exec(ctx, `INSERT INTO products (id, sku, description, uom_primary, base_price, average_unit_cost)
 		VALUES ($1, $2, '2x4x8 SPF', 'PCS', 5.5, 2)`, product, "WWIR-"+uuid.NewString()[:8]); err != nil {
 		t.Fatalf("seed product: %v", err)
 	}
-	if _, err := db.Pool.Exec(ctx, `UPDATE locations SET default_tax_rate = 0.0825 WHERE id = `+branch); err != nil {
-		t.Fatalf("seed branch rate: %v", err)
-	}
-	if _, err := db.Pool.Exec(ctx, `INSERT INTO locations (id, type, code, parent_id, branch_id) VALUES ($1, 'YARD', 'WW-' || $2, `+branch+`, `+branch+`)`,
-		yard, yard.String()[:8]); err != nil {
+	if _, err := db.Pool.Exec(ctx, `INSERT INTO locations (id, type, code, parent_id, branch_id) VALUES ($1, 'YARD', 'WW-' || $2, $3, $3)`,
+		yard, yard.String()[:8], branch); err != nil {
 		t.Fatalf("seed yard: %v", err)
 	}
 	if _, err := db.Pool.Exec(ctx, `INSERT INTO inventory (product_id, location_id, location, quantity, allocated) VALUES ($1, $2, 'Y', 100, 0)`,
@@ -100,6 +101,7 @@ func TestWorkerOrderServiceBillsWithTheConfiguredTaxProvider(t *testing.T) {
 
 	q, _ := httpx.ParseQuantity("10")
 	o, err := svc.Create(ctx, &order.Draft{
+		BranchID:     &branch,
 		CustomerID:   customer,
 		DeliveryType: order.DeliveryDelivery,
 		Lines:        []salesdoc.ParsedLine{{LineType: salesdoc.LineProduct, ProductID: &product, Quantity: q}},

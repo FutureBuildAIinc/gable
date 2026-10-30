@@ -66,6 +66,13 @@ type Config struct {
 	// Auth & Security
 	AuthMode string // "dev" to disable auth; otherwise JWKS_URL is required
 
+	// Appwrite identity provider (ADR 0012). An empty endpoint keeps the
+	// integration off; when set, serve reads the server version at start.
+	AppwriteEndpoint  string // APPWRITE_ENDPOINT
+	AppwriteProjectID string // APPWRITE_PROJECT_ID
+	AppwriteTeamID    string // APPWRITE_TEAM_ID
+	AppwriteAPIKey    string // APPWRITE_API_KEY
+
 	// TrustedProxies lists the reverse proxy networks whose X-Forwarded-For
 	// is believed (TRUSTED_PROXIES, comma separated CIDRs or addresses).
 	// Empty by default: no forwarding header is trusted and the client is the
@@ -237,6 +244,12 @@ func Load() (*Config, error) {
 
 		// Auth & Security
 		AuthMode: getEnv("AUTH_MODE", ""),
+
+		// Appwrite identity provider (ADR 0012)
+		AppwriteEndpoint:  getEnv("APPWRITE_ENDPOINT", ""),
+		AppwriteProjectID: getEnv("APPWRITE_PROJECT_ID", ""),
+		AppwriteTeamID:    getEnv("APPWRITE_TEAM_ID", ""),
+		AppwriteAPIKey:    getEnv("APPWRITE_API_KEY", ""),
 
 		// Logging
 		LogLevel: getEnv("LOG_LEVEL", "INFO"),

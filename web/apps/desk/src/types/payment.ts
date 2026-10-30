@@ -53,6 +53,8 @@ export interface CreatePaymentRequest {
     notes?: string;
     order_id?: string;
     till_session_id?: string;
+    /** A check taken on a till session: the clerk looked at the payer's ID. */
+    id_checked?: boolean;
     applications?: PaymentApplicationRequest[];
 }
 

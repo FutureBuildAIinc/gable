@@ -313,11 +313,13 @@ func TestPartialFulfilmentsSumToTheOrder(t *testing.T) {
 	f.cleanMoney()
 	f.stock(f.productID, "3")
 	f.setCost(f.productID, "10")
-	if _, err := db.Pool.Exec(context.Background(), `UPDATE locations SET default_tax_rate = 0 WHERE id = (SELECT value::uuid FROM system_settings WHERE key = 'default_branch_id')`); err != nil {
+	// the rate moves on the branch the fixture owns, never on the
+	// deployment's default branch every package shares
+	if _, err := db.Pool.Exec(context.Background(), `UPDATE locations SET default_tax_rate = 0 WHERE id = $1`, f.branchID); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
-		_, _ = db.Pool.Exec(context.Background(), `UPDATE locations SET default_tax_rate = $1 WHERE id = (SELECT value::uuid FROM system_settings WHERE key = 'default_branch_id')`, f.branchRate)
+		_, _ = db.Pool.Exec(context.Background(), `UPDATE locations SET default_tax_rate = $1 WHERE id = $2`, f.branchRate, f.branchID)
 	})
 	body := f.createBody(map[string]any{
 		"product_id": f.productID.String(), "quantity": "3", "unit_price_ten_thousandths": 333300, "override_reason": "contract price",
@@ -640,7 +642,7 @@ func TestNonStockLineCostComesFromTheReceivedPurchaseOrderLine(t *testing.T) {
 		}
 	}
 	must(`INSERT INTO vendors (id, name) VALUES ($1, $2)`, vendor, "nsv-"+vendor.String()[:8])
-	must(`INSERT INTO purchase_orders (id, vendor_id, status, source, branch_id) VALUES ($1, $2, 'RECEIVED', 'SPECIAL_ORDER', (SELECT value::uuid FROM system_settings WHERE key = 'default_branch_id'))`, po, vendor)
+	must(`INSERT INTO purchase_orders (id, vendor_id, status, source, branch_id) VALUES ($1, $2, 'RECEIVED', 'SPECIAL_ORDER', $3)`, po, vendor, f.branchID)
 	t.Cleanup(func() {
 		_, _ = db.Pool.Exec(ctx, `DELETE FROM purchase_order_lines WHERE po_id = $1`, po)
 		_, _ = db.Pool.Exec(ctx, `DELETE FROM purchase_orders WHERE id = $1`, po)
@@ -711,7 +713,7 @@ func TestNonStockReliefComesFromTheLinkedReceiptsProRata(t *testing.T) {
 		}
 	}
 	must(`INSERT INTO vendors (id, name) VALUES ($1, $2)`, vendor, "pr-"+vendor.String()[:8])
-	must(`INSERT INTO purchase_orders (id, vendor_id, status, source, branch_id) VALUES ($1, $2, 'RECEIVED', 'SPECIAL_ORDER', (SELECT value::uuid FROM system_settings WHERE key = 'default_branch_id'))`, po, vendor)
+	must(`INSERT INTO purchase_orders (id, vendor_id, status, source, branch_id) VALUES ($1, $2, 'RECEIVED', 'SPECIAL_ORDER', $3)`, po, vendor, f.branchID)
 	t.Cleanup(func() {
 		_, _ = db.Pool.Exec(ctx, `DELETE FROM purchase_order_lines WHERE po_id = $1`, po)
 		_, _ = db.Pool.Exec(ctx, `DELETE FROM purchase_orders WHERE id = $1`, po)
@@ -773,7 +775,7 @@ func TestStockedSpecialOrderRelievesCOGSAtTheMovingAverage(t *testing.T) {
 		}
 	}
 	must(`INSERT INTO vendors (id, name) VALUES ($1, $2)`, vendor, "so-"+vendor.String()[:8])
-	must(`INSERT INTO purchase_orders (id, vendor_id, status, source, branch_id) VALUES ($1, $2, 'RECEIVED', 'SPECIAL_ORDER', (SELECT value::uuid FROM system_settings WHERE key = 'default_branch_id'))`, po, vendor)
+	must(`INSERT INTO purchase_orders (id, vendor_id, status, source, branch_id) VALUES ($1, $2, 'RECEIVED', 'SPECIAL_ORDER', $3)`, po, vendor, f.branchID)
 	t.Cleanup(func() {
 		_, _ = db.Pool.Exec(ctx, `DELETE FROM purchase_order_lines WHERE po_id = $1`, po)
 		_, _ = db.Pool.Exec(ctx, `DELETE FROM purchase_orders WHERE id = $1`, po)

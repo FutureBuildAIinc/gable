@@ -3,6 +3,7 @@
 
 import { test, expect, type Page, type APIRequestContext } from '@playwright/test';
 import { openCounter } from './pos-till';
+import { pickOptionByValue } from './app-controls';
 import path from 'path';
 import fs from 'fs';
 
@@ -146,6 +147,12 @@ test.describe('Deposits on an order', () => {
     await orderButton.click();
     await expect(depositDialog).toContainText(`Deposit on ${second.number}`);
     await page.screenshot({ path: path.join(SHOTS_DIR, 'pos-deposit-order.png'), fullPage: true });
+    // a check at the counter asks for the payer's ID; cash does not
+    await expect(depositDialog.getByTestId('deposit-id-checked')).toHaveCount(0);
+    await pickOptionByValue(depositDialog.locator('gable-select'), 'check');
+    await expect(depositDialog.getByTestId('deposit-id-checked')).toBeVisible();
+    await pickOptionByValue(depositDialog.locator('gable-select'), 'cash');
+    await expect(depositDialog.getByTestId('deposit-id-checked')).toHaveCount(0);
     const counterDeposit = page.waitForResponse((r) => r.url().endsWith('/api/v1/payments') && r.request().method() === 'POST');
     await depositDialog.locator('input[name="deposit-amount"]').fill('3.00');
     await depositDialog.getByTestId('deposit-submit').click();

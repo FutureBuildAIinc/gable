@@ -32,6 +32,8 @@ import { payPlan, panelProgress, type PanelState, type PanelKey } from './panels
 import { roundCashFor, type CashRoundingMode } from '../../lib/cashRounding';
 import './PosOrderDeposit';
 import { intentIdOfRefusal, cardWaitWords, CARD_DECLINED_WORDS, CARD_CANCEL_WORDS } from './terminal';
+import { receiptEmailAnswer, type ReceiptTone } from './receiptEmail';
+import { EmailDeliveryService } from '../../services/EmailDeliveryService';
 
 /**
  * The money guard at the yard: the field shell's own offline words, so a
@@ -154,7 +156,7 @@ export class POSTerminal extends LitElement {
   // The picture each product came with from the catalogue, by product id.
   @state() private _images: Record<string, string> = {};
   @state() private _receiptNote: string | null = null;
-  @state() private _receiptRefused = false;
+  @state() private _receiptTone: ReceiptTone = 'plain';
   @state() private _receiptBusy = false;
   /** A blob url the receipt can be downloaded from when its tab was blocked. */
   @state() private _receiptDownload: string | null = null;
@@ -1060,7 +1062,7 @@ export class POSTerminal extends LitElement {
       this._signerName = '';
       this._signatureNote = null;
       this._receiptNote = null;
-      this._receiptRefused = false;
+      this._receiptTone = 'plain';
       this._dropReceiptDownload();
       this._dismissCardWait();
       // A completed sale on screen stays offerable for a void or a return
@@ -3288,18 +3290,27 @@ export class POSTerminal extends LitElement {
       </section>`;
   }
 
-  /** Sends the sale's receipt to the contact on the account; the server says in words if there is none. */
+  /** Sends the sale's receipt to the contact on the account, then follows the
+   *  queued delivery the 202 names: the note says what actually happened
+   *  (sent, not sent because email is not set up here, not sent because the
+   *  mail server refused, or still sending), never success on the 202 alone.
+   *  The server says in words if there is no contact to send to. */
   private async _emailReceipt(saleId: string) {
     if (this._receiptBusy) return;
     this._receiptBusy = true;
     try {
       this._error = null;
-      await posService.emailReceipt(saleId);
-      this._receiptNote = 'Receipt sent to the contact on the account';
-      this._receiptRefused = false;
+      const queued = await posService.emailReceipt(saleId);
+      const invoiceId = this._sale?.invoice_id ?? null;
+      const delivery = queued.delivery_id && invoiceId
+        ? await EmailDeliveryService.follow(queued.delivery_id, invoiceId)
+        : undefined;
+      const answer = receiptEmailAnswer(delivery);
+      this._receiptNote = answer.note;
+      this._receiptTone = answer.tone;
     } catch (err: unknown) {
       this._receiptNote = err instanceof Error ? err.message : 'Failed to email the receipt';
-      this._receiptRefused = true;
+      this._receiptTone = 'error';
     } finally {
       this._receiptBusy = false;
     }
@@ -3323,14 +3334,14 @@ export class POSTerminal extends LitElement {
       if (shown?.blocked) {
         this._receiptDownload = shown.url;
         this._receiptNote = 'Allow pop ups for this page to print the receipt, or download it';
-        this._receiptRefused = true;
+        this._receiptTone = 'error';
         return;
       }
       this._receiptNote = null;
-      this._receiptRefused = false;
+      this._receiptTone = 'plain';
     } catch (err: unknown) {
       this._receiptNote = err instanceof Error ? err.message : 'Failed to print the receipt';
-      this._receiptRefused = true;
+      this._receiptTone = 'error';
     }
   }
 
@@ -3436,7 +3447,7 @@ export class POSTerminal extends LitElement {
                   class="min-h-11 flex-1 rounded border border-white/20 px-3 py-2 text-sm font-semibold text-slate-200 hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-40">Email receipt</button>` : nothing}
             </div>
             ${sale.customer_id !== null ? html`<p class="mt-2 text-xs text-slate-400" data-testid="pos-receipt-contact">Email goes to the contact on the account</p>` : nothing}
-            ${this._receiptNote ? html`<p class="mt-2 text-xs ${this._receiptRefused ? 'text-safety-red' : 'text-slate-400'}" data-testid="pos-receipt-note" role="status">${this._receiptNote}</p>` : nothing}
+            ${this._receiptNote ? html`<p class="mt-2 text-xs ${this._receiptTone === 'error' ? 'text-safety-red' : this._receiptTone === 'warn' ? 'text-amber-400' : 'text-slate-400'}" data-testid="pos-receipt-note" role="status">${this._receiptNote}</p>` : nothing}
             ${this._receiptDownload ? html`<a data-testid="pos-receipt-download" href=${this._receiptDownload} download="receipt-${sale.number}.pdf"
               class="mt-1 inline-block text-xs font-semibold text-gable-green underline">Download the receipt</a>` : nothing}
             ${sale.print_count > 0 ? html`<p class="mt-2 text-xs text-slate-400" data-testid="pos-print-count">Printed ${sale.print_count} time${sale.print_count === 1 ? '' : 's'}; the next is a reprint</p>` : nothing}

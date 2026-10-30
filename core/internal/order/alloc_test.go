@@ -48,15 +48,14 @@ func (f *fixture) withStock() func(*order.Service) *order.Service {
 	}
 }
 
-// stock puts qty of a product on hand at a yard of the default branch,
+// stock puts qty of a product on hand at a yard of the fixture's branch,
 // replacing what the fixture left, and removes it with the test.
 func (f *fixture) stock(productID uuid.UUID, qty string) {
 	f.t.Helper()
 	ctx := context.Background()
 	yard := uuid.New()
-	branch := `(SELECT value::uuid FROM system_settings WHERE key = 'default_branch_id')`
-	if _, err := f.db.Pool.Exec(ctx, `INSERT INTO locations (id, type, code, parent_id, branch_id) VALUES ($1, 'YARD', $2, `+branch+`, `+branch+`)`,
-		yard, "ST-"+yard.String()[:8]); err != nil {
+	if _, err := f.db.Pool.Exec(ctx, `INSERT INTO locations (id, type, code, parent_id, branch_id) VALUES ($1, 'YARD', $2, $3, $3)`,
+		yard, "ST-"+yard.String()[:8], f.branchID); err != nil {
 		f.t.Fatalf("seed yard: %v", err)
 	}
 	if _, err := f.db.Pool.Exec(ctx, `INSERT INTO inventory (product_id, location_id, location, quantity, allocated) VALUES ($1, $2, 'Y', $3::numeric, 0)`,

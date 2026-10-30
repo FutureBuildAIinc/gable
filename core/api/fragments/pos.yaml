@@ -220,8 +220,10 @@ paths:
       description: >-
         Sends the sale's invoice to the account's contact exactly as the
         invoice email route does (the same service call, the same words, 202
-        and {"status":"queued"}; the outcome is written to email_deliveries),
-        under the counter's own roles admin, owner and cashier. The sale is
+        and {"status":"queued"} with the queued delivery row's delivery_id;
+        the send resolves that row to sent, logged or failed in
+        email_deliveries), under the counter's own roles admin, owner and
+        cashier. The sale is
         read as the sale read reads it (404 for a sale the caller cannot
         read). A sale that is not completed or has no invoice answers 409
         with the blocker no_receipt; a walk in sale (no customer, or the shared

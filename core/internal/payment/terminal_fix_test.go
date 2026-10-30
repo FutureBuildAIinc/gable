@@ -17,6 +17,7 @@ import (
 
 	"github.com/gablelbm/gable/internal/payment"
 	"github.com/gablelbm/gable/internal/testutil"
+	"github.com/gablelbm/gable/pkg/branchctx"
 	"github.com/google/uuid"
 )
 
@@ -67,6 +68,7 @@ func TestSweepIsOneStatement(t *testing.T) {
 	in := &payment.TerminalIntent{ID: uuid.New(), TransactionID: sale, LegKey: "card-0", RegisterID: "REG-" + sale.String()[:12],
 		BranchID: m29BranchOf(t, l), AmountCents: 7777, Kind: payment.TerminalKindSale,
 		IdempotencyKey: "sale-" + sale.String() + "-card-0", LeaseUntil: time.Now().Add(time.Minute)}
+	ctx = branchctx.With(ctx, &branchctx.Context{BranchID: &in.BranchID})
 	if err := l.Claim(ctx, in); err != nil {
 		t.Fatalf("claim: %v", err)
 	}
@@ -88,8 +90,8 @@ func TestSweepIsOneStatement(t *testing.T) {
 // lostItemOf sweeps one dispatched leg and answers its manager item.
 func lostItemOf(t *testing.T, l *payment.TerminalLedger, sale uuid.UUID, ref string) (*payment.TerminalIntent, *payment.TerminalLostItem) {
 	t.Helper()
-	ctx := context.Background()
 	in := claimIntent(t, l, sale, time.Minute)
+	ctx := branchctx.With(context.Background(), &branchctx.Context{BranchID: &in.BranchID})
 	if ok, err := l.MarkDispatched(ctx, in.ID, ref, time.Now().Add(-time.Minute)); err != nil || !ok {
 		t.Fatalf("dispatch: %t %v", ok, err)
 	}

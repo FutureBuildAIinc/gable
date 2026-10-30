@@ -48,6 +48,7 @@ func newARWorld(t *testing.T) *arWorld {
 
 func newARWorldOn(t *testing.T, db *database.DB) *arWorld {
 	t.Helper()
+	testutil.LockBranchDay(t)
 	loadBranchZone(db)
 	w := &arWorld{t: t, db: db, customerID: uuid.New()}
 	w.svc = account.NewService(db, gl.NewService(gl.NewRepository(db), nil, slog.Default()), slog.Default())
@@ -113,12 +114,10 @@ func (w *arWorld) cleanup() {
 		exec(`DELETE FROM credit_holds WHERE customer_id = $1`, c)
 		exec(`DELETE FROM customers WHERE id = $1`, c)
 	}
-	// The runs outlast no world: their items cascade with them, and a run may
-	// name several worlds' customers, so they are cleared whole.
-	exec(`DELETE FROM ar_finance_charge_items`)
-	exec(`DELETE FROM ar_finance_charge_runs`)
-	exec(`DELETE FROM ar_statement_run_items`)
-	exec(`DELETE FROM ar_statement_runs`)
+	// Only runs that hold no remaining items are removed, so another test's
+	// concurrent run is never deleted out from under it.
+	exec(`DELETE FROM ar_finance_charge_runs WHERE NOT EXISTS (SELECT 1 FROM ar_finance_charge_items i WHERE i.run_id = ar_finance_charge_runs.id)`)
+	exec(`DELETE FROM ar_statement_runs WHERE NOT EXISTS (SELECT 1 FROM ar_statement_run_items i WHERE i.run_id = ar_statement_runs.id)`)
 }
 
 // ---------------------------------------------------------------------------

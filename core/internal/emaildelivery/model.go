@@ -13,14 +13,19 @@ import (
 	"github.com/google/uuid"
 )
 
-// The document kinds a delivery can carry, and the two outcomes.
+// The document kinds a delivery can carry, and the statuses a row moves
+// through: queued the moment a sending route answers 202, then sent (the SMTP
+// server took it), logged (a log sender took it: nothing left the process) or
+// failed (the send errored).
 const (
 	DocInvoice       = "invoice"
 	DocStatement     = "statement"
 	DocQuote         = "quote"
 	DocPurchaseOrder = "purchase_order"
 
+	StatusQueued = "queued"
 	StatusSent   = "sent"
+	StatusLogged = "logged"
 	StatusFailed = "failed"
 )
 
@@ -53,9 +58,11 @@ type Entry struct {
 	Error          string
 }
 
-// Recorder is what a sending route needs.
+// Recorder is what a sending route needs: the queued row its 202 names, and
+// the one outcome the send resolves that row to.
 type Recorder interface {
 	Record(ctx context.Context, e Entry) (*Delivery, error)
+	SetOutcome(ctx context.Context, id uuid.UUID, status, senderAnswer, sendError string) error
 }
 
 // Filter narrows the list.

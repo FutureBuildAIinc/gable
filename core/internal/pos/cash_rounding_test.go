@@ -110,7 +110,7 @@ func (f *fixture) openSessionID() string {
 // takes the money exactly as it was tendered.
 func TestCP18_OffByDefault(t *testing.T) {
 	testutil.LockOutboxTables(t)
-	f := newOwnBranchFixture(t, testutil.RequireDB(t))
+	f := newFixture(t, testutil.RequireDB(t))
 	f.noTax()
 	saleID, _ := f.saleAtPrice(103)
 	r := f.completeSale(saleID, tender("cash", 103))
@@ -134,7 +134,7 @@ func TestCP18_OffByDefault(t *testing.T) {
 // check sale settle to the exact cent.
 func TestCP18_CashOnlyRounded(t *testing.T) {
 	testutil.LockOutboxTables(t)
-	f := newOwnBranchFixture(t, testutil.RequireDB(t))
+	f := newFixture(t, testutil.RequireDB(t))
 	f.noTax()
 	f.setRounding("NEAREST_5_CENTS")
 
@@ -221,7 +221,7 @@ func TestCP18_CashOnlyRounded(t *testing.T) {
 // exact cent and the total is not rounded as a whole.
 func TestCP18_SplitTenderRoundsCashLeg(t *testing.T) {
 	testutil.LockOutboxTables(t)
-	f := newOwnBranchFixture(t, testutil.RequireDB(t))
+	f := newFixture(t, testutil.RequireDB(t))
 	f.noTax()
 	f.setRounding("NEAREST_5_CENTS")
 
@@ -250,7 +250,7 @@ func TestCP18_SplitTenderRoundsCashLeg(t *testing.T) {
 // never moves for the rounding.
 func TestCP18_TaxBeforeRounding(t *testing.T) {
 	testutil.LockOutboxTables(t)
-	f := newOwnBranchFixture(t, testutil.RequireDB(t))
+	f := newFixture(t, testutil.RequireDB(t))
 	f.setRounding("NEAREST_5_CENTS")
 
 	// A $1.03 line with the branch's tax: the tax is on the exact $1.03, and
@@ -281,7 +281,7 @@ func TestCP18_TaxBeforeRounding(t *testing.T) {
 // and the rounding account carries the difference.
 func TestCP18_RoundingPostedBalanced(t *testing.T) {
 	testutil.LockOutboxTables(t)
-	f := newOwnBranchFixture(t, testutil.RequireDB(t))
+	f := newFixture(t, testutil.RequireDB(t))
 	f.noTax()
 	f.setRounding("NEAREST_5_CENTS")
 
@@ -357,7 +357,7 @@ func TestCP18_RoundingPostedBalanced(t *testing.T) {
 // stays correct.
 func TestCP18_TillExpectedCashUsesRounded(t *testing.T) {
 	testutil.LockOutboxTables(t)
-	f := newOwnBranchFixture(t, testutil.RequireDB(t))
+	f := newFixture(t, testutil.RequireDB(t))
 	f.noTax()
 	f.setRounding("NEAREST_5_CENTS")
 
@@ -376,7 +376,7 @@ func TestCP18_TillExpectedCashUsesRounded(t *testing.T) {
 // rounding income back, so the rounding account nets to zero.
 func TestCP18_ReturnRefundsExactPaysRounded(t *testing.T) {
 	testutil.LockOutboxTables(t)
-	f := newOwnBranchFixture(t, testutil.RequireDB(t))
+	f := newFixture(t, testutil.RequireDB(t))
 	f.setRounding("NEAREST_5_CENTS")
 
 	// A $1.00 line with the branch's tax: the total of $1.09 rounds up to
@@ -446,7 +446,7 @@ func TestCP18_ReturnRefundsExactPaysRounded(t *testing.T) {
 // ledger line, and the drawer expects nothing (money checklist line 16).
 func TestCP18_RoundedRefusalWritesNothing(t *testing.T) {
 	testutil.LockOutboxTables(t)
-	f := newOwnBranchFixture(t, testutil.RequireDB(t))
+	f := newFixture(t, testutil.RequireDB(t))
 	f.noTax()
 	f.setRounding("NEAREST_5_CENTS")
 
@@ -483,7 +483,7 @@ func TestCP18_RoundedRefusalWritesNothing(t *testing.T) {
 // (a 103 sale paid 105) and round down (a 106 sale paid 105) both.
 func TestCP18_VoidOfRoundedSaleReversesTheRounding(t *testing.T) {
 	testutil.LockOutboxTables(t)
-	f := newOwnBranchFixture(t, testutil.RequireDB(t))
+	f := newFixture(t, testutil.RequireDB(t))
 	f.noTax()
 	f.setRounding("NEAREST_5_CENTS")
 
@@ -553,7 +553,7 @@ func TestCP18_VoidOfRoundedSaleReversesTheRounding(t *testing.T) {
 // the rounding on the cash part alone.
 func TestCP18_ExchangeReceiptCountsTheCreditOnce(t *testing.T) {
 	testutil.LockOutboxTables(t)
-	f := newOwnBranchFixture(t, testutil.RequireDB(t), withRealThermalReceipts())
+	f := newFixture(t, testutil.RequireDB(t), withRealThermalReceipts())
 
 	// The rule off: one 5.99 line exchanged for two, the 5.99 difference paid
 	// in exact cash. Nothing was rounded: the receipt carries no rounding
@@ -616,7 +616,7 @@ func TestCP18_ExchangeReceiptCountsTheCreditOnce(t *testing.T) {
 // sale carries the difference the drawer kept.
 func TestCP18_ReceiptRoundingNamesOnlyWhatTheBranchRounded(t *testing.T) {
 	testutil.LockOutboxTables(t)
-	f := newOwnBranchFixture(t, testutil.RequireDB(t), withRealThermalReceipts())
+	f := newFixture(t, testutil.RequireDB(t), withRealThermalReceipts())
 	f.noTax()
 
 	// The rule off: a 20 cent sale paid with two cash tenders, 50 and 60.
@@ -660,7 +660,7 @@ func TestCP18_ReceiptRoundingNamesOnlyWhatTheBranchRounded(t *testing.T) {
 // the AR subledger invariants.
 func TestCP18_ConcurrentRoundedCashSales(t *testing.T) {
 	testutil.LockOutboxTables(t)
-	f := newOwnBranchFixture(t, testutil.RequireDBMaxConns(t, 4))
+	f := newFixture(t, testutil.RequireDBMaxConns(t, 4))
 	f.noTax()
 	f.setRounding("NEAREST_5_CENTS")
 

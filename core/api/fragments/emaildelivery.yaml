@@ -33,7 +33,7 @@ paths:
           required: false
           schema:
             type: string
-            enum: [sent, failed]
+            enum: [queued, sent, logged, failed]
         - name: document_id
           in: query
           required: false
@@ -87,7 +87,12 @@ components:
           description: The document's number; the account number for a statement.
         status:
           type: string
-          enum: [sent, failed]
+          enum: [queued, sent, logged, failed]
+          description: >-
+            queued the moment the sending route answers 202, then sent (the
+            SMTP server took it), logged (a log sender took it: nothing left
+            the process, email is not set up on this server) or failed (the
+            send errored).
         sender_answer:
           type: [string, "null"]
           description: The sender's own answer; the SMTP server's reply, or a note that the log sender logged and did not send.
