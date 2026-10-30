@@ -147,12 +147,13 @@ test('CP-15: the branch switches the card fee on, the counter states it before t
     const saleId = await saleIdByNumber(request, number);
     const sale = (await (await request.get(`/api/v1/pos/transactions/${saleId}`)).json()) as {
       total_cents: number;
-      tenders: { method: string; amount_cents: number; surcharge_cents: number }[];
+      tenders: { method: string; amount_cents: number; surcharge_cents: number; gateway_tx_id: string | null }[];
     };
     expect(sale.total_cents).toBe(totalCents);
     const cardTender = sale.tenders.find((t) => t.method === 'card');
     expect(cardTender?.amount_cents).toBe(totalCents);
     expect(cardTender?.surcharge_cents).toBe(expectedFee);
+    expect(cardTender?.gateway_tx_id, 'the simulated terminal took the card leg').toMatch(/^simterm_/);
 
     // The 80mm receipt prints the fee the answer charged.
     const receipt = await request.get(`/api/v1/pos/transactions/${saleId}/receipt?layout=thermal80`);
