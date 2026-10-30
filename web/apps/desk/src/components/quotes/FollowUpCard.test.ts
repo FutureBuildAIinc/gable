@@ -96,7 +96,7 @@ afterEach(() => {
   document.body.innerHTML = ''
 })
 
-describe('gable-follow-up-card — what it shows', () => {
+describe('gable-follow-up-card: what it shows', () => {
   it('says there is no follow up when the quote carries none', async () => {
     const el = await card(quote(null))
     expect(text(q(el, '[data-testid="follow-up-date"]'))).toBe('No follow up set')
@@ -121,7 +121,7 @@ describe('gable-follow-up-card — what it shows', () => {
   })
 })
 
-describe('gable-follow-up-card — what it writes', () => {
+describe('gable-follow-up-card: what it writes', () => {
   it('sets the follow up on the quote with its revision', async () => {
     const el = await card(quote(null))
     button(el, 'Set follow up').click()

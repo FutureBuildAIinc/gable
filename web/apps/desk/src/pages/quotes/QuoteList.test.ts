@@ -73,11 +73,11 @@ afterEach(() => {
   document.body.innerHTML = ''
 })
 
-describe('gable-quote-list — the follow up column', () => {
+describe('gable-quote-list: the follow up column', () => {
   it('shows the follow up date of a quote that carries one', async () => {
     const el = await list([quote(FUTURE)])
     const cell = q(el, '[data-testid="follow-up-cell"]')
-    expect(text(cell)).not.toBe('—')
+    expect(text(cell)).not.toBe('None')
     expect(el.querySelector('[data-testid="follow-up-overdue"]')).toBeNull()
   })
 
@@ -89,12 +89,12 @@ describe('gable-quote-list — the follow up column', () => {
 
   it('shows a dash for a quote with no follow up', async () => {
     const el = await list([quote(null)])
-    expect(text(q(el, '[data-testid="follow-up-cell"]'))).toBe('—')
+    expect(text(q(el, '[data-testid="follow-up-cell"]'))).toBe('None')
     expect(el.querySelector('[data-testid="follow-up-overdue"]')).toBeNull()
   })
 })
 
-describe('gable-quote-list — the follow up queue tabs', () => {
+describe('gable-quote-list: the follow up queue tabs', () => {
   it('asks the server for the whole list when no queue is picked', async () => {
     await list([quote(FUTURE)])
     expect(urls.some((u) => u.includes('follow_up='))).toBe(false)

@@ -326,7 +326,7 @@ export class GableQuoteList extends LitElement {
                                                 ${quote.follow_up_owner_name ? html`
                                                     <div class="text-[10px] text-zinc-500 mt-0.5">${quote.follow_up_owner_name}</div>
                                                 ` : nothing}
-                                            ` : html`<span class="text-xs text-zinc-500" data-testid="follow-up-cell">—</span>`}
+                                            ` : html`<span class="text-xs text-zinc-500" data-testid="follow-up-cell">None</span>`}
                                         </td>
                                         <td class="p-4">
                                             <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border uppercase ${this.stateColors[quote.status] || ''}">
