@@ -743,6 +743,13 @@ components:
         margin_total_cents:
           type: integer
           format: int64
+          description: >-
+            On the full document read the margin is computed from the lines:
+            the total less the cost of every product and component line (the
+            quantity in the stocking unit times the product's average cost,
+            rounded once per line), so a kit's margin is its components' and
+            a kit quoted below its parts reads negative. A list row carries
+            the stored figure.
         delivery_type:
           $ref: "#/components/schemas/QuoteDeliveryType"
         vehicle_id:
@@ -866,8 +873,12 @@ components:
         quantity as a decimal string with its unit, the scaled unit price with
         its price unit, the conversion pair, and the extension in cents
         (quantity x unit price x price_uom_qty / uom_qty, rounded once, half
-        away from zero).
-      required: [id, quote_id, product_id, sku, description, customer_note, quantity, uom, price_uom, uom_qty, price_uom_qty, unit_price_ten_thousandths, line_total_cents, stock_uom, stock_quantity, tally, unit_cost_ten_thousandths, created_at]
+        away from zero). A line that names a kit product is written by the
+        server as one kit line, priced as a whole, followed by one component
+        line per component of the kit's definition at quantity kit x per kit,
+        unit price zero, extension zero (ADR 0005 section 2.6): line_type and
+        parent_line_id say which is which, and a request never sends either.
+      required: [id, quote_id, line_type, parent_line_id, product_id, sku, description, customer_note, quantity, uom, price_uom, uom_qty, price_uom_qty, unit_price_ten_thousandths, line_total_cents, stock_uom, stock_quantity, tally, unit_cost_ten_thousandths, created_at]
       properties:
         id:
           type: string
@@ -875,6 +886,18 @@ components:
         quote_id:
           type: string
           format: uuid
+        line_type:
+          type: string
+          enum: [product, kit, component]
+          description: >-
+            The line's kind. A kit line is priced as a whole and carries no
+            cost of its own (its components carry it); a component line
+            carries quantity and cost at zero price. Written by the server at
+            the line's create or edit, never sent by a client.
+        parent_line_id:
+          type: [string, "null"]
+          format: uuid
+          description: Set on a component line only, naming its kit line.
         product_id:
           type: [string, "null"]
           format: uuid
@@ -926,7 +949,10 @@ components:
         unit_cost_ten_thousandths:
           type: integer
           format: int64
-          description: The product's average cost times 10,000; read only.
+          description: >-
+            The product's average cost times 10,000; read only. A kit line's
+            own cost says nothing about what the kit is made of: a kit's cost
+            is its component lines', and the margin reads theirs.
         created_at:
           type: string
           format: date-time

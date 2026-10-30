@@ -90,7 +90,7 @@ var productColumns = `p.id, p.sku, p.description, p.uom_primary, p.base_price::t
 		       p.sale_uom, p.price_uom, p.purchase_uom,
 		       p.board_thickness_in::text, p.board_width_in::text, p.board_length_ft::text, p.random_length,
 		       p.density_lb_per_cy::text, p.density_volume_state,
-		       ` + pictures.ImageSQL("p")
+		       ` + pictures.ImageSQL("p") + `, p.is_kit`
 
 // stockColumns and stockJoin read a product's stock totals in the same
 // statement as the product, in the stocking unit (ADR 0006 7.1): one
@@ -140,7 +140,7 @@ func scanProductWith(scanner interface{ Scan(dest ...any) error }, withStock boo
 		&p.SaleUOM, &p.PriceUOM, &p.PurchaseUOM,
 		&boardThick, &boardWidth, &boardLength, &p.RandomLength,
 		&density, &p.DensityVolumeState,
-		&p.ImageURL,
+		&p.ImageURL, &p.IsKit,
 	}
 	if withStock {
 		dest = append(dest, &onHand, &allocated)

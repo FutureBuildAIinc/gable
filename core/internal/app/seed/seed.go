@@ -1539,6 +1539,15 @@ func Run() {
 	}
 
 	// =========================================================================
+	// 22d. QUOTES AND ESTIMATES SECTION (QE)
+	//    The section's seed rows live in qe.go: two plain building material
+	//    kits with their component definitions, so the demo's quotes and
+	//    orders have kits to build and explode. Reference data, upserted by
+	//    natural key like every other section's.
+	// =========================================================================
+	seedQuoteKits(db, skuToID)
+
+	// =========================================================================
 	// 23. EDI TRADING PARTNERS
 	// =========================================================================
 	db.Exec(`INSERT INTO edi_trading_partners (name, isa_sender_id, isa_receiver_id, gs_sender_id, gs_receiver_id, transport_type)
