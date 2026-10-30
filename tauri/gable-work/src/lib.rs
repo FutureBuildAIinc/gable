@@ -318,7 +318,8 @@ mod tests {
                 "allow-core-token",
                 "allow-clear-tokens",
                 "allow-begin-sign-in",
-                "allow-refresh-tokens"
+                "allow-refresh-tokens",
+                "allow-sign-in-with-password"
             ]
         );
         // Least privilege: no open core grant, no plugin, no device or shell
@@ -508,6 +509,60 @@ mod tests {
         for wanted in ["allow-begin-sign-in", "allow-refresh-tokens"] {
             assert!(perms.contains(&wanted), "{wanted} must be granted");
         }
+    }
+
+    // RULE (CP-13 plan (b)): the page the window loads from the enrolled
+    // Gable can sign the register in by email and password, so the runtime
+    // capability grants that command by name.
+    #[test]
+    fn the_runtime_capability_grants_sign_in_with_password() {
+        let url = super::Url::parse("https://gable.yard.internal:8443/").unwrap();
+        let cap: serde_json::Value =
+            serde_json::from_str(&shell::work_remote_capability_json(&url)).unwrap();
+        let perms: Vec<&str> = cap["permissions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_str().unwrap())
+            .collect();
+        assert!(perms.contains(&"allow-sign-in-with-password"));
+    }
+
+    // RULE: every command the handler registers is declared to tauri-build
+    // (so the ACL applies to it) and granted to the enrolled Gable, in the
+    // same order in all three lists: none can be added to one and missed in
+    // another.
+    #[test]
+    fn the_commands_the_handler_registers_and_build_declares_and_the_grant_names_are_one_list() {
+        let lib = include_str!("lib.rs");
+        let handler = lib
+            .split("generate_handler![")
+            .nth(1)
+            .and_then(|r| r.split(']').next())
+            .expect("the handler list");
+        let registered: Vec<String> = handler
+            .split(',')
+            .map(|c| c.trim().trim_start_matches("commands::").to_string())
+            .filter(|c| !c.is_empty())
+            .collect();
+        let build = include_str!("../build.rs");
+        let declared: Vec<String> = build
+            .split("const COMMANDS: &[&str] = &[")
+            .nth(1)
+            .and_then(|r| r.split("];").next())
+            .expect("the COMMANDS list")
+            .split(',')
+            .map(|c| c.trim().trim_matches('"').replace('-', "_"))
+            .filter(|c| !c.is_empty())
+            .collect();
+        let granted: Vec<String> = shell::WORK_REMOTE_PERMISSIONS
+            .iter()
+            .map(|p| p.trim_start_matches("allow-").replace('-', "_"))
+            .collect();
+        assert_eq!(registered, declared);
+        assert_eq!(registered, granted);
+        assert_eq!(registered.len(), 9);
+        assert!(registered.contains(&"sign_in_with_password".to_string()));
     }
 
     // RULE (ADR 0011 section 5.2 and section 7): the Gable URL comes from the

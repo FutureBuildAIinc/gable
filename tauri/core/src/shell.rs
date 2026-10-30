@@ -575,6 +575,87 @@ mod tests {
         );
     }
 
+    const PASSWORD: &str = "pw-sentinel-Kx9";
+
+    fn password() -> zeroize::Zeroizing<String> {
+        zeroize::Zeroizing::new(PASSWORD.to_string())
+    }
+
+    #[test]
+    fn the_password_command_answers_only_the_apps_own_origin() {
+        let transport = Scripted::new(vec![pair_answer("gst_x", "fam.x")]);
+        let (state, custody) = state_with_server(transport.clone());
+        for refused in [
+            "https://evil.example/",
+            "http://gable.example/work",
+            "https://gable.example:8443/work",
+            "not a url",
+        ] {
+            assert_eq!(
+                sign_in_with_password_answer(&state, refused, "a@b.example", password()),
+                Err(ERR_ORIGIN.to_string()),
+                "{refused}"
+            );
+        }
+        assert!(
+            transport.calls.lock().unwrap().is_empty(),
+            "a foreign caller never reaches the core"
+        );
+        assert_eq!(custody.snapshot_len(), 0);
+    }
+
+    #[test]
+    fn a_password_command_with_no_server_answers_its_code() {
+        let (state, custody) = state_for(profiles::work());
+        assert_eq!(
+            sign_in_with_password_answer(&state, OWN, "a@b.example", password()),
+            Err(ERR_NO_SERVER.to_string())
+        );
+        assert_eq!(custody.snapshot_len(), 0);
+    }
+
+    #[test]
+    fn the_password_command_answers_nothing_and_the_pair_lands_in_custody() {
+        let transport = Scripted::new(vec![pair_answer("gst_pw", "fam.pw")]);
+        let (state, _) = state_with_server(transport.clone());
+        assert_eq!(
+            sign_in_with_password_answer(&state, GABLE, "a@b.example", password()),
+            Ok(())
+        );
+        let calls = transport.calls.lock().unwrap().clone();
+        assert_eq!(
+            calls,
+            vec![(
+                "https://gable.example/api/v1/auth/shell/signin".to_string(),
+                None
+            )]
+        );
+        assert_eq!(core_token_answer(&state, GABLE).unwrap(), "gst_pw");
+    }
+
+    #[test]
+    fn a_password_refusal_answers_a_fixed_code_and_leaves_custody_as_it_was() {
+        for (status, want) in [
+            (401, "sign_in_refused"),
+            (403, "sign_in_not_allowed"),
+            (429, "sign_in_limited"),
+            (503, "sign_in_unavailable"),
+        ] {
+            let transport = Scripted::new(vec![Ok(signin::HttpAnswer {
+                status,
+                body: String::new(),
+            })]);
+            let (state, custody) = state_with_server(transport);
+            state.store_tokens(&pair()).unwrap();
+            let before = custody.snapshot_pairs();
+            let err =
+                sign_in_with_password_answer(&state, GABLE, "a@b.example", password()).unwrap_err();
+            assert_eq!(err, want);
+            assert!(!err.contains("pw-sentinel"));
+            assert_eq!(custody.snapshot_pairs(), before, "{want}");
+        }
+    }
+
     #[test]
     fn refresh_answers_the_new_access_token_and_never_the_refresh_token() {
         let transport = Scripted::new(vec![pair_answer("gst_new", "fam.new")]);
