@@ -12,10 +12,13 @@ import type { TintBase, TintColor, TintColorant, TintFormula, TintSystem } from 
 import '../../components/ui/gable-select.ts';
 import type { QuickSearchResult } from '../../types/pos.ts';
 
+/** A visible ring on keyboard focus, for every control on the screen. */
+const FOCUS_CLASS =
+    'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gable-green focus-visible:ring-offset-2 focus-visible:ring-offset-deep-space';
 const FIELD_CLASS =
-    'w-full bg-deep-space border border-white/10 rounded px-3 py-2 text-white text-sm placeholder-slate-500 focus:outline-none focus:border-gable-green';
+    `w-full bg-deep-space border border-border rounded px-3 py-2 text-foreground text-sm placeholder:text-muted-foreground focus:border-gable-green ${FOCUS_CLASS}`;
 const BUTTON_CLASS =
-    'px-3 py-2 rounded bg-gable-green text-deep-space text-sm font-semibold disabled:opacity-50';
+    `px-3 py-2 rounded bg-gable-green text-deep-space text-sm font-semibold disabled:opacity-50 ${FOCUS_CLASS}`;
 
 /** One colorant row of the formula being entered, in the guide's own amount columns. */
 interface DraftComponent {
@@ -227,7 +230,7 @@ export class GableTintCatalogue extends LitElement {
     private _input(label: string, testid: string, value: string, set: (v: string) => void, mono = false, required = false) {
         return html`
             <label class="block space-y-1">
-                <span class="text-xs uppercase tracking-wider text-slate-400">${label}${required ? html` <span class="text-red-400" aria-hidden="true">*</span>` : nothing}</span>
+                <span class="text-xs uppercase tracking-wider text-muted-foreground">${label}${required ? html` <span class="text-safety-red" aria-hidden="true">*</span>` : nothing}</span>
                 <input type="text" data-testid=${testid} .value=${value} ?required=${required} aria-required=${required ? 'true' : 'false'}
                     @input=${(e: Event) => set((e.target as HTMLInputElement).value)}
                     class="${FIELD_CLASS} ${mono ? 'font-mono' : ''}" />
@@ -237,7 +240,7 @@ export class GableTintCatalogue extends LitElement {
     private _select(label: string, testid: string, value: string, options: { id: string; text: string }[], set: (v: string) => void, required = false) {
         return html`
             <div class="block space-y-1">
-                <span class="text-xs uppercase tracking-wider text-slate-400">${label}${required ? html` <span class="text-red-400" aria-hidden="true">*</span>` : nothing}</span>
+                <span class="text-xs uppercase tracking-wider text-muted-foreground">${label}${required ? html` <span class="text-safety-red" aria-hidden="true">*</span>` : nothing}</span>
                 <gable-select data-testid=${testid} label=${label} placeholder="Choose" .value=${value}
                     .options=${options.map((o) => ({ value: o.id, label: o.text }))}
                     @change=${(e: Event) => set((e.target as HTMLSelectElement).value)}></gable-select>
@@ -247,7 +250,7 @@ export class GableTintCatalogue extends LitElement {
     /** Says what a disabled button is waiting for, when it is waiting for fields. */
     private _needs(testid: string, missing: string[]) {
         if (missing.length === 0) return nothing;
-        return html`<p id=${testid} data-testid=${testid} class="text-xs text-slate-400">Needs ${missing.length > 1 ? `${missing.slice(0, -1).join(', ')} and ${missing[missing.length - 1]}` : missing[0]}.</p>`;
+        return html`<p id=${testid} data-testid=${testid} class="text-xs text-muted-foreground">Needs ${missing.length > 1 ? `${missing.slice(0, -1).join(', ')} and ${missing[missing.length - 1]}` : missing[0]}.</p>`;
     }
 
     /** The outcome of the last action when it belongs to this card. */
@@ -256,7 +259,7 @@ export class GableTintCatalogue extends LitElement {
         if (!n) return nothing;
         return n.kind === 'error'
             ? html`<div role="alert" data-testid="tint-error" data-card=${card}
-                class="bg-red-500/10 border border-red-500/20 rounded-lg p-3 text-sm text-red-400">${n.text}</div>`
+                class="bg-safety-red/10 border border-safety-red/30 rounded-lg p-3 text-sm text-safety-red">${n.text}</div>`
             : html`<div role="status" data-testid="tint-success" data-card=${card}
                 class="bg-gable-green/10 border border-gable-green/20 rounded-lg p-3 text-sm text-gable-green">${n.text}</div>`;
     }
@@ -267,15 +270,15 @@ export class GableTintCatalogue extends LitElement {
         return html`
             <li class="py-3 space-y-2" data-testid="tint-base-${b.code}">
                 <div class="flex flex-wrap items-baseline justify-between gap-2">
-                    <span class="text-sm text-white">${b.name} <span class="text-slate-500 font-mono">${b.code}</span>
-                        ${b.is_deepest ? html`<span class="text-xs text-slate-400">deepest</span>` : nothing}</span>
-                    <span class="text-xs text-slate-400 font-mono">${b.fill_volume_oz} oz</span>
+                    <span class="text-sm text-foreground">${b.name} <span class="text-muted-foreground font-mono">${b.code}</span>
+                        ${b.is_deepest ? html`<span class="text-xs text-muted-foreground">deepest</span>` : nothing}</span>
+                    <span class="text-xs text-muted-foreground font-mono">${b.fill_volume_oz} oz</span>
                 </div>
                 <div class="flex flex-wrap items-center gap-2 text-sm">
-                    <span class="text-slate-300" data-testid="tint-base-link-${b.code}">
+                    <span class="text-foreground" data-testid="tint-base-link-${b.code}">
                         ${linked ?? 'Not linked to a product: the counter cannot tint it'}</span>
                     ${b.product_id ? html`
-                        <button class="text-xs text-slate-300 underline" data-testid="tint-base-unlink-${b.code}"
+                        <button class=${`text-xs text-foreground underline rounded ${FOCUS_CLASS}`} data-testid="tint-base-unlink-${b.code}"
                             ?disabled=${this._busy} @click=${() => this._link(b, null)}>Unlink</button>` : nothing}
                 </div>
                 <div class="space-y-1">
@@ -284,9 +287,9 @@ export class GableTintCatalogue extends LitElement {
                         class=${FIELD_CLASS} />
                     ${this._noteFor(`base:${b.id}`)}
                     ${s.found.length > 0 ? html`
-                        <ul class="border border-white/10 rounded divide-y divide-white/5">
+                        <ul class="border border-border rounded divide-y divide-border">
                             ${s.found.map((p) => html`
-                                <li><button class="w-full text-left px-3 py-2 text-sm text-slate-200 hover:bg-white/5"
+                                <li><button class=${`w-full text-left px-3 py-2 text-sm text-foreground hover:bg-hover-row ${FOCUS_CLASS}`}
                                     data-testid="tint-base-pick-${b.code}-${p.sku}" ?disabled=${this._busy}
                                     @click=${() => this._link(b, p)}>${p.sku} ${p.description}</button></li>`)}
                         </ul>` : nothing}
@@ -295,31 +298,31 @@ export class GableTintCatalogue extends LitElement {
     }
 
     render() {
-        if (this._loading) return html`<div class="text-slate-400 p-8">Loading the tint catalogue...</div>`;
+        if (this._loading) return html`<div class="text-muted-foreground p-8">Loading the tint catalogue...</div>`;
         const sys = this._system;
         const n = this._newSystem;
         const f = this._formula;
-        const card = 'bg-slate-steel border border-white/10 rounded-lg p-6 space-y-4';
+        const card = 'bg-slate-steel border border-border rounded-lg p-6 space-y-4';
         return html`
             <div class="space-y-6">
                 <div>
-                    <h1 class="text-3xl font-bold text-white flex items-center gap-2">
+                    <h1 class="text-3xl font-bold text-foreground flex items-center gap-2">
                         ${icon(Palette, 24, 'w-6 h-6 text-gable-green')}
                         Tint catalogue
                     </h1>
-                    <p class="text-slate-400 text-sm mt-1">
+                    <p class="text-muted-foreground text-sm mt-1">
                         The tint systems the dealer runs, the base paints each one mixes in and the product each base is sold
                         as, the colorants, the colours and the formulas. A base with no product cannot be tinted at the counter.
-                        <span class="text-red-400" aria-hidden="true">*</span> marks a required field.
+                        <span class="text-safety-red" aria-hidden="true">*</span> marks a required field.
                     </p>
                 </div>
                 ${this._noteFor('page')}
 
                 <section class="${card}" data-testid="tint-systems">
-                    <h2 class="text-lg font-semibold text-white">Tint system</h2>
+                    <h2 class="text-lg font-semibold text-foreground">Tint system</h2>
                     ${this._systems.length > 0 ? this._select('System', 'tint-system-pick', this._systemId,
                         this._systems.map((s) => ({ id: s.id, text: `${s.name} (${s.code})` })), (v) => this._pickSystem(v)) : html`
-                        <p class="text-sm text-slate-400">No tint system yet. Add the dealer's first one below.</p>`}
+                        <p class="text-sm text-muted-foreground">No tint system yet. Add the dealer's first one below.</p>`}
                     <div class="grid gap-3 sm:grid-cols-4">
                         ${this._input('Code', 'tint-new-system-code', n.code, (v) => { this._newSystem = { ...this._newSystem, code: v }; }, true, true)}
                         ${this._input('Name', 'tint-new-system-name', n.name, (v) => { this._newSystem = { ...this._newSystem, name: v }; }, false, true)}
@@ -334,15 +337,15 @@ export class GableTintCatalogue extends LitElement {
 
                 ${sys ? html`
                 <section class="${card}" data-testid="tint-bases">
-                    <h2 class="text-lg font-semibold text-white">Bases and their products</h2>
-                    ${this._bases.length === 0 ? html`<p class="text-sm text-slate-400">No bases yet.</p>` : html`
-                        <ul class="divide-y divide-white/10">${this._bases.map((b) => this._baseRow(b))}</ul>`}
+                    <h2 class="text-lg font-semibold text-foreground">Bases and their products</h2>
+                    ${this._bases.length === 0 ? html`<p class="text-sm text-muted-foreground">No bases yet.</p>` : html`
+                        <ul class="divide-y divide-border">${this._bases.map((b) => this._baseRow(b))}</ul>`}
                     <div class="grid gap-3 sm:grid-cols-4">
                         ${this._input('Code', 'tint-new-base-code', this._newBase.code, (v) => { this._newBase = { ...this._newBase, code: v }; }, true, true)}
                         ${this._input('Name', 'tint-new-base-name', this._newBase.name, (v) => { this._newBase = { ...this._newBase, name: v }; }, false, true)}
                         ${this._input('Fill (ounces)', 'tint-new-base-fill', this._newBase.fill, (v) => { this._newBase = { ...this._newBase, fill: v }; }, true)}
-                        <label class="flex items-end gap-2 text-sm text-slate-200 pb-2">
-                            <input type="checkbox" data-testid="tint-new-base-deepest" .checked=${this._newBase.deepest}
+                        <label class="flex items-end gap-2 text-sm text-foreground pb-2">
+                            <input type="checkbox" class=${FOCUS_CLASS} data-testid="tint-new-base-deepest" .checked=${this._newBase.deepest}
                                 @change=${(e: Event) => { this._newBase = { ...this._newBase, deepest: (e.target as HTMLInputElement).checked }; }} />
                             Deepest base
                         </label>
@@ -355,12 +358,12 @@ export class GableTintCatalogue extends LitElement {
                 </section>
 
                 <section class="${card}" data-testid="tint-colorants">
-                    <h2 class="text-lg font-semibold text-white">Colorants</h2>
-                    ${this._colorants.length === 0 ? html`<p class="text-sm text-slate-400" data-testid="tint-colorant-list">No colorants yet.</p>` : html`
-                        <ul class="divide-y divide-white/10 text-sm" data-testid="tint-colorant-list">
+                    <h2 class="text-lg font-semibold text-foreground">Colorants</h2>
+                    ${this._colorants.length === 0 ? html`<p class="text-sm text-muted-foreground" data-testid="tint-colorant-list">No colorants yet.</p>` : html`
+                        <ul class="divide-y divide-border text-sm" data-testid="tint-colorant-list">
                             ${this._colorants.map((c) => html`
-                                <li class="flex justify-between gap-2 py-2"><span class="text-white">${c.name}</span>
-                                    <span class="text-slate-400 font-mono">${c.code}</span></li>`)}
+                                <li class="flex justify-between gap-2 py-2"><span class="text-foreground">${c.name}</span>
+                                    <span class="text-muted-foreground font-mono">${c.code}</span></li>`)}
                         </ul>`}
                     <div class="grid gap-3 sm:grid-cols-2">
                         ${this._input('Code', 'tint-new-colorant-code', this._newColorant.code, (v) => { this._newColorant = { ...this._newColorant, code: v }; }, true, true)}
@@ -374,12 +377,12 @@ export class GableTintCatalogue extends LitElement {
                 </section>
 
                 <section class="${card}" data-testid="tint-colors">
-                    <h2 class="text-lg font-semibold text-white">Colours</h2>
-                    ${this._colors.length === 0 ? html`<p class="text-sm text-slate-400" data-testid="tint-color-list">No colours yet.</p>` : html`
-                        <ul class="divide-y divide-white/10 text-sm" data-testid="tint-color-list">
+                    <h2 class="text-lg font-semibold text-foreground">Colours</h2>
+                    ${this._colors.length === 0 ? html`<p class="text-sm text-muted-foreground" data-testid="tint-color-list">No colours yet.</p>` : html`
+                        <ul class="divide-y divide-border text-sm" data-testid="tint-color-list">
                             ${this._colors.map((c) => html`
-                                <li class="flex justify-between gap-2 py-2"><span class="text-white">${c.name}</span>
-                                    <span class="text-slate-400 font-mono">${c.manufacturer_code ?? ''}</span></li>`)}
+                                <li class="flex justify-between gap-2 py-2"><span class="text-foreground">${c.name}</span>
+                                    <span class="text-muted-foreground font-mono">${c.manufacturer_code ?? ''}</span></li>`)}
                         </ul>`}
                     <div class="grid gap-3 sm:grid-cols-2">
                         ${this._input('Manufacturer code', 'tint-new-color-code', this._newColor.code, (v) => { this._newColor = { ...this._newColor, code: v }; }, true)}
@@ -393,19 +396,19 @@ export class GableTintCatalogue extends LitElement {
                 </section>
 
                 <section class="${card}" data-testid="tint-formulas">
-                    <h2 class="text-lg font-semibold text-white">Formulas</h2>
-                    ${this._formulas.length === 0 ? html`<p class="text-sm text-slate-400" data-testid="tint-formula-list">No formulas yet.</p>` : html`
-                        <ul class="divide-y divide-white/10 text-sm" data-testid="tint-formula-list">
+                    <h2 class="text-lg font-semibold text-foreground">Formulas</h2>
+                    ${this._formulas.length === 0 ? html`<p class="text-sm text-muted-foreground" data-testid="tint-formula-list">No formulas yet.</p>` : html`
+                        <ul class="divide-y divide-border text-sm" data-testid="tint-formula-list">
                             ${this._formulas.map((x) => html`
                                 <li class="flex flex-wrap justify-between gap-2 py-2" data-testid="tint-formula-${x.id}">
-                                    <span class="text-white">${this._colors.find((c) => c.id === x.color_id)?.name ?? 'A colour'}
+                                    <span class="text-foreground">${this._colors.find((c) => c.id === x.color_id)?.name ?? 'A colour'}
                                         on ${this._bases.find((b) => b.id === x.base_id)?.name ?? 'a base'}</span>
-                                    <span class="text-slate-400 font-mono">${x.container_size_code}, ${x.container_volume_oz} oz,
+                                    <span class="text-muted-foreground font-mono">${x.container_size_code}, ${x.container_volume_oz} oz,
                                         ${x.components.length} ${x.components.length === 1 ? 'colorant' : 'colorants'}</span>
                                 </li>`)}
                         </ul>`}
-                    <h3 class="text-sm font-semibold text-white pt-2">Add a formula</h3>
-                    <p class="text-xs text-slate-500">One formula is a colour on a base in one container size. Amounts are in whole
+                    <h3 class="text-sm font-semibold text-foreground pt-2">Add a formula</h3>
+                    <p class="text-xs text-muted-foreground">One formula is a colour on a base in one container size. Amounts are in whole
                         ounces with the guide's two increment columns, in this system's ${sys.unit_denominator} per ounce.</p>
                     <div class="grid gap-3 sm:grid-cols-4">
                         ${this._select('Colour', 'tint-formula-color', f.colorId,
@@ -424,7 +427,7 @@ export class GableTintCatalogue extends LitElement {
                             ${this._input('Fine', `tint-formula-fine-${i}`, c.fine, (v) => this._setComponent(i, { fine: v }), true)}
                         </div>`)}
                     <div class="flex gap-2">
-                        <button class="px-3 py-2 rounded border border-white/10 text-sm text-slate-200" data-testid="tint-formula-add-colorant"
+                        <button class=${`px-3 py-2 rounded border border-border text-sm text-foreground ${FOCUS_CLASS}`} data-testid="tint-formula-add-colorant"
                             ?disabled=${this._colorants.length === 0} @click=${() => this._addComponent()}>Add a colorant</button>
                         <button class=${BUTTON_CLASS} data-testid="tint-add-formula" aria-describedby="tint-add-formula-needs"
                             ?disabled=${this._busy || f.colorId === '' || f.baseId === '' || f.components.length === 0}

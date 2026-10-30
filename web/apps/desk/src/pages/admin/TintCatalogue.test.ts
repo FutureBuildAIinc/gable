@@ -139,6 +139,18 @@ describe('Tint catalogue screen', () => {
     expect(text(q(el, '[data-testid="tint-formula-list"]'))).toBe('No formulas yet.')
   })
 
+  it('gives every button, field and the checkbox a focus ring, and draws with tokens', async () => {
+    base = { ...base, product_id: 'p1' }
+    const el = await open()
+    await type(el, '[data-testid="tint-base-find-DEEP"]', 'paint')
+    const controls = el.querySelectorAll('button, input[type="text"], input[type="checkbox"]')
+    expect(controls.length).toBeGreaterThan(8)
+    for (const c of controls) if (!c.closest('gable-select')) expect(c.className, c.getAttribute('data-testid') ?? c.tagName).toContain('focus-visible:ring-2')
+    expect(q(el, '[data-testid="tint-base-unlink-DEEP"]').className).toContain('focus-visible:ring-2')
+    expect(q(el, '[data-testid="tint-base-pick-DEEP-PAINT-GAL"]').className).toContain('focus-visible:ring-2')
+    expect(el.innerHTML.replace(/<gable-select.*?<\/gable-select>/gs, '')).not.toMatch(/(?:text|bg|border|divide)-(?:white|slate-\d|red-\d)/)
+  })
+
   it('marks required fields and says what a disabled button is waiting for', async () => {
     const el = await open()
     expect(text(q(el, 'label:has([data-testid="tint-new-base-code"])'))).toContain('*')
