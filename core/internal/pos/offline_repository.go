@@ -72,8 +72,13 @@ func (r *offlineExceptionRow) outcome(it *offlineItem) *OfflineItemOutcome {
 	id, code, msg := r.ID, r.ReasonCode, r.ReasonMessage
 	out := &OfflineItemOutcome{ClientID: it.Sale.ClientID, DeviceEpoch: it.Sale.DeviceEpoch, DeviceSeq: it.Sale.DeviceSeq,
 		Outcome: OfflineRefused, ExceptionID: &id, ReasonCode: &code, ReasonMessage: &msg}
-	if r.Status == "held" {
+	switch r.Status {
+	case "held":
 		out.Outcome = OfflineHeld
+	case "resolved":
+		// a manager resolved it with nothing posted (a resolution that posts
+		// the sale is answered from the posting first, as a duplicate)
+		out.Outcome = OfflineResolved
 	}
 	return out
 }

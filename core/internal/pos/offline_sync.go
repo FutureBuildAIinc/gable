@@ -34,6 +34,9 @@ const (
 	OfflineDuplicate = "duplicate"
 	OfflineRefused   = "refused"
 	OfflineHeld      = "held"
+	// OfflineResolved: a manager resolved the item's exception with nothing
+	// posted (a write off); the device settles it
+	OfflineResolved = "resolved"
 	// offlineFault: the server could not judge the item; retried next sync
 	offlineFault = "error"
 )

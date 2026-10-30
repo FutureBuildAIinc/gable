@@ -214,3 +214,32 @@ func TestOfflineSyncWire_SoldPastAnOpenWarningPosts(t *testing.T) {
 		t.Errorf("expected cash moved by %d, want %d", got, sale.TotalCents)
 	}
 }
+
+// RULE (ADR 0011 3.4, the device keeps a refused item until the server says
+// it is resolved): once a manager resolves an exception with nothing posted
+// (a write off), the replay answers resolved, so the register settles the
+// item and it no longer counts against the queue caps; an open one keeps
+// answering refused.
+func TestOfflineSyncWire_AResolvedExceptionAnswersResolved(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	f := newFixture(t, testutil.RequireDB(t))
+	offlinePolicyOn(t, f)
+	b := newOfflineBench(t, f)
+	raw, sale := b.build(t, saleSpec{lines: []offlineLine{line(f.productID, "101")}})
+	if out := wireOutcome(t, b.syncWire(t, raw), sale.ClientID); out["outcome"] != pos.OfflineRefused {
+		t.Fatalf("first sync %v, want refused", out)
+	}
+	if out := wireOutcome(t, b.syncWire(t, raw), sale.ClientID); out["outcome"] != pos.OfflineRefused {
+		t.Errorf("replay of an open exception %v, want refused", out)
+	}
+	mustExec(t, f.db, `UPDATE pos_offline_exceptions SET status = 'resolved', resolution_action = 'write_off',
+		resolved_by = 'test', resolved_at = NOW() WHERE sale_id = $1`, sale.ClientID)
+	r := b.syncWire(t, raw)
+	out := wireOutcome(t, r, sale.ClientID)
+	if out["outcome"] != pos.OfflineResolved || out["reason_code"] != "insufficient_stock" {
+		t.Errorf("replay of a written off exception %v, want resolved with its reason", out)
+	}
+	if got := num(t, r.body, "open_exception_count"); got != 0 {
+		t.Errorf("open_exception_count = %d, want 0", got)
+	}
+}

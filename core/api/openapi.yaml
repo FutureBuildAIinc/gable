@@ -35632,7 +35632,7 @@ components:
         client_id: {type: string}
         device_epoch: {type: integer, format: int64}
         device_seq: {type: integer, format: int64}
-        outcome: {type: string, enum: [posted, duplicate, refused, held, error], description: "error: the server could not judge the item; it is sent again at the next sync."}
+        outcome: {type: string, enum: [posted, duplicate, refused, held, resolved, error], description: "resolved: a manager resolved the item's exception with nothing posted (a write off), so the register settles it; error: the server could not judge the item; it is sent again at the next sync."}
         sale_id: {type: [string, "null"], format: uuid}
         number: {type: [string, "null"]}
         invoice_id: {type: [string, "null"], format: uuid}
