@@ -76,13 +76,13 @@ export class GableOfflineExceptions extends LitElement {
 
     private begin(item: OfflineException) {
         this.openId = item.id;
-        this.way = resolutionsFor(item.reason_code)[0].value;
+        this.way = resolutionsFor(item.actions)[0]?.value ?? '';
         this.reason = '';
         this.failure = '';
     }
 
     private async settle(item: OfflineException) {
-        const choice = resolutionsFor(item.reason_code).find((c) => c.value === this.way);
+        const choice = resolutionsFor(item.actions).find((c) => c.value === this.way);
         if (!choice) return;
         const reason = this.reason.trim();
         if (choice.needsReason && reason === '') {
@@ -92,10 +92,10 @@ export class GableOfflineExceptions extends LitElement {
         try {
             this.busy = true;
             this.failure = '';
-            await offlineAdminService.resolveException(item.id, choice.value, reason);
+            await offlineAdminService.resolveException(item, choice.value, reason);
             this.items = this.items.filter((i) => i.id !== item.id);
             this.openId = '';
-            ToastService.show(`${item.offline_reference || 'The sale'}: ${choice.label.toLowerCase()} done`, 'success');
+            ToastService.show(`${item.offline_ref || 'The sale'}: ${choice.label.toLowerCase()} done`, 'success');
         } catch (err: unknown) {
             // a refusal (a manager other than the cashier, a blocker) is said in the server's words and the item stays
             this.failure = apiErrorMessage(err, 'Failed to resolve the exception');
@@ -105,8 +105,9 @@ export class GableOfflineExceptions extends LitElement {
     }
 
     private renderForm(item: OfflineException) {
-        const choices = resolutionsFor(item.reason_code);
+        const choices = resolutionsFor(item.actions);
         const picked = choices.find((c) => c.value === this.way) ?? choices[0];
+        if (!picked) return nothing;
         return html`
             <div class="mt-3 p-3 bg-black/20 rounded border border-white/5 space-y-3" data-testid="offline-exception-form">
                 <div class="flex flex-wrap gap-4" role="radiogroup" aria-label="How to settle it">
@@ -156,11 +157,11 @@ export class GableOfflineExceptions extends LitElement {
                                 <div>
                                     <p class="text-white font-bold" data-testid="offline-exception-reason">${reasonWords(item.reason_code)}</p>
                                     <p class="text-sm text-zinc-400">
-                                        <span class="font-mono text-zinc-200">${item.offline_reference}</span>
-                                        on ${item.register_id}, ${formatDay(item.business_date)}
+                                        <span class="font-mono text-zinc-200">${item.offline_ref}</span>
+                                        ${item.offline_ref ? html`on ` : nothing}${item.register_id}, ${formatDay(item.business_date)}
                                         ${item.status === 'held' ? html`<span class="text-amber-500">(held until its link arrives)</span>` : nothing}
                                     </p>
-                                    ${item.message ? html`<p class="text-sm text-zinc-500">${item.message}</p>` : nothing}
+                                    ${item.reason_message ? html`<p class="text-sm text-zinc-500">${item.reason_message}</p>` : nothing}
                                 </div>
                                 <div class="flex items-center gap-4">
                                     <span class="font-mono text-white text-lg" data-testid="offline-exception-total">${formatCents(item.total_cents)}</span>

@@ -19,7 +19,7 @@ type Act = 'enrol' | 'revoke';
  * number and own counter PIN: the proof they stand at the register. An
  * enrolment starts a new epoch and revokes the earlier key; a revoked
  * register's later offline sales go to the exception list, never dropped.
- * The route does not exist until slice O2; a missing list shows nothing wrong.
+ * A yard with no registers lists none.
  */
 @customElement('gable-register-devices')
 export class GableRegisterDevices extends LitElement {
@@ -34,6 +34,8 @@ export class GableRegisterDevices extends LitElement {
     @state() private target: { registerId: string; act: Act } | null = null;
     @state() private manager = '';
     @state() private pin = '';
+    /** Why a register is revoked: the audit row keeps it. */
+    @state() private reason = '';
 
     private unsubscribe: (() => void) | null = null;
     private seq = 0;
@@ -79,6 +81,7 @@ export class GableRegisterDevices extends LitElement {
         this.target = { registerId, act };
         this.manager = '';
         this.pin = '';
+        this.reason = '';
         this.error = '';
     }
 
@@ -89,6 +92,12 @@ export class GableRegisterDevices extends LitElement {
             this.error = 'Type your staff number and your counter PIN.';
             return;
         }
+        if (t.act === 'revoke' && this.reason.trim() === '') {
+            this.error = 'Say why the register is revoked.';
+            return;
+        }
+        const current = this.devices.find((d) => d.register_id === t.registerId);
+        if (!current) return;
         const proof = { manager: this.manager.trim(), pin: this.pin };
         try {
             this.busy = true;
@@ -100,9 +109,9 @@ export class GableRegisterDevices extends LitElement {
                     this.error = "Enrol from the register's own work shell: only it holds the register's key.";
                     return;
                 }
-                device = await offlineAdminService.enrolDevice(t.registerId, key, proof);
+                device = await offlineAdminService.enrolDevice(t.registerId, current.next_epoch, key, proof);
             } else {
-                device = await offlineAdminService.revokeDevice(t.registerId, proof);
+                device = await offlineAdminService.revokeDevice(t.registerId, current.epoch, this.reason.trim(), proof);
             }
             this.devices = this.devices.map((d) => (d.register_id === device.register_id ? device : d));
             this.target = null;
@@ -145,6 +154,13 @@ export class GableRegisterDevices extends LitElement {
                             class="w-full px-3 py-2 bg-black/20 border border-zinc-700 rounded text-white font-mono" />
                     </label>
                 </div>
+                ${act === 'revoke' ? html`
+                    <label class="block">
+                        <span class="block text-sm text-zinc-400 mb-1">Why</span>
+                        <input type="text" data-testid="device-reason" maxlength="200" .value=${this.reason}
+                            @input=${(e: Event) => { this.reason = (e.target as HTMLInputElement).value; this.error = ''; }}
+                            class="w-full px-3 py-2 bg-black/20 border border-zinc-700 rounded text-white" />
+                    </label>` : nothing}
                 <div class="flex gap-3">
                     <button type="button" data-testid="device-confirm" @click=${() => void this.confirm()} ?disabled=${this.busy}
                         class="px-4 py-2 rounded ${act === 'revoke' ? 'bg-red-500 text-white' : 'bg-emerald-500 text-black'} text-sm font-bold disabled:opacity-40">
@@ -157,7 +173,6 @@ export class GableRegisterDevices extends LitElement {
 
     render() {
         if (!branchContext.currentId || this.loading) return nothing;
-        // the device routes are slice O2's; until they answer there is nothing to list
         if (this.unavailable) return nothing;
         return html`
             <div class="bg-slate-900/50 border border-white/10 rounded-lg p-6" data-testid="register-devices">

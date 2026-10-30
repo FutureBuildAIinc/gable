@@ -2,33 +2,25 @@
 // SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
 
 import { describe, expect, it } from 'vitest';
+import type { ExceptionResolution } from '../../services/OfflineAdminService';
 import { reasonWords, resolutionsFor } from './offlineExceptions';
 
-const ways = (code: string) => resolutionsFor(code).map((c) => c.value);
+const ways = (actions: ExceptionResolution[]) => resolutionsFor(actions).map((c) => c.value);
 
 describe('the ways a manager may settle an offline exception', () => {
-  it('offers only what ADR 0011 section 3.4 gives each reason', () => {
-    expect(ways('insufficient_stock')).toEqual(['retry', 'write_off']);
-    expect(ways('stock_unit_changed')).toEqual(['restate_stock', 'write_off']); // a retry never helps it
-    expect(ways('period_closed')).toEqual(['late_post', 'write_off']);
-    expect(ways('price_unverified')).toEqual(['accept', 'write_off']);
-    expect(ways('replaced_sale_mismatch')).toEqual(['separate_sale', 'write_off']);
-    expect(ways('replaced_sale_settled')).toContain('settled_replaced');
+  it('offers exactly the actions the server lists, in its order', () => {
+    expect(ways(['restate', 'write_off'])).toEqual(['restate', 'write_off']);
+    expect(ways(['replaced_sale_settled' as never, 'post_separate', 'write_off'])).toEqual(['post_separate', 'write_off']); // an action it has no words for is not offered
+    expect(ways(['review'])).toEqual(['review']);
   });
 
-  it('leaves a forged or unverifiable sale only the write off', () => {
-    for (const code of ['bad_signature', 'replay_mismatch', 'device_revoked', 'sequence_reused']) {
-      expect(ways(code)).toEqual(['write_off']);
-    }
-  });
-
-  it('falls back to retry and write off for a reason it does not know', () => {
-    expect(ways('something_new')).toEqual(['retry', 'write_off']);
+  it('names a reason it does not know in plain words', () => {
     expect(reasonWords('something_new')).toBe('something new');
+    expect(reasonWords('unknown_tail')).toContain('re-enrolled');
   });
 
   it('asks for a reason on every act except a retry', () => {
-    expect(resolutionsFor('insufficient_stock').find((c) => c.value === 'retry')?.needsReason).toBe(false);
-    expect(resolutionsFor('insufficient_stock').find((c) => c.value === 'write_off')?.needsReason).toBe(true);
+    expect(resolutionsFor(['retry', 'write_off']).find((c) => c.value === 'retry')?.needsReason).toBe(false);
+    expect(resolutionsFor(['retry', 'write_off']).find((c) => c.value === 'write_off')?.needsReason).toBe(true);
   });
 });

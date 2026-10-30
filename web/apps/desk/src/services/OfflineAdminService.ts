@@ -3,6 +3,7 @@
 
 import { fetchWithAuth } from './fetchClient';
 import { parseApiError } from './apiError';
+import { posService } from './POSService';
 
 const API_URL = import.meta.env.VITE_API_URL || '';
 const JSON_HEADERS = { 'Content-Type': 'application/json' };
@@ -42,43 +43,72 @@ export interface OfflinePolicyInput {
     max_queued: number;
 }
 
-/**
- * One offline exception (ADR 0011 section 3.4). SEAM O4: the list and the
- * resolve routes are built on refactor/cp-offline-o4; this is their contract
- * as the ADR states it, faked in the screens' tests until that branch lands.
- */
+/** The ways a manager settles an exception (POST .../exceptions/{id}/resolve, slice O4). */
+export type ExceptionResolution = 'retry' | 'accept' | 'late_post' | 'write_off' | 'post_separate' | 'restate' | 'review';
+
+/** One offline exception as GET /api/v1/pos/offline/exceptions answers it (ADR 0011 section 3.4). */
 export interface OfflineException {
     id: string;
     sale_id: string;
     register_id: string;
-    epoch: number;
-    sequence: number;
-    reason_code: string;
-    message: string;
-    status: 'open' | 'held' | 'resolved';
-    session_id: string | null;
+    branch_id: string;
+    device_epoch: number;
+    device_seq: number;
+    offline_ref: string;
+    till_session_id: string | null;
     business_date: string;
+    reason_code: string;
+    reason_message: string;
     total_cents: number;
-    tendered_by_method: Record<string, number>;
-    offline_reference: string;
+    status: 'open' | 'held' | 'resolved' | 'relinked' | 'superseded' | 'found' | 'reviewed';
+    /** What the server allows for this reason: the screen offers exactly these. */
+    actions: ExceptionResolution[];
+    revision: number;
     created_at: string;
 }
 
-export type ExceptionResolution =
-    | 'retry' | 'accept' | 'restate_stock' | 'late_post' | 'write_off' | 'separate_sale' | 'settled_replaced';
-
 /**
- * One register's device (ADR 0011 section 6.1). SEAM O2: the device routes are
- * built on refactor/cp-offline-o2; status none is a register never enrolled.
+ * One register's device (GET /api/v1/pos/offline/registers/{id}/device, slice
+ * O2), folded to what the screen shows. status none is a register never
+ * enrolled; next_epoch is the epoch the next enrolment must name.
  */
 export interface RegisterDevice {
     register_id: string;
+    next_epoch: number;
     epoch: number;
     status: 'active' | 'revoked' | 'none';
     enrolled_by: string | null;
     enrolled_at: string | null;
     revoked_at: string | null;
-    synced_high_sequence: number;
+}
+
+interface WireDevice {
+    device_epoch: number;
+    enrolled_by: string;
+    enrolled_at: string;
+    revoked_at: string | null;
+}
+
+interface WireEnrolment {
+    register_id: string;
+    next_epoch: number;
+    device: WireDevice | null;
+    previous: WireDevice | null;
+}
+
+function foldDevice(w: WireEnrolment): RegisterDevice {
+    const d = w.device;
+    const p = w.previous;
+    const shown = d ?? p;
+    return {
+        register_id: w.register_id,
+        next_epoch: w.next_epoch,
+        epoch: shown?.device_epoch ?? 0,
+        status: d ? 'active' : p ? 'revoked' : 'none',
+        enrolled_by: shown?.enrolled_by ?? null,
+        enrolled_at: shown?.enrolled_at ?? null,
+        revoked_at: d ? null : p?.revoked_at ?? null,
+    };
 }
 
 /** The manager's proof at the register: their staff number and own counter PIN. */
@@ -121,63 +151,69 @@ export const offlineAdminService = {
         return response.json();
     },
 
-    /** SEAM O4. */
+    /** The branch's open and held exceptions, every page (a manager settles them all). */
     async exceptions(branchID: string): Promise<OfflineException[]> {
-        const response = await expectOk(
-            await fetchWithAuth(`${API_URL}/api/v1/pos/offline/exceptions?branch_id=${encodeURIComponent(branchID)}&status=open`),
-            'Failed to load the offline exceptions',
-        );
-        const page = (await response.json()) as { items?: OfflineException[] };
-        return Array.isArray(page.items) ? page.items : [];
+        const all: OfflineException[] = [];
+        let cursor = '';
+        for (;;) {
+            const url = `${API_URL}/api/v1/pos/offline/exceptions?branch_id=${encodeURIComponent(branchID)}&status=open`
+                + (cursor ? `&cursor=${encodeURIComponent(cursor)}` : '');
+            const response = await expectOk(await fetchWithAuth(url), 'Failed to load the offline exceptions');
+            const page = (await response.json()) as { items?: OfflineException[]; next_cursor?: string | null };
+            if (Array.isArray(page.items)) all.push(...page.items);
+            if (!page.next_cursor) return all;
+            cursor = page.next_cursor;
+        }
     },
 
-    /** SEAM O4. */
-    async resolveException(id: string, resolution: ExceptionResolution, reason: string): Promise<OfflineException> {
+    /** The row's revision rides the body: a second manager's settle of the same row is refused. */
+    async resolveException(item: OfflineException, action: ExceptionResolution, reason: string): Promise<OfflineException> {
         const response = await expectOk(
-            await fetchWithAuth(`${API_URL}/api/v1/pos/offline/exceptions/${id}/resolve`, {
+            await fetchWithAuth(`${API_URL}/api/v1/pos/offline/exceptions/${encodeURIComponent(item.id)}/resolve`, {
                 method: 'POST',
                 headers: { ...JSON_HEADERS, 'Idempotency-Key': crypto.randomUUID() },
-                body: JSON.stringify({ resolution, reason }),
+                body: JSON.stringify({ action, reason, revision: item.revision }),
             }),
             'Failed to resolve the exception',
         );
         return response.json();
     },
 
-    /** SEAM O2. */
+    /** The yard's registers, each with its device: there is no list route, so one read per register. */
     async devices(branchID: string): Promise<RegisterDevice[]> {
-        const response = await expectOk(
-            await fetchWithAuth(`${API_URL}/api/v1/pos/offline/devices?branch_id=${encodeURIComponent(branchID)}`),
-            'Failed to load the registers',
-        );
-        const page = (await response.json()) as { items?: RegisterDevice[] };
-        return Array.isArray(page.items) ? page.items : [];
+        const registers = (await posService.listRegisters()).filter((r) => r.branch_id === branchID);
+        return Promise.all(registers.map(async (r) => {
+            const response = await expectOk(
+                await fetchWithAuth(`${API_URL}/api/v1/pos/offline/registers/${encodeURIComponent(r.id)}/device`),
+                'Failed to load the registers',
+            );
+            return foldDevice((await response.json()) as WireEnrolment);
+        }));
     },
 
-    /** SEAM O2: the public key comes from the register's own shell keychain. */
-    async enrolDevice(registerID: string, publicKey: string, proof: ManagerProof): Promise<RegisterDevice> {
+    /** The public key comes from the register's own shell keychain; the epoch is the register's next_epoch. */
+    async enrolDevice(registerID: string, epoch: number, publicKey: string, proof: ManagerProof): Promise<RegisterDevice> {
         const response = await expectOk(
-            await fetchWithAuth(`${API_URL}/api/v1/pos/offline/devices`, {
+            await fetchWithAuth(`${API_URL}/api/v1/pos/offline/registers/${encodeURIComponent(registerID)}/device`, {
                 method: 'POST',
                 headers: { ...JSON_HEADERS, 'Idempotency-Key': crypto.randomUUID() },
-                body: JSON.stringify({ register_id: registerID, public_key: publicKey, ...proof }),
+                body: JSON.stringify({ device_epoch: epoch, public_key: publicKey, ...proof }),
             }),
             'Failed to enrol the register',
         );
-        return response.json();
+        return foldDevice((await response.json()) as WireEnrolment);
     },
 
-    /** SEAM O2. */
-    async revokeDevice(registerID: string, proof: ManagerProof): Promise<RegisterDevice> {
+    async revokeDevice(registerID: string, epoch: number, reason: string, proof: ManagerProof): Promise<RegisterDevice> {
         const response = await expectOk(
-            await fetchWithAuth(`${API_URL}/api/v1/pos/offline/devices/${encodeURIComponent(registerID)}/revoke`, {
+            await fetchWithAuth(`${API_URL}/api/v1/pos/offline/registers/${encodeURIComponent(registerID)}/device/revoke`, {
                 method: 'POST',
                 headers: { ...JSON_HEADERS, 'Idempotency-Key': crypto.randomUUID() },
-                body: JSON.stringify(proof),
+                body: JSON.stringify({ device_epoch: epoch, reason, ...proof }),
             }),
             'Failed to revoke the register',
         );
-        return response.json();
+        return foldDevice((await response.json()) as WireEnrolment);
     },
 };
 
