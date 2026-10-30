@@ -16,7 +16,7 @@ import { router } from '../../lib/router.ts';
 import { workspace, menuForKey, activeMenuPath, type WorkspaceTab } from '../../lib/workspace.ts';
 import '@gable/design-system';
 import { framedByShell } from '@gable/design-system';
-import { authCustody } from '@gable/auth';
+import { authCustody, signOutStaff } from '@gable/auth';
 import '../ui/omnibar.ts';
 import '../ui/shortcuts-modal.ts';
 import './branch-switcher.ts';
@@ -238,9 +238,11 @@ export class GableAppShell extends LitElement {
     }
   }
 
-  private _handleSignOut() {
+  private async _handleSignOut() {
     this._userMenuOpen = false;
-    authCustody.signOut();
+    // A staff session is revoked at the core before the door opens; custody
+    // is cleared whether or not the core answered.
+    await signOutStaff();
     this._goToDoor();
   }
 

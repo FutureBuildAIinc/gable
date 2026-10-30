@@ -37,7 +37,7 @@ import {
   type ChromeTitleFeed,
   type Theme,
 } from '@gable/design-system';
-import { authConfig, authCustody } from '@gable/auth';
+import { authConfig, authCustody, signOutStaff } from '@gable/auth';
 import type { ShellApp, ShellYard } from '@gable/shell-chrome';
 import '@gable/shell-chrome';
 import { FIELD_APPS } from './config.ts';
@@ -239,7 +239,7 @@ export class GableFieldShell extends LitElement {
       });
     }
     this._leaveOutcome = outcome;
-    authCustody.signOut();
+    await signOutStaff();
     this._state = switchRole(this._state);
     this._frameControls = [];
     this._frameFeed = null;

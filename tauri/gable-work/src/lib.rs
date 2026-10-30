@@ -267,15 +267,15 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::core_token,
             commands::clear_tokens,
+            commands::begin_sign_in,
+            commands::refresh_tokens,
             commands::offline_enrolment_status,
             commands::load_offline_snapshot,
             commands::sign_and_queue_offline_sale,
             commands::offline_queue_status,
             commands::refresh_offline_snapshot,
             commands::price_offline_cart,
-            commands::sync_offline_queue,
-            commands::begin_sign_in,
-            commands::refresh_tokens
+            commands::sync_offline_queue
         ])
         .setup(move |app| {
             let data_dir = app

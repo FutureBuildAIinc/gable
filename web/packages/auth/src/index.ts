@@ -49,3 +49,11 @@ export {
   IDENTITY_TAP_KEY,
   type TappedIdentity,
 } from './identity-tap.ts';
+export {
+  CSRF_HEADER,
+  bootStaffSession,
+  restoreStaffSession,
+  signInStaff,
+  signOutStaff,
+  type StaffSignInResult,
+} from './staffAuth.ts';

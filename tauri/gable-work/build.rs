@@ -18,6 +18,8 @@ use tauri_build::{AppManifest, Attributes};
 const COMMANDS: &[&str] = &[
     "core_token",
     "clear_tokens",
+    "begin_sign_in",
+    "refresh_tokens",
     "offline_enrolment_status",
     "load_offline_snapshot",
     "sign_and_queue_offline_sale",
@@ -25,8 +27,6 @@ const COMMANDS: &[&str] = &[
     "refresh_offline_snapshot",
     "price_offline_cart",
     "sync_offline_queue",
-    "begin_sign_in",
-    "refresh_tokens",
 ];
 
 fn drop_stale_permissions() {

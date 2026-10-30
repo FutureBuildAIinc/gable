@@ -662,7 +662,7 @@ export class POSTerminal extends LitElement {
     const s = authCustody.session;
     if (s === null) return { key: 'anon', cashierId: NIL };
     if (s.kind === 'dev') return { key: `dev-${s.name}`, cashierId: NIL };
-    const sub = s.claims.sub ?? '';
+    const sub = s.kind === 'staff' ? s.sub : (s.claims.sub ?? '');
     const isId = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(sub);
     return { key: sub !== '' ? sub : 'anon', cashierId: isId ? sub.toLowerCase() : NIL };
   }
@@ -3185,6 +3185,7 @@ export class POSTerminal extends LitElement {
     return html`
       <div class="min-[900px]:contents" data-testid="pos-till-menu">
         <button type="button" data-testid="pos-till-menu-button" aria-label="Till" aria-haspopup="menu"
+          title=${off ? 'Offline: drawer cash and X report need the connection; Close Till says what holds it' : 'Till'}
           aria-expanded=${this._tillMenu ? 'true' : 'false'} @click=${() => { this._tillMenu = !this._tillMenu; }}
           class="flex h-11 w-11 items-center justify-center rounded border border-white/20 text-slate-200 hover:bg-white/5 min-[900px]:hidden">
           <svg viewBox="0 0 24 24" class="h-5 w-5" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">

@@ -66,7 +66,7 @@ export function signedInPerson(): SignedInPerson {
     const s = authCustody.session;
     if (s === null) return { id: null, name: null };
     if (s.kind === 'dev') return { id: null, name: s.name };
-    const sub = s.claims.sub ?? '';
+    const sub = s.kind === 'staff' ? s.sub : (s.claims.sub ?? '');
     return { id: UUID.test(sub) ? sub.toLowerCase() : null, name: authCustody.displayName };
 }
 

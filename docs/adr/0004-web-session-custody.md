@@ -15,6 +15,14 @@ session slice builds this record's target, and when it lands the interim
 by the API after an Appwrite sign in made by the core, with no bridge
 (ADR 0012 sections 2 and 3).
 
+ADR 0012 slice 3 has landed for staff: the session is the `HttpOnly` cookie
+the core sets, and `@gable/auth` keeps display data only (the subject, the
+roles and the name the person typed) in the `sessionStorage` record. No
+credential is written to any storage. A bearer token, which only the JWKS path
+still uses until ADR 0012 slice 8 retires it, is held in memory and in no
+storage, so a reload drops it. The paragraphs below describe the interim
+design as it was.
+
 ## Context
 
 The web workspace is two separate bundles on one origin: the front door at `/`

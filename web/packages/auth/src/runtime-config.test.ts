@@ -19,7 +19,7 @@ const TWO_METHODS = {
   auth_mode: 'production',
   methods: [
     { method: 'google', kind: 'redirect', label: 'Google', start_url: '/api/v1/auth/start/google', issuer_url: null, client_id: null },
-    { method: 'email_password', kind: 'form', label: 'Email and password', start_url: '/api/portal/v1/login', issuer_url: null, client_id: null },
+    { method: 'email_password', kind: 'form', label: 'Email and password', start_url: '/api/v1/auth/signin', issuer_url: null, client_id: null },
   ],
 };
 
