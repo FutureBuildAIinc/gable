@@ -203,6 +203,9 @@ type settingsRequest struct {
 // PutSettings is PUT /admin/large-cash/settings: the default country and
 // the Canadian dealer threshold, on or off and its amount.
 func (h *Handler) PutSettings(w http.ResponseWriter, r *http.Request) {
+	if refuseMachineKey(w, r, "the large cash settings are a person's to change") {
+		return
+	}
 	var req settingsRequest
 	if err := httpx.DecodeJSON(r, &req); err != nil {
 		httpx.WriteError(w, r, err)
