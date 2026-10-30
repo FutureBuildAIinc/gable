@@ -53,14 +53,16 @@ func newFixture(t *testing.T, maxConns int32) *fixture {
 		logo                                         []byte
 		ctype                                        *string
 		revision                                     int64
+		gstNumber                                    string
+		gstNotRegistered                             bool
 	}
-	if err := db.Pool.QueryRow(context.Background(), `SELECT legal_name, trading_name, phone, email, website, remit_to, locale, logo, logo_content_type, revision FROM dealer_profile WHERE id = 1`).
-		Scan(&snapshot.legal, &snapshot.trading, &snapshot.phone, &snapshot.email, &snapshot.website, &snapshot.remit, &snapshot.locale, &snapshot.logo, &snapshot.ctype, &snapshot.revision); err != nil {
+	if err := db.Pool.QueryRow(context.Background(), `SELECT legal_name, trading_name, phone, email, website, remit_to, locale, logo, logo_content_type, revision, gst_hst_number, gst_hst_not_registered FROM dealer_profile WHERE id = 1`).
+		Scan(&snapshot.legal, &snapshot.trading, &snapshot.phone, &snapshot.email, &snapshot.website, &snapshot.remit, &snapshot.locale, &snapshot.logo, &snapshot.ctype, &snapshot.revision, &snapshot.gstNumber, &snapshot.gstNotRegistered); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
-		_, _ = db.Pool.Exec(context.Background(), `UPDATE dealer_profile SET legal_name=$1, trading_name=$2, phone=$3, email=$4, website=$5, remit_to=$6, locale=$7, logo=$8, logo_content_type=$9, revision=$10 WHERE id = 1`,
-			snapshot.legal, snapshot.trading, snapshot.phone, snapshot.email, snapshot.website, snapshot.remit, snapshot.locale, snapshot.logo, snapshot.ctype, snapshot.revision)
+		_, _ = db.Pool.Exec(context.Background(), `UPDATE dealer_profile SET legal_name=$1, trading_name=$2, phone=$3, email=$4, website=$5, remit_to=$6, locale=$7, logo=$8, logo_content_type=$9, revision=$10, gst_hst_number=$11, gst_hst_not_registered=$12 WHERE id = 1`,
+			snapshot.legal, snapshot.trading, snapshot.phone, snapshot.email, snapshot.website, snapshot.remit, snapshot.locale, snapshot.logo, snapshot.ctype, snapshot.revision, snapshot.gstNumber, snapshot.gstNotRegistered)
 	})
 	svc := dealerprofile.NewService(dealerprofile.NewRepository(db), db, audit.NewLogger(db))
 	mux := http.NewServeMux()
@@ -138,7 +140,7 @@ func TestDealerProfileReadShape(t *testing.T) {
 	if r.status != http.StatusOK {
 		t.Fatalf("get: %d %s", r.status, r.raw)
 	}
-	for _, k := range []string{"legal_name", "trading_name", "phone", "email", "website", "remit_to", "locale", "logo_url", "revision", "updated_at"} {
+	for _, k := range []string{"legal_name", "trading_name", "phone", "email", "website", "remit_to", "locale", "gst_hst_number", "gst_hst_not_registered", "logo_url", "revision", "updated_at"} {
 		if _, ok := r.body[k]; !ok {
 			t.Errorf("field %q missing from %s", k, r.raw)
 		}
@@ -479,5 +481,52 @@ func TestDealerProfileThreeWritersOneWinner(t *testing.T) {
 	}
 	if got := f.revision(); got != rev+1 {
 		t.Errorf("revision = %d, want %d", got, rev+1)
+	}
+}
+
+// TestDealerProfileGSTHST pins the GST/HST registration on the wire (CP-14
+// A1): a typed number is stored normalized, a malformed one is refused with
+// the field named, the not registered switch and a number are refused
+// together, a write that leaves both fields out keeps them, and the audit
+// row carries both.
+func TestDealerProfileGSTHST(t *testing.T) {
+	f := newFixture(t, 0)
+	ifMatch := func() []string { return []string{"If-Match", `"` + strconv.FormatInt(f.revision(), 10) + `"`} }
+	withGST := func(extra string) string { return strings.TrimSuffix(goodBody, "}") + "," + extra + "}" }
+
+	r := f.put(withGST(`"gst_hst_number":"123 456 789 rt-0001","gst_hst_not_registered":false`), ifMatch()...)
+	if r.status != http.StatusOK || r.body["gst_hst_number"] != "123456789RT0001" || r.body["gst_hst_not_registered"] != false {
+		t.Fatalf("normalized write: %d %s", r.status, r.raw)
+	}
+	for _, bad := range []string{`"gst_hst_number":"12345678RT0001"`, `"gst_hst_number":"123456789RP0001"`} {
+		r := f.put(withGST(bad), ifMatch()...)
+		if r.status != http.StatusBadRequest {
+			t.Fatalf("%s: %d %s", bad, r.status, r.raw)
+		}
+		if d, _ := json.Marshal(r.body["error"]); !strings.Contains(string(d), "gst_hst_number") || !strings.Contains(string(d), "RT") {
+			t.Errorf("%s: the refusal does not name the field and its shape: %s", bad, d)
+		}
+	}
+	if r := f.put(withGST(`"gst_hst_number":"123456789RT0001","gst_hst_not_registered":true`), ifMatch()...); r.status != http.StatusBadRequest {
+		t.Fatalf("number and switch together: %d %s", r.status, r.raw)
+	}
+	// A caller from before the fields existed keeps them as they are.
+	if r := f.put(goodBody, ifMatch()...); r.status != http.StatusOK || r.body["gst_hst_number"] != "123456789RT0001" {
+		t.Fatalf("write without the fields: %d %s", r.status, r.raw)
+	}
+	r = f.put(withGST(`"gst_hst_number":"","gst_hst_not_registered":true`), ifMatch()...)
+	if r.status != http.StatusOK || r.body["gst_hst_number"] != "" || r.body["gst_hst_not_registered"] != true {
+		t.Fatalf("switch on: %d %s", r.status, r.raw)
+	}
+	var changes []byte
+	if err := f.db.Pool.QueryRow(context.Background(),
+		`SELECT changes FROM audit_log WHERE entity_type = 'dealer_profile' AND action = 'dealer_profile.update' ORDER BY created_at DESC LIMIT 1`).Scan(&changes); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(changes), `"gst_hst_not_registered": true`) && !strings.Contains(string(changes), `"gst_hst_not_registered":true`) {
+		t.Errorf("audit row lacks the switch: %s", changes)
+	}
+	if !strings.Contains(string(changes), "123456789RT0001") {
+		t.Errorf("audit row lacks the number it replaced: %s", changes)
 	}
 }

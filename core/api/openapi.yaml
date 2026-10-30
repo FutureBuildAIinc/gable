@@ -27465,7 +27465,7 @@ components:
           description: The dealer's locale (a BCP 47 tag).
     DealerProfile:
       type: object
-      required: [legal_name, trading_name, phone, email, website, remit_to, locale, logo_url, revision, updated_at]
+      required: [legal_name, trading_name, phone, email, website, remit_to, locale, gst_hst_number, gst_hst_not_registered, logo_url, revision, updated_at]
       properties:
         legal_name:
           type: string
@@ -27483,6 +27483,12 @@ components:
         locale:
           type: string
           description: The dealer's locale (a BCP 47 tag, default en-US); every date the app shows is formatted for it.
+        gst_hst_number:
+          type: string
+          description: The dealer's GST/HST registration number, stored normalized (123456789RT0001), empty when none is on file. Every Canadian document prints it.
+        gst_hst_not_registered:
+          type: boolean
+          description: The small supplier switch. On, the dealer is not registered for GST/HST, so no GST is charged or printed.
         logo_url:
           type: [string, "null"]
           description: /api/v1/dealer-profile/logo when a logo is set, otherwise null.
@@ -27518,6 +27524,12 @@ components:
           type: string
           maxLength: 35
           description: A BCP 47 tag (en-US, en-CA), refused in words otherwise. Leave it out to keep the stored one.
+        gst_hst_number:
+          type: string
+          description: Nine digits, RT, four digits; spaces and hyphens are dropped and the result stored normalized. Empty clears it. Leave it out to keep the stored one. Refused together with gst_hst_not_registered true.
+        gst_hst_not_registered:
+          type: boolean
+          description: The small supplier switch. Leave it out to keep the stored one.
         revision:
           type: integer
           format: int64

@@ -60,3 +60,35 @@ func TestJPEGEndWalk(t *testing.T) {
 		}
 	}
 }
+
+// TestNormalizeGSTHSTNumber pins the GST/HST number's shape (CP-14 A1): nine
+// digits, RT, four digits, stored without the spaces and hyphens a person
+// types, printed with one space before the RT. A payroll (RP) or short
+// business number is refused; empty is allowed.
+func TestNormalizeGSTHSTNumber(t *testing.T) {
+	ok := []struct{ in, want string }{
+		{"123456789RT0001", "123456789RT0001"},
+		{"123456789 RT0001", "123456789RT0001"},
+		{"123456789-RT-0001", "123456789RT0001"},
+		{" 123 456 789 rt 0001 ", "123456789RT0001"},
+		{"", ""},
+		{"   ", ""},
+	}
+	for _, c := range ok {
+		got, err := NormalizeGSTHSTNumber(c.in)
+		if err != nil || got != c.want {
+			t.Errorf("NormalizeGSTHSTNumber(%q) = %q, %v; want %q", c.in, got, err, c.want)
+		}
+	}
+	for _, in := range []string{"12345678RT0001", "123456789RP0001", "1234567890RT0001", "123456789RT001", "123456789RT00011", "ABCDEFGHIRT0001", "123456789"} {
+		if got, err := NormalizeGSTHSTNumber(in); err == nil {
+			t.Errorf("NormalizeGSTHSTNumber(%q) = %q, want a refusal", in, got)
+		}
+	}
+	if got := FormatGSTHSTNumber("123456789RT0001"); got != "123456789 RT0001" {
+		t.Errorf("FormatGSTHSTNumber = %q", got)
+	}
+	if got := FormatGSTHSTNumber(""); got != "" {
+		t.Errorf("FormatGSTHSTNumber(empty) = %q", got)
+	}
+}

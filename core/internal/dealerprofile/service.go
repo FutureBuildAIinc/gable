@@ -51,6 +51,7 @@ func fields(p *Profile) map[string]any {
 	return map[string]any{
 		"legal_name": p.LegalName, "trading_name": p.TradingName, "phone": p.Phone,
 		"email": p.Email, "website": p.Website, "remit_to": p.RemitTo, "locale": p.Locale, "has_logo": p.LogoURL != nil,
+		"gst_hst_number": p.GSTHSTNumber, "gst_hst_not_registered": p.GSTHSTNotRegistered,
 	}
 }
 
@@ -69,6 +70,20 @@ func (s *Service) Update(ctx context.Context, in Input, ifMatch string, bodyRevi
 		}
 		if in.Locale == "" {
 			in.Locale = cur.Locale
+		}
+		if in.GSTHSTNumber == nil {
+			n := cur.GSTHSTNumber
+			in.GSTHSTNumber = &n
+		}
+		if in.GSTHSTNotRegistered == nil {
+			on := cur.GSTHSTNotRegistered
+			in.GSTHSTNotRegistered = &on
+		}
+		// A dealer is registered or not: a number on file and the not
+		// registered switch never hold together (migration 154's check).
+		if *in.GSTHSTNotRegistered && *in.GSTHSTNumber != "" {
+			return httpx.BadRequest("one or more fields failed validation",
+				httpx.FieldError{Field: "gst_hst_not_registered", Message: "clear the GST/HST number before marking the dealer not registered for GST/HST"})
 		}
 		next, err := s.repo.Update(ctx, in)
 		if err != nil {

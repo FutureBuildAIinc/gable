@@ -34,16 +34,22 @@ var ErrNotFound = errors.New("dealer profile: no logo")
 
 // Profile is the wire shape of GET and PUT /api/v1/dealer-profile.
 type Profile struct {
-	LegalName   string          `json:"legal_name"`
-	TradingName string          `json:"trading_name"`
-	Phone       string          `json:"phone"`
-	Email       string          `json:"email"`
-	Website     string          `json:"website"`
-	RemitTo     string          `json:"remit_to"`
-	Locale      string          `json:"locale"`
-	LogoURL     *string         `json:"logo_url"`
-	Revision    int64           `json:"revision"`
-	UpdatedAt   httpx.Timestamp `json:"updated_at"`
+	LegalName   string `json:"legal_name"`
+	TradingName string `json:"trading_name"`
+	Phone       string `json:"phone"`
+	Email       string `json:"email"`
+	Website     string `json:"website"`
+	RemitTo     string `json:"remit_to"`
+	Locale      string `json:"locale"`
+	// GSTHSTNumber is the dealer's GST/HST registration number, stored
+	// normalized (123456789RT0001), empty when none is on file (CP-14 A1).
+	GSTHSTNumber string `json:"gst_hst_number"`
+	// GSTHSTNotRegistered is the small supplier switch: on, the dealer is not
+	// registered for GST/HST, so no GST is charged or printed.
+	GSTHSTNotRegistered bool            `json:"gst_hst_not_registered"`
+	LogoURL             *string         `json:"logo_url"`
+	Revision            int64           `json:"revision"`
+	UpdatedAt           httpx.Timestamp `json:"updated_at"`
 }
 
 // DisplayName is the name a form leads with: the trading name, else the legal.
@@ -54,17 +60,48 @@ func (p Profile) DisplayName() string {
 	return strings.TrimSpace(p.LegalName)
 }
 
-// Input is the writable slice of the profile. An empty Locale leaves the
-// stored one alone (the service fills it from the locked row), so a caller
-// from before the field existed never resets it.
+// Input is the writable slice of the profile. An empty Locale, and a nil
+// GST/HST field, leaves the stored one alone (the service fills it from the
+// locked row), so a caller from before the field existed never resets it.
 type Input struct {
-	LegalName   string
-	TradingName string
-	Phone       string
-	Email       string
-	Website     string
-	RemitTo     string
-	Locale      string
+	LegalName           string
+	TradingName         string
+	Phone               string
+	Email               string
+	Website             string
+	RemitTo             string
+	Locale              string
+	GSTHSTNumber        *string
+	GSTHSTNotRegistered *bool
+}
+
+// gstHSTShape is exactly the column's check (migration 154): the nine digit
+// business number, the GST/HST program identifier RT, and the four digit
+// reference number.
+var gstHSTShape = regexp.MustCompile(`^[0-9]{9}RT[0-9]{4}$`)
+
+// NormalizeGSTHSTNumber takes a GST/HST number as a person types it, drops
+// its spaces and hyphens, upper cases it and checks its shape; empty stays
+// empty (no number on file). Anything else is refused in words, so a payroll
+// (RP) account or a short business number never reaches a document.
+func NormalizeGSTHSTNumber(raw string) (string, error) {
+	n := strings.ToUpper(strings.NewReplacer(" ", "", "-", "").Replace(strings.TrimSpace(raw)))
+	if n == "" {
+		return "", nil
+	}
+	if !gstHSTShape.MatchString(n) {
+		return "", errors.New("must be a GST/HST number: nine digits, RT, four digits, for example 123456789 RT0001")
+	}
+	return n, nil
+}
+
+// FormatGSTHSTNumber prints a stored number the way CRA writes it, with one
+// space before the program identifier: 123456789 RT0001.
+func FormatGSTHSTNumber(n string) string {
+	if len(n) != 15 {
+		return n
+	}
+	return n[:9] + " " + n[9:]
 }
 
 // Logo is the stored image.

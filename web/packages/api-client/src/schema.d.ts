@@ -13151,6 +13151,10 @@ export interface components {
             remit_to: string;
             /** @description The dealer's locale (a BCP 47 tag, default en-US); every date the app shows is formatted for it. */
             locale: string;
+            /** @description The dealer's GST/HST registration number, stored normalized (123456789RT0001), empty when none is on file. Every Canadian document prints it. */
+            gst_hst_number: string;
+            /** @description The small supplier switch. On, the dealer is not registered for GST/HST, so no GST is charged or printed. */
+            gst_hst_not_registered: boolean;
             /** @description /api/v1/dealer-profile/logo when a logo is set, otherwise null. */
             logo_url: string | null;
             /** Format: int64 */
@@ -13168,6 +13172,10 @@ export interface components {
             remit_to?: string;
             /** @description A BCP 47 tag (en-US, en-CA), refused in words otherwise. Leave it out to keep the stored one. */
             locale?: string;
+            /** @description Nine digits, RT, four digits; spaces and hyphens are dropped and the result stored normalized. Empty clears it. Leave it out to keep the stored one. Refused together with gst_hst_not_registered true. */
+            gst_hst_number?: string;
+            /** @description The small supplier switch. Leave it out to keep the stored one. */
+            gst_hst_not_registered?: boolean;
             /**
              * Format: int64
              * @description The precondition, beside If-Match.

@@ -35,6 +35,13 @@ describe('Tech Admin tab from the address', () => {
     expect(text(el)).toContain('Flow webhook id')
   })
 
+  it('opens the tax setup panel for ?tab=tax, where a setup warning links', async () => {
+    serve()
+    history.replaceState(null, '', '/admin?tab=tax')
+    const el = await mountAsync<TechAdminPage>('gable-tech-admin')
+    expect(el.querySelector('gable-tax-setup')).not.toBeNull()
+  })
+
   it('opens API Keys with no tab named, and ignores an unknown one', async () => {
     serve()
     history.replaceState(null, '', '/admin?tab=nonsense')

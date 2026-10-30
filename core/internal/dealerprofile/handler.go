@@ -87,7 +87,11 @@ type putRequest struct {
 	Website     string  `json:"website"`
 	RemitTo     string  `json:"remit_to"`
 	Locale      *string `json:"locale"`
-	Revision    *int64  `json:"revision"`
+	// The GST/HST fields are pointers so a caller from before they existed
+	// keeps them as they are.
+	GSTHSTNumber        *string `json:"gst_hst_number"`
+	GSTHSTNotRegistered *bool   `json:"gst_hst_not_registered"`
+	Revision            *int64  `json:"revision"`
 }
 
 func (req putRequest) parse() (Input, error) {
@@ -120,6 +124,18 @@ func (req putRequest) parse() (Input, error) {
 		} else {
 			in.Locale = locale
 		}
+	}
+	if req.GSTHSTNumber != nil {
+		n, err := NormalizeGSTHSTNumber(*req.GSTHSTNumber)
+		if err != nil {
+			v.Check(false, "gst_hst_number", err.Error())
+		} else {
+			in.GSTHSTNumber = &n
+		}
+	}
+	if req.GSTHSTNotRegistered != nil {
+		on := *req.GSTHSTNotRegistered
+		in.GSTHSTNotRegistered = &on
 	}
 	return in, v.Err()
 }
