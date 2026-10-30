@@ -279,6 +279,11 @@ export class POSTerminal extends LitElement {
   private _completing = false;
   private _reconnecting = false;
   @state() private _needsSignIn = false;
+  /** The strip's email and password form (CP-13). Only the email is state: the password lives in its field and one call. */
+  @state() private _pwForm = false;
+  @state() private _pwEmail = '';
+  @state() private _pwBusy = false;
+  @state() private _pwError: string | null = null;
 
   // The X report of the open drawer, and the register's stored Z reports (CP-08).
   @state() private _showXReport = false;
@@ -399,10 +404,16 @@ export class POSTerminal extends LitElement {
     return true;
   }
 
-  /** The strip's "Sign in this register": the shell's sign in, then the reconnect runs again. */
+  /** The strip's "Sign in this register": the dealer's first method opens the form or starts the shell's redirect sign in, then the reconnect runs again. */
   private async _signInRegister() {
     try {
-      await offlineCounter.signIn();
+      if ((await offlineCounter.signIn()) === 'form') {
+        this._pwError = null;
+        this._pwForm = true;
+        await this.updateComplete;
+        this._focusTestId('pos-offline-pw-email');
+        return;
+      }
     } catch (err) {
       this._offlineStrip = err instanceof Error ? err.message : null;
       return;
@@ -410,6 +421,80 @@ export class POSTerminal extends LitElement {
     this._offlineStrip = null;
     this._needsSignIn = false;
     await this._reconnect();
+  }
+
+  private _pwField(): HTMLInputElement | null {
+    return this.querySelector<HTMLInputElement>('[data-testid="pos-offline-pw-password"]');
+  }
+
+  private _focusTestId(id: string) {
+    this.querySelector<HTMLElement>(`[data-testid="${id}"]`)?.focus();
+  }
+
+  private _closePasswordForm() {
+    const field = this._pwField();
+    if (field) field.value = '';
+    this._pwForm = false;
+    this._pwEmail = '';
+    this._pwError = null;
+  }
+
+  /** Cancel: the form goes and focus goes to the ask button that comes back. */
+  private async _cancelPasswordForm() {
+    this._closePasswordForm();
+    await this.updateComplete;
+    this._focusTestId('pos-offline-sign-in');
+  }
+
+  /**
+   * The form's submit: the password goes from its field to the one shell call
+   * and the field is emptied at once, before any answer. It is never a state,
+   * a log line or an error word.
+   */
+  private async _submitPassword() {
+    const field = this._pwField();
+    if (this._pwBusy || !field) return;
+    const email = this._pwEmail.trim();
+    const attempt = offlineCounter.signInWithPassword(email, field.value);
+    field.value = '';
+    this._pwBusy = true;
+    this._pwError = null;
+    try {
+      await attempt;
+    } catch (err) {
+      this._pwError = err instanceof Error ? err.message : 'The register could not be signed in. Ask a manager.';
+      this._pwBusy = false;
+      await this.updateComplete;
+      this._focusTestId('pos-offline-pw-password');
+      return;
+    }
+    this._pwBusy = false;
+    this._closePasswordForm();
+    this._offlineStrip = null;
+    this._needsSignIn = false;
+    await this._reconnect();
+  }
+
+  private _renderPasswordForm() {
+    const input = 'w-full min-h-11 rounded border border-white/10 bg-deep-space px-3 py-2 text-sm text-white outline-none focus:border-gable-green';
+    const enter = (e: KeyboardEvent) => { if (e.key === 'Enter') void this._submitPassword(); };
+    return html`
+      <form class="flex flex-col gap-3 border-b border-blueprint-blue/30 bg-blueprint-blue/5 px-4 py-3 text-sm sm:flex-row sm:flex-wrap sm:items-end" data-testid="pos-offline-pw-form" @submit=${(e: Event) => e.preventDefault()}>
+        <label class="block w-full space-y-1.5 sm:w-auto sm:min-w-[12rem] sm:flex-1">
+          <span class="text-xs uppercase tracking-wider text-muted-foreground">Email</span>
+          <input type="email" data-testid="pos-offline-pw-email" aria-label="Email" autocomplete="username" class=${input}
+            .value=${this._pwEmail} @input=${(e: Event) => { this._pwEmail = (e.target as HTMLInputElement).value; }} @keydown=${enter} />
+        </label>
+        <label class="block w-full space-y-1.5 sm:w-auto sm:min-w-[12rem] sm:flex-1">
+          <span class="text-xs uppercase tracking-wider text-muted-foreground">Password</span>
+          <input type="password" data-testid="pos-offline-pw-password" aria-label="Password" autocomplete="current-password" class=${input} @keydown=${enter} />
+        </label>
+        <div class="flex gap-3" data-testid="pos-offline-pw-buttons">
+          <button type="button" data-testid="pos-offline-pw-submit" ?disabled=${this._pwBusy} class="min-h-11 rounded-lg bg-gable-green px-4 font-semibold text-deep-space disabled:opacity-60" @click=${() => void this._submitPassword()}>${this._pwBusy ? 'Signing in' : NO_SESSION_ASK}</button>
+          <button type="button" data-testid="pos-offline-pw-cancel" class="min-h-11 rounded-lg border border-white/20 px-4 font-semibold" @click=${() => void this._cancelPasswordForm()}>Cancel</button>
+        </div>
+        ${this._pwError ? html`<p class="basis-full text-sm text-amber-400" role="alert" data-testid="pos-offline-pw-error">${this._pwError}</p>` : nothing}
+      </form>`;
   }
 
   /**
@@ -3990,9 +4075,10 @@ export class POSTerminal extends LitElement {
       ${this._offlineStrip ? html`
         <div class="flex items-center justify-between gap-3 border-b border-blueprint-blue/30 bg-blueprint-blue/10 px-4 py-2 text-sm text-blueprint-blue" role="status" data-testid="pos-offline-strip">
           <span>${this._offlineStrip}</span>
-          ${this._needsSignIn ? html`<button type="button" data-testid="pos-offline-sign-in" class="min-h-11 rounded-lg bg-gable-green px-4 font-semibold text-deep-space" @click=${() => void this._signInRegister()}>${NO_SESSION_ASK}</button>` : nothing}
+          ${this._needsSignIn && !this._pwForm ? html`<button type="button" data-testid="pos-offline-sign-in" class="min-h-11 rounded-lg bg-gable-green px-4 font-semibold text-deep-space" @click=${() => void this._signInRegister()}>${NO_SESSION_ASK}</button>` : nothing}
           <button type="button" class="min-h-11 px-2 text-lg" aria-label="Dismiss" @click=${() => { this._offlineStrip = null; }}>×</button>
         </div>` : nothing}
+      ${this._pwForm ? this._renderPasswordForm() : nothing}
       ${this._sameGoods ? html`
         <div class="flex flex-wrap items-center gap-3 border-b border-white/10 bg-slate-steel px-4 py-3 text-sm" role="group" data-testid="pos-offline-same-goods">
           <span>Offline sale <span class="font-mono">${this._sameGoods.offlineRef}</span> replaced the sale whose result was unknown. ${SAME_GOODS_QUESTION}</span>

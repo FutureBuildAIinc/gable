@@ -32,6 +32,24 @@ export class OfflineCounterError extends Error {
     }
 }
 
+const SERVER_UNREACHABLE = 'The server cannot be reached: the register keeps its sales and sends them when the connection returns.';
+
+/** The words for each fixed code the shell's password sign in answers. */
+const PASSWORD_WORDS: Record<string, string> = {
+    sign_in_refused: 'That email and password did not sign this register in. Type the password again.',
+    sign_in_limited: 'Too many tries. Wait a little, then try again.',
+    sign_in_not_allowed: 'This sign in is not allowed for this register. Ask a manager.',
+    sign_in_unavailable: SERVER_UNREACHABLE,
+    no_server: 'This register has no server set, so it cannot sign in. Ask a manager.',
+};
+
+/** Maps a raw shell answer to a coded error whose words come from the table above, never from the answer. */
+function passwordSignInError(raw: unknown): OfflineCounterError {
+    const code = typeof raw === 'string' ? raw : raw && typeof raw === 'object' && 'code' in raw ? String((raw as { code: unknown }).code) : '';
+    if (code in PASSWORD_WORDS) return new OfflineCounterError({ code, message: PASSWORD_WORDS[code] });
+    return new OfflineCounterError({ code: 'sign_in_failed', message: 'The register could not be signed in. Ask a manager.' });
+}
+
 let override: Invoke | null | undefined;
 
 /** Tests set the core's stand in here; null removes it. */
@@ -91,19 +109,38 @@ export const offlineCounter = {
     },
     /**
      * The shell's own sign in, which puts the token in the keychain the core
-     * reads (a web sign in writes only the cookie). The method is the dealer's
-     * first allowed redirect method; the shell starts redirect methods only.
-     * A degraded answer means the server did not answer: the register says
-     * so and forgets it, so the next tap asks the server again.
+     * reads (a web sign in writes only the cookie). The dealer's first method
+     * picks the door: email and password answers 'form' and starts nothing,
+     * the strip then shows its own form; otherwise the first redirect method
+     * starts, as the shell starts redirect methods only. A degraded answer
+     * means the server did not answer: the register says so and forgets it,
+     * so the next tap asks the server again.
      */
-    async signIn(): Promise<void> {
+    async signIn(): Promise<'form' | 'started'> {
         const config = await authMethodsConfig(import.meta.env.VITE_API_URL || '');
         if (config.degraded) {
             resetAuthMethodsCache();
-            throw new OfflineCounterError({ code: 'server_unreachable', message: 'The server cannot be reached: the register keeps its sales and sends them when the connection returns.' });
+            throw new OfflineCounterError({ code: 'server_unreachable', message: SERVER_UNREACHABLE });
         }
+        if (config.methods[0]?.method === 'email_password') return 'form';
         const method = config.methods.find((m) => m.kind === 'redirect');
         if (!method) throw new OfflineCounterError({ code: 'no_sign_in_method', message: 'This dealer allows no sign in method a register can start. Ask a manager.' });
         await call('begin_sign_in', { method: method.method });
+        return 'started';
+    },
+    /**
+     * The password sign in (CP-13): one call into the shell, which answers
+     * nothing or a fixed code. The password is a parameter of this call
+     * only; the shell's answers are bare code strings, mapped here to words
+     * that never carry what the clerk typed.
+     */
+    async signInWithPassword(email: string, password: string): Promise<void> {
+        const invoke = invoker();
+        if (!invoke) throw new OfflineCounterError({ code: 'no_core', message: 'This counter runs in a browser tab: it sells online only.' });
+        try {
+            await invoke('sign_in_with_password', { email, password });
+        } catch (raw) {
+            throw passwordSignInError(raw);
+        }
     },
 };
