@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: LicenseRef-OpenLBM-Docs-1.0
 # SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
 
-.PHONY: help up db down smoke logs ps pg-shell migrate seed reset-db \
+.PHONY: help up up-mail db down smoke logs ps pg-shell migrate seed reset-db \
         build vet test test-short cover \
         contract contract-go contract-ts \
         fe-install fe-typecheck fe-lint fe-test fe-cover fe-build \
@@ -18,6 +18,7 @@ help:
 	@echo ""
 	@echo "  Infra"
 	@echo "    up down logs ps pg-shell     the local stack (docker compose)"
+	@echo "    up-mail                      the stack plus Mailpit, mail routed into it"
 	@echo "    db                           Postgres alone, for running core from source"
 	@echo "    smoke                        the exit test's step 3 against the running stack"
 	@echo "    migrate seed reset-db        database lifecycle"
@@ -58,6 +59,17 @@ STACK_ENV = COMPOSE_PROJECT_NAME=$(STACK_PROJECT) GABLE_PG_CONTAINER=$${GABLE_PG
 
 up:
 	$(STACK_ENV) COMPOSE_PARALLEL_LIMIT=1 docker compose up -d --build --wait --wait-timeout 600
+
+# The same stack with Mailpit (compose profile mail) and the core's outgoing
+# mail routed into it, so what the demo sends (a statement, an invoice, a
+# quote) is read in Mailpit's inbox at http://127.0.0.1:8025 instead of the
+# log. demo@gable.example is this local stack's invented From address, in the
+# seed's style of reserved example domains. Local only, like `make up`.
+MAIL_ENV = COMPOSE_PROFILES=mail GABLE_SMTP_HOST=mailpit GABLE_SMTP_PORT=1025 \
+	GABLE_SMTP_TLS=none GABLE_SMTP_FROM=demo@gable.example
+
+up-mail:
+	$(STACK_ENV) $(MAIL_ENV) COMPOSE_PARALLEL_LIMIT=1 docker compose up -d --build --wait --wait-timeout 600
 
 # Postgres alone (localhost:5434), for running core from source. Uses the
 # checkout's own compose project and volume, never the stack's.
