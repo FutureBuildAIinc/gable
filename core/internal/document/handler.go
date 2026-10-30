@@ -272,10 +272,11 @@ func (h *Handler) emailInvoice(w http.ResponseWriter, r *http.Request, id uuid.U
 		return
 	}
 	// Async dispatch: the HTTP thread never waits on the mail server. The
-	// send, its answer and any error are written to email_deliveries, which is
-	// where a failed send is read (GET /api/v1/email-deliveries).
+	// delivery row is written queued before the 202 answers (so the 202 can
+	// name it and a desk can follow it), and the send resolves it with the
+	// sender's answer or its error (GET /api/v1/email-deliveries).
 	dealer := h.docSvc.DealerName(r.Context())
-	h.dispatch(r.Context(), outgoing{
+	deliveryID := h.dispatch(r.Context(), outgoing{
 		to:       email,
 		subject:  withDealer("Invoice "+inv.Number, dealer),
 		body:     closing("Please find invoice "+inv.Number+" attached.", dealer),
@@ -289,6 +290,10 @@ func (h *Handler) emailInvoice(w http.ResponseWriter, r *http.Request, id uuid.U
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusAccepted)
+	if deliveryID != uuid.Nil {
+		_ = json.NewEncoder(w).Encode(map[string]string{"status": "queued", "delivery_id": deliveryID.String()})
+		return
+	}
 	w.Write([]byte(`{"status":"queued"}`))
 }
 
@@ -323,21 +328,33 @@ func branchPtr(id uuid.UUID) *uuid.UUID {
 	return &id
 }
 
-// dispatch sends in the background on a context that keeps the request's
-// values (who sent it) but not its cancellation, then records the delivery
-// with the sender's answer or its error. A panic in the send path is
-// contained here: this goroutine runs outside the HTTP recovery middleware.
-func (h *Handler) dispatch(reqCtx context.Context, o outgoing) {
+// dispatch writes the delivery row queued on the caller's own thread, sends
+// in the background on a context that keeps the request's values (who sent
+// it) but not its cancellation, then resolves the row with the send's
+// outcome: sent (the SMTP sender took it), logged (a log sender took it:
+// nothing left the process) or failed. A panic in the send path is contained
+// here: this goroutine runs outside the HTTP recovery middleware. The
+// returned id names the queued row; it is uuid.Nil when no recorder is wired
+// or its row could not be written, and the send still runs.
+func (h *Handler) dispatch(reqCtx context.Context, o outgoing) (deliveryID uuid.UUID) {
+	entry := o.entry
+	entry.Recipient, entry.Subject, entry.Status = o.to, o.subject, emaildelivery.StatusQueued
+	if h.deliveries != nil {
+		d, err := h.deliveries.Record(reqCtx, entry)
+		if err != nil {
+			slog.Error("Failed to record the queued email delivery", "error", err, "document_type", entry.DocumentType)
+		} else {
+			deliveryID = d.ID
+		}
+	}
 	ctx := context.WithoutCancel(reqCtx)
 	h.sends.Add(1)
 	go func() {
 		defer h.sends.Done()
-		entry := o.entry
-		entry.Recipient, entry.Subject = o.to, o.subject
 		func() {
 			defer func() {
 				if rec := recover(); rec != nil {
-					entry.Status, entry.Error = emaildelivery.StatusFailed, fmt.Sprintf("panic in the send path: %v", rec)
+					h.resolve(ctx, deliveryID, emaildelivery.StatusFailed, "", fmt.Sprintf("panic in the send path: %v", rec))
 					slog.Error("panic sending document email", "recover", rec, "document_type", entry.DocumentType)
 				}
 			}()
@@ -348,22 +365,31 @@ func (h *Handler) dispatch(reqCtx context.Context, o outgoing) {
 			sendCtx, cancel := context.WithTimeout(ctx, limit)
 			defer cancel()
 			answer, err := notification.SendWithAnswer(sendCtx, h.emailSvc, []string{o.to}, o.subject, o.body, o.filename, o.pdf)
-			if err != nil {
-				entry.Status, entry.Error = emaildelivery.StatusFailed, err.Error()
+			switch {
+			case err != nil:
+				h.resolve(ctx, deliveryID, emaildelivery.StatusFailed, "", err.Error())
 				slog.Error("Failed to send document email", "error", err, "document_type", entry.DocumentType)
-				return
+			case notification.LogsOnly(h.emailSvc):
+				h.resolve(ctx, deliveryID, emaildelivery.StatusLogged, answer, "")
+			default:
+				h.resolve(ctx, deliveryID, emaildelivery.StatusSent, answer, "")
 			}
-			entry.Status, entry.SenderAnswer = emaildelivery.StatusSent, answer
 		}()
-		if h.deliveries == nil {
-			return
-		}
-		recCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
-		defer cancel()
-		if _, err := h.deliveries.Record(recCtx, entry); err != nil {
-			slog.Error("Failed to record the email delivery", "error", err, "document_type", entry.DocumentType)
-		}
 	}()
+	return deliveryID
+}
+
+// resolve writes one send's outcome to its queued row, bounded; a row that
+// was never written has nothing to resolve.
+func (h *Handler) resolve(ctx context.Context, id uuid.UUID, status, answer, sendError string) {
+	if h.deliveries == nil || id == uuid.Nil {
+		return
+	}
+	recCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	if err := h.deliveries.SetOutcome(recCtx, id, status, answer, sendError); err != nil {
+		slog.Error("Failed to record the email delivery outcome", "error", err, "status", status)
+	}
 }
 
 // pathUUID parses the path id for the wire envelope routes.

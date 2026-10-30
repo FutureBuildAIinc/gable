@@ -15,43 +15,12 @@ import (
 	"log/slog"
 	"net"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
 	"github.com/gablelbm/gable/internal/emaildelivery"
 	"github.com/gablelbm/gable/internal/notification"
-	"github.com/google/uuid"
 )
-
-// outcomeDeliveries records the queued row and the one outcome written to it.
-type outcomeDeliveries struct {
-	mu       sync.Mutex
-	rows     []emaildelivery.Delivery
-	outcomes []deliveredOutcome
-}
-
-type deliveredOutcome struct {
-	id     uuid.UUID
-	status string
-	answer string
-	failed string
-}
-
-func (r *outcomeDeliveries) Record(_ context.Context, e emaildelivery.Entry) (*emaildelivery.Delivery, error) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	d := emaildelivery.Delivery{ID: uuid.New(), Status: e.Status, Recipient: e.Recipient}
-	r.rows = append(r.rows, d)
-	return &d, nil
-}
-
-func (r *outcomeDeliveries) SetOutcome(_ context.Context, id uuid.UUID, status, answer, sendError string) error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.outcomes = append(r.outcomes, deliveredOutcome{id: id, status: status, answer: answer, failed: sendError})
-	return nil
-}
 
 // scriptSMTP is a one message SMTP server on port 0 that answers the end of
 // data with dataReply, the way a real server answers 250 with its own words.
@@ -108,7 +77,7 @@ func scriptSMTP(t *testing.T, dataReply string) (host string, port int) {
 // then resolved logged, never sent, with the sender's own disclosure as the
 // answer and no error.
 func TestCP14_LogSenderRecordsLogged(t *testing.T) {
-	rec := &outcomeDeliveries{}
+	rec := &recordedDeliveries{}
 	h := NewHandler(nil, nil, nil, nil, notification.NewLogEmailService(slog.New(slog.DiscardHandler))).WithDeliveries(rec)
 
 	h.dispatch(context.Background(), outgoing{
@@ -119,15 +88,15 @@ func TestCP14_LogSenderRecordsLogged(t *testing.T) {
 
 	rec.mu.Lock()
 	defer rec.mu.Unlock()
-	if len(rec.rows) != 1 || rec.rows[0].Status != emaildelivery.StatusQueued {
-		t.Fatalf("queued rows = %+v, want exactly one queued row written before the send", rec.rows)
+	if len(rec.rows) != 1 || len(rec.entries) != 1 || rec.entries[0].Status != emaildelivery.StatusQueued {
+		t.Fatalf("queued rows = %v, want exactly one queued row written before the send", rec.rows)
 	}
 	if len(rec.outcomes) != 1 {
 		t.Fatalf("outcomes = %+v, want exactly one", rec.outcomes)
 	}
 	o := rec.outcomes[0]
-	if o.id != rec.rows[0].ID {
-		t.Errorf("outcome id %s does not name the queued row %s", o.id, rec.rows[0].ID)
+	if o.id != rec.rows[0] {
+		t.Errorf("outcome id %s does not name the queued row %s", o.id, rec.rows[0])
 	}
 	if o.status != emaildelivery.StatusLogged {
 		t.Errorf("log sender outcome status = %q, want logged", o.status)
@@ -151,7 +120,7 @@ func TestCP14_SMTPSenderRecordsSent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rec := &outcomeDeliveries{}
+	rec := &recordedDeliveries{}
 	h := NewHandler(nil, nil, nil, nil, sender).WithDeliveries(rec)
 
 	h.dispatch(context.Background(), outgoing{
@@ -162,15 +131,15 @@ func TestCP14_SMTPSenderRecordsSent(t *testing.T) {
 
 	rec.mu.Lock()
 	defer rec.mu.Unlock()
-	if len(rec.rows) != 1 || rec.rows[0].Status != emaildelivery.StatusQueued {
-		t.Fatalf("queued rows = %+v, want exactly one queued row written before the send", rec.rows)
+	if len(rec.rows) != 1 || len(rec.entries) != 1 || rec.entries[0].Status != emaildelivery.StatusQueued {
+		t.Fatalf("queued rows = %v, want exactly one queued row written before the send", rec.rows)
 	}
 	if len(rec.outcomes) != 1 {
 		t.Fatalf("outcomes = %+v, want exactly one", rec.outcomes)
 	}
 	o := rec.outcomes[0]
-	if o.id != rec.rows[0].ID {
-		t.Errorf("outcome id %s does not name the queued row %s", o.id, rec.rows[0].ID)
+	if o.id != rec.rows[0] {
+		t.Errorf("outcome id %s does not name the queued row %s", o.id, rec.rows[0])
 	}
 	if o.status != emaildelivery.StatusSent {
 		t.Errorf("smtp outcome status = %q, want sent", o.status)
