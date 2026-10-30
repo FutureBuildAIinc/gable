@@ -27,6 +27,7 @@ import {
     tenThousandthsToInput,
     extensionCents,
     floatDollarsToTenThousandths,
+    multiplyQuantities,
     normalizeQuantity,
     numberToQuantity,
     tenThousandthsToDecimal,
@@ -35,7 +36,7 @@ import {
 import type { QuoteLineEscalator } from '../types/pricing.ts';
 import type { ParseResponse, ParsedItem } from '../types/parsing.ts';
 import type { Vehicle } from '../types/delivery.ts';
-import { Save, Send, Printer, Calculator, AlertCircle, TrendingUp, Truck, Package, Minus, Plus, Trash2, Loader2 } from 'lucide';
+import { Save, Send, Printer, Calculator, AlertCircle, TrendingUp, Truck, Package, Minus, Plus, Trash2, Loader2, Boxes } from 'lucide';
 
 // Side-effect imports: register child custom elements
 import './quotes/QuoteList.ts';
@@ -50,6 +51,10 @@ import '../components/quotes/EscalatorToggle.ts';
  * ten thousandths of a dollar, exactly as the quote wire carries them; nothing
  * here is a float. The optional fields are kept from a loaded quote so a full
  * replace (PUT) does not drop a portal customer's note or a price unit pair.
+ *
+ * A kit line is one line for the kit; the parts it holds are the server's to
+ * write (the draft explodes the line when it is saved), so the builder shows
+ * them from the kit's definition and never sends them as lines of its own.
  */
 interface LineWithEscalator {
     id?: string;
@@ -64,6 +69,20 @@ interface LineWithEscalator {
     price_uom_qty?: string;
     unit_price_ten_thousandths: number;
     escalator: QuoteLineEscalator;
+    /** True when the line's product is a kit, so the line explodes into its parts. */
+    is_kit: boolean;
+}
+
+/**
+ * One part of a kit, as the kit's definition says it: what it holds per one
+ * kit, in the part's own stocking unit.
+ */
+interface KitPart {
+    product_id: string;
+    sku: string;
+    description: string;
+    uom: string;
+    quantity: string;
 }
 
 /** The local calendar day of a stored instant, so a Valid until set to a day shows that day west of UTC. */
@@ -91,6 +110,8 @@ export class GableQuoteBuilder extends LitElement {
     @state() private customer: Customer | null = null;
     @state() private products: Product[] = [];
     @state() private lines: LineWithEscalator[] = [];
+    /** The kit definitions of the kit lines on this draft, by product id. */
+    @state() private kitParts: Record<string, KitPart[]> = {};
     @state() private loading = false;
     @state() private initialLoading = false;
 
@@ -168,20 +189,30 @@ export class GableQuoteBuilder extends LitElement {
             this.expiresAt = quote.expires_at;
             this.formError = null;
             this.lineErrors = {};
-            this.lines = (quote.lines ?? []).map(l => ({
-                id: l.id,
-                product_id: l.product_id,
-                sku: l.sku,
-                description: l.description,
-                customer_note: l.customer_note,
-                quantity: l.quantity,
-                uom: l.uom,
-                price_uom: l.price_uom,
-                uom_qty: l.uom_qty,
-                price_uom_qty: l.price_uom_qty,
-                unit_price_ten_thousandths: l.unit_price_ten_thousandths,
-                escalator: defaultEscalator(),
-            }));
+            this.lines = (quote.lines ?? [])
+                // The parts of a kit are the server's to write: it explodes the
+                // kit line into a kit line and its parts when it saves the
+                // draft, so the builder keeps the kit line alone. Sending the
+                // parts back as lines of their own would price the kit twice.
+                .filter(l => l.line_type !== 'component')
+                .map(l => ({
+                    id: l.id,
+                    product_id: l.product_id,
+                    sku: l.sku,
+                    description: l.description,
+                    customer_note: l.customer_note,
+                    quantity: l.quantity,
+                    uom: l.uom,
+                    price_uom: l.price_uom,
+                    uom_qty: l.uom_qty,
+                    price_uom_qty: l.price_uom_qty,
+                    unit_price_ten_thousandths: l.unit_price_ten_thousandths,
+                    escalator: defaultEscalator(),
+                    is_kit: l.line_type === 'kit',
+                }));
+            for (const line of this.lines) {
+                if (line.is_kit && line.product_id) void this.loadKitParts(line.product_id);
+            }
             this.aiSource = quote.source === 'ai';
             this.deliveryType = quote.delivery_type;
             this.freightCents = quote.freight_cents;
@@ -208,7 +239,69 @@ export class GableQuoteBuilder extends LitElement {
             quantity,
             unit_price_ten_thousandths: unitPriceTenThousandths,
             escalator: defaultEscalator(),
+            is_kit: product.is_kit,
         }];
+        if (product.is_kit) void this.loadKitParts(product.id);
+    }
+
+    /**
+     * The kit's definition, read once per kit product: what the kit holds per
+     * one kit. The parts a draft shows come from the definition because the
+     * definition is what the server explodes the line into when it saves.
+     */
+    private async loadKitParts(productId: string) {
+        if (this.kitParts[productId]) return;
+        try {
+            const list = await ProductService.getKitComponents(productId);
+            this.kitParts = {
+                ...this.kitParts,
+                [productId]: list.components.map(c => ({
+                    product_id: c.component_product_id,
+                    sku: c.sku,
+                    description: c.description,
+                    uom: c.uom,
+                    quantity: c.quantity,
+                })),
+            };
+        } catch (err) {
+            console.error('Failed to load the kit definition', err);
+        }
+    }
+
+    /** True when the catalogue's product is a kit, so a line naming it explodes into its parts. */
+    private isKitProduct(productId: string | null | undefined): boolean {
+        if (!productId) return false;
+        return this.products.find(p => p.id === productId)?.is_kit === true;
+    }
+
+    /** The parts of the kit the line names. */
+    private partsOf(line: LineWithEscalator): KitPart[] {
+        if (!line.is_kit || !line.product_id) return [];
+        return this.kitParts[line.product_id] ?? [];
+    }
+
+    /**
+     * The quantity of a part on this line: the kit's quantity times the kit's
+     * per kit quantity, the way the server multiplies them when it explodes
+     * the line (ADR 0005 section 2.6).
+     */
+    private partQuantityOnLine(line: LineWithEscalator, part: KitPart): string {
+        return multiplyQuantities(line.quantity, part.quantity) ?? part.quantity;
+    }
+
+    /**
+     * The cost of the kit's parts for the quantity on the line, in cents. A kit
+     * carries no cost of its own: the dealer carries the cost of its parts
+     * (ADR 0005 section 2.6), so the kit's cost is the parts' cost, the same
+     * way the server prices it: each part's line cost, summed.
+     */
+    private kitCostCents(line: LineWithEscalator): number {
+        const parts = this.partsOf(line);
+        if (parts.length === 0) return 0;
+        return parts.reduce((sum, part) => {
+            const cost = this.costByProduct.get(part.product_id) ?? 0;
+            return sum + extensionCents(this.partQuantityOnLine(line, part), cost);
+        }, 0);
     }
 
     private handleUomInput(idx: number, value: string) {
@@ -309,8 +402,12 @@ export class GableQuoteBuilder extends LitElement {
             uom: (item.matched_product?.uom || item.uom || '').toUpperCase(),
             unit_price_ten_thousandths: priced[i].unitPriceTenThousandths,
             escalator: defaultEscalator(),
+            is_kit: this.isKitProduct(item.matched_product?.product_id),
         }));
         this.lines = [...this.lines, ...newLines];
+        for (const line of newLines) {
+            if (line.is_kit && line.product_id) void this.loadKitParts(line.product_id);
+        }
         this.aiSource = true;
         const failed = priced.filter(p => p.failed).length;
         if (failed > 0) {
@@ -549,6 +646,8 @@ export class GableQuoteBuilder extends LitElement {
     }
 
     private pictureByProduct = new Map<string, string>();
+    /** Each product's average unit cost in ten thousandths, the cost a kit's parts carry. */
+    private costByProduct = new Map<string, number>();
 
     /** The picture path of a line's product, from the catalogue the builder loaded (null when it has none). */
     private pictureOf(line: LineWithEscalator): string | null {
@@ -557,14 +656,28 @@ export class GableQuoteBuilder extends LitElement {
 
     private renderLineRow(line: LineWithEscalator, idx: number, pictures: boolean) {
         const err = this.lineErrors[idx];
-        return html`
-            <tr data-testid="quote-line" class="group hover:bg-white/5 transition-colors align-top">
+        const parts = this.partsOf(line);
+        return [
+            html`
+            <tr data-testid=${line.is_kit ? 'quote-kit-line' : 'quote-line'} class="group hover:bg-white/5 transition-colors align-top">
                 <td class="px-4 py-3">
                     <div class="flex items-start gap-3">
                         ${pictures ? html`<gable-product-thumb .src=${this.pictureOf(line)} .size=${40} reserve></gable-product-thumb>` : nothing}
                         <div class="min-w-0 flex-1">
-                            <div class="font-mono text-white group-hover:text-gable-green transition-colors">${line.sku}</div>
+                            <div class="font-mono text-white group-hover:text-gable-green transition-colors">
+                                ${line.sku}
+                                ${line.is_kit ? html`
+                                    <span data-testid="quote-kit-mark" class="ml-2 inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wide bg-gable-green/15 text-gable-green border border-gable-green/25">
+                                        ${icon(Boxes, 10, 'w-2.5 h-2.5')} Kit
+                                    </span>
+                                ` : nothing}
+                            </div>
                             <div class="text-zinc-400 text-xs">${line.description}</div>
+                            ${line.is_kit && parts.length > 0 ? html`
+                                <div class="text-[10px] text-zinc-500 mt-1" data-testid="quote-kit-cost">
+                                    Kit cost ${formatCents(this.kitCostCents(line))}
+                                </div>
+                            ` : nothing}
                             ${err ? html`<div class="text-[10px] text-rose-400 mt-1">${err}</div>` : nothing}
                             <gable-escalator-toggle
                                 .basePrice=${Number(tenThousandthsToDecimal(line.unit_price_ten_thousandths))}
@@ -617,7 +730,29 @@ export class GableQuoteBuilder extends LitElement {
                         class="p-1.5 rounded text-zinc-500 hover:text-rose-400 hover:bg-white/5">${icon(Trash2, 14)}</button>
                 </td>
             </tr>
-        `;
+        `,
+            ...parts.map(part => html`
+                <tr data-testid="quote-kit-component" class="bg-black/20 hover:bg-white/5 transition-colors align-top">
+                    <td class="px-4 py-2 pl-12">
+                        <div class="font-mono text-zinc-300 text-xs">
+                            ${part.sku}
+                            <span class="ml-2 text-[10px] uppercase tracking-wide text-zinc-600">part</span>
+                        </div>
+                        <div class="text-zinc-500 text-[10px]">
+                            ${part.description}
+                            ${this.costByProduct.get(part.product_id)
+                                ? html` · ${formatPrice4(this.costByProduct.get(part.product_id) ?? 0)} each`
+                                : nothing}
+                        </div>
+                    </td>
+                    <td class="px-2 py-2 text-right font-mono text-xs text-zinc-400">${this.partQuantityOnLine(line, part)}</td>
+                    <td class="px-2 py-2 text-xs text-zinc-500">${part.uom}</td>
+                    <td class="px-2 py-2 text-right text-zinc-600">—</td>
+                    <td class="px-3 py-2 text-right text-zinc-600">—</td>
+                    <td class="px-2 py-2"></td>
+                </tr>
+            `),
+        ];
     }
 
     render() {
@@ -636,6 +771,7 @@ export class GableQuoteBuilder extends LitElement {
         const card = 'bg-slate-steel/50 backdrop-blur border border-white/10 rounded-xl';
         // The picture of each line's product, built once per render; room for a thumb only while some line has one.
         this.pictureByProduct = new Map(this.products.filter(p => isDrawablePath(p.image_url)).map(p => [p.id, p.image_url as string]));
+        this.costByProduct = new Map(this.products.map(p => [p.id, p.average_unit_cost_ten_thousandths]));
         const linePictures = this.lines.some(l => this.pictureOf(l) !== null);
 
         return html`

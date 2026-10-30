@@ -436,3 +436,44 @@ describe('the order page source', () => {
     expect(after.startsWith('handleConfirm(')).toBe(true)
   })
 })
+
+describe('gable-order-detail - a kit on the order', () => {
+  /** An order carrying one kit line and the part lines the server wrote under it. */
+  function kitOrder(): Order {
+    const base = order()
+    const kit = {
+      ...base.lines[0],
+      id: '00000000-0000-4000-8000-0000000000k1',
+      position: 0,
+      line_type: 'kit' as const,
+      parent_line_id: null,
+      sku: 'KIT-FRAME-8',
+      description: '8 ft Wall Section Framing Kit',
+      quantity: '2',
+      line_total_cents: 17_800,
+    }
+    const part = {
+      ...base.lines[0],
+      id: '00000000-0000-4000-8000-0000000000c1',
+      position: 1,
+      line_type: 'component' as const,
+      parent_line_id: kit.id,
+      sku: 'LUM-2492-STUD',
+      description: '2x4x92-5/8 SPF Stud',
+      quantity: '24',
+      line_total_cents: 0,
+    }
+    return { ...base, lines: [kit, part] }
+  }
+
+  it('shows the kit marked and its parts indented under it, not filtered away', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse(kitOrder())))
+    const el = await mountAsync<GableOrderDetail>('gable-order-detail', { routeId: kitOrder().id })
+
+    expect(el.querySelectorAll('[data-testid="order-kit-mark"]')).toHaveLength(1)
+    const parts = el.querySelectorAll('[data-testid="order-kit-component"]')
+    expect(parts).toHaveLength(1)
+    expect(text(parts[0])).toContain('LUM-2492-STUD')
+    expect(text(el)).toContain('KIT-FRAME-8')
+  })
+})

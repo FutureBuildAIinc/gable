@@ -18,6 +18,7 @@ import (
 
 	"github.com/gablelbm/gable/internal/order"
 	"github.com/gablelbm/gable/internal/platform/httpx"
+	"github.com/gablelbm/gable/internal/salesdoc"
 	"github.com/gablelbm/gable/internal/units"
 	"github.com/gablelbm/gable/pkg/audit"
 	"github.com/gablelbm/gable/pkg/middleware"
@@ -296,6 +297,12 @@ func (s *Service) priceDraft(ctx context.Context, d *Draft) (*Quote, error) {
 			if line.Description == "" {
 				line.Description = p.Description
 			}
+			// The line's cost is the product's average cost, read only: the
+			// margin basis and the figure the kit's parts carry. The stored
+			// line keeps no cost column; every read joins the catalogue for
+			// it, and the draft carries it so the priced lines and the ones
+			// the kit explosion mints are alike.
+			line.UnitCost = p.AverageCost
 			set = productUnits[*dl.ProductID]
 		}
 		if line.UOM == "" || line.PriceUOM == "" {
@@ -314,6 +321,13 @@ func (s *Service) priceDraft(ctx context.Context, d *Draft) (*Quote, error) {
 		q.Lines = append(q.Lines, line)
 	}
 	if err := v.Err(); err != nil {
+		return nil, err
+	}
+	// Kits explode through the one shared explosion (QE-05-a, ADR 0005
+	// section 2.6): the kit line keeps its price, its component lines carry
+	// the quantity and the cost, at zero on the face. The components add no
+	// extension, so the total above already stands.
+	if err := s.explodeKits(ctx, q, products); err != nil {
 		return nil, err
 	}
 	q.TotalCents = httpx.Cents(total)
@@ -947,7 +961,10 @@ func (s *Service) WithOrderCreator(orders OrderCreator) *Service {
 
 // quoteSourceFor maps a quote onto what the order copies (ADR 0005 5.8's
 // table): the lines with their pair and price exactly, the header's job,
-// delivery type and freight.
+// delivery type and freight. A quote's component lines are not copied: the
+// order's own explosion rebuilds them from the kit line, the same one it
+// runs for an order a client posts, so the converted order's kit and
+// component lines are the lines that path makes today (QE-05-a).
 func quoteSourceFor(q *Quote) *order.QuoteSource {
 	src := &order.QuoteSource{
 		QuoteID:      q.ID,
@@ -963,6 +980,9 @@ func quoteSourceFor(q *Quote) *order.QuoteSource {
 		src.DeliveryType = order.DeliveryPickup
 	}
 	for _, l := range q.Lines {
+		if l.LineType == salesdoc.LineComponent {
+			continue // the order's explosion writes its own component lines
+		}
 		row := order.QuoteSourceLine{
 			QuoteLineID: l.ID, ProductID: l.ProductID, SKU: l.SKU, Description: l.Description,
 			Quantity: l.Quantity, UOM: string(l.UOM), PriceUOM: l.PriceUOM,
@@ -1048,6 +1068,12 @@ func (s *Service) triggerAutoPO(ctx context.Context, q *Quote, created *order.Or
 		}
 	}
 	for _, line := range q.Lines {
+		// A kit's component lines are never special orders: their stock moves
+		// with the kit as whole units, and a purchase order line for one part
+		// of a kit would reorder what the kit already carries (QE-05-a).
+		if line.LineType == salesdoc.LineComponent {
+			continue
+		}
 		// Only create POs for lines that have a unit cost (special order indicator)
 		if line.UnitCost > 0 && line.ProductID != nil {
 			linked := line.ID

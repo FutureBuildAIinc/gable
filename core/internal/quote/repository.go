@@ -11,6 +11,7 @@ import (
 
 	"github.com/gablelbm/gable/internal/customer/customerlink"
 	"github.com/gablelbm/gable/internal/platform/httpx"
+	"github.com/gablelbm/gable/internal/salesdoc"
 	"github.com/gablelbm/gable/internal/units"
 	"github.com/gablelbm/gable/pkg/database"
 	"github.com/gablelbm/gable/pkg/middleware"
@@ -34,12 +35,17 @@ type ListFilter struct {
 	Limit      int
 }
 
-// ProductRef is the slice of a product a quote line defaults from.
+// ProductRef is the slice of a product a quote line defaults from. IsKit and
+// AverageCost ride along for the kit explosion and the margin: the first says
+// a line names a kit, the second is the cost basis of a product or component
+// line.
 type ProductRef struct {
-	ID          uuid.UUID
-	SKU         string
-	Description string
-	UOMPrimary  string
+	ID           uuid.UUID
+	SKU          string
+	Description  string
+	UOMPrimary   string
+	IsKit        bool
+	AverageCost  httpx.Price
 }
 
 // ProductUnitRow is one row of a product's unit set as a line's resolution
@@ -89,6 +95,9 @@ type Repository interface {
 	// and 4): the products' unit sets and the unit catalogue.
 	LookupProductUnits(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]ProductUnitSet, error)
 	LookupCatalogue(ctx context.Context, codes []string) (map[string]units.CatalogueUnit, error)
+	// LookupKitComponents reads the kit definitions the explosion reads (ADR
+	// 0005 section 2.6), through the caller's executor.
+	LookupKitComponents(ctx context.Context, kitIDs []uuid.UUID) (map[uuid.UUID][]salesdoc.KitComponent, error)
 	InsertQuote(ctx context.Context, q *Quote) error
 	GetQuote(ctx context.Context, id uuid.UUID) (*Quote, error)
 	// LockQuote takes the quote's row lock for the rest of the transaction,
@@ -134,17 +143,48 @@ func (r *PostgresRepository) LookupProducts(ctx context.Context, ids []uuid.UUID
 		return out, nil
 	}
 	rows, err := r.db.GetExecutor(ctx).Query(ctx,
-		`SELECT id, sku, description, uom_primary::text FROM products WHERE id = ANY($1)`, ids)
+		`SELECT id, sku, description, uom_primary::text, is_kit,
+		        ROUND(COALESCE(average_unit_cost, 0) * 10000)::bigint
+		 FROM products WHERE id = ANY($1)`, ids)
 	if err != nil {
 		return nil, fmt.Errorf("failed to look up products: %w", err)
 	}
 	defer rows.Close()
 	for rows.Next() {
 		var p ProductRef
-		if err := rows.Scan(&p.ID, &p.SKU, &p.Description, &p.UOMPrimary); err != nil {
+		var cost int64
+		if err := rows.Scan(&p.ID, &p.SKU, &p.Description, &p.UOMPrimary, &p.IsKit, &cost); err != nil {
 			return nil, fmt.Errorf("failed to scan product: %w", err)
 		}
+		p.AverageCost = httpx.Price(cost)
 		out[p.ID] = p
+	}
+	return out, rows.Err()
+}
+
+// LookupKitComponents reads the kit definitions of the given kit products
+// (ADR 0005 section 2.6): per one kit, in each component's own stocking unit.
+func (r *PostgresRepository) LookupKitComponents(ctx context.Context, kitIDs []uuid.UUID) (map[uuid.UUID][]salesdoc.KitComponent, error) {
+	out := make(map[uuid.UUID][]salesdoc.KitComponent, len(kitIDs))
+	if len(kitIDs) == 0 {
+		return out, nil
+	}
+	rows, err := r.db.GetExecutor(ctx).Query(ctx, `
+		SELECT kit_product_id, component_product_id, ROUND(quantity * 10000)::bigint, position
+		FROM product_kit_components WHERE kit_product_id = ANY($1)
+		ORDER BY kit_product_id, position`, kitIDs)
+	if err != nil {
+		return nil, fmt.Errorf("failed to look up kit components: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var k salesdoc.KitComponent
+		var qty int64
+		if err := rows.Scan(&k.KitProductID, &k.ComponentProductID, &qty, &k.Position); err != nil {
+			return nil, fmt.Errorf("failed to scan kit component: %w", err)
+		}
+		k.Quantity = httpx.Quantity(qty)
+		out[k.KitProductID] = append(out[k.KitProductID], k)
 	}
 	return out, rows.Err()
 }
@@ -377,7 +417,8 @@ func tsArg(t *httpx.Timestamp) any {
 }
 
 // insertLines writes q.Lines in order, with each line's stocking unit and
-// quantity and its tally rows (ADR 0006 sections 3.4 and 4.2). priorNotes
+// quantity and its tally rows (ADR 0006 sections 3.4 and 4.2), and the line
+// kind and parent link a kit's components carry (migration 156). priorNotes
 // carries the customer notes of lines whose id survives an edit.
 func (r *PostgresRepository) insertLines(ctx context.Context, q *Quote, priorNotes map[uuid.UUID]string) error {
 	exec := r.db.GetExecutor(ctx)
@@ -390,15 +431,19 @@ func (r *PostgresRepository) insertLines(ctx context.Context, q *Quote, priorNot
 		if note == "" {
 			note = priorNotes[line.ID]
 		}
+		lineType := line.LineType
+		if lineType == "" {
+			lineType = salesdoc.LineProduct
+		}
 		_, err := exec.Exec(ctx, `
 			INSERT INTO quote_lines (
-				id, quote_id, product_id, sku, description, customer_note,
+				id, quote_id, line_type, parent_line_id, product_id, sku, description, customer_note,
 				quantity, uom, price_uom, uom_qty, price_uom_qty, unit_price, line_total, position, created_at,
 				stock_uom, stock_quantity, board_thickness_in, board_width_in
-			) VALUES ($1, $2, $3, $4, $5, $6,
-				$7::numeric / 10000, $8, $9, $10::numeric / 10000, $11::numeric / 10000, $12::numeric / 10000, $13::numeric / 100, $14, $15,
-				$16, $17::numeric / 10000, $18::numeric / 10000, $19::numeric / 10000)`,
-			line.ID, line.QuoteID, lineProductID(line), line.SKU, line.Description, nullIfEmpty(note),
+			) VALUES ($1, $2, $3, $4, $5, $6, $7, $8,
+				$9::numeric / 10000, $10, $11, $12::numeric / 10000, $13::numeric / 10000, $14::numeric / 10000, $15::numeric / 100, $16, $17,
+				$18, $19::numeric / 10000, $20::numeric / 10000, $21::numeric / 10000)`,
+			line.ID, line.QuoteID, string(lineType), line.ParentLineID, lineProductID(line), line.SKU, line.Description, nullIfEmpty(note),
 			int64(line.Quantity), string(line.UOM), line.PriceUOM, int64(line.UOMQty), int64(line.PriceUOMQty),
 			int64(line.UnitPrice), int64(line.LineTotal), i, line.CreatedAt.Time,
 			line.StockUOM, qtyPtrArg(line.StockQuantity), qtyPtrArg(line.TallyThickness()), qtyPtrArg(line.TallyWidth()),
@@ -495,9 +540,10 @@ func (r *PostgresRepository) GetQuote(ctx context.Context, id uuid.UUID) (*Quote
 	q.ExposureLastCheckedAt = httpx.PtrTimestamp(exposureAt)
 
 	// Lines, with the product's average cost for the margin basis, the
-	// stocking fields of C3-2A-units and the tally rows.
+	// stocking fields of C3-2A-units, the line kind and parent link of a
+	// kit's components (migration 156), and the tally rows.
 	rows, err := r.db.GetExecutor(ctx).Query(ctx, `
-		SELECT ql.id, ql.quote_id, ql.product_id, ql.sku, ql.description, NULLIF(ql.customer_note, ''),
+		SELECT ql.id, ql.quote_id, ql.line_type, ql.parent_line_id, ql.product_id, ql.sku, ql.description, NULLIF(ql.customer_note, ''),
 		       ROUND(ql.quantity * 10000)::bigint, ql.uom::text, COALESCE(ql.price_uom, ql.uom::text),
 		       ROUND(ql.uom_qty * 10000)::bigint, ROUND(ql.price_uom_qty * 10000)::bigint,
 		       ROUND(ql.unit_price * 10000)::bigint, ROUND(COALESCE(p.average_unit_cost, 0) * 10000)::bigint,
@@ -518,16 +564,20 @@ func (r *PostgresRepository) GetQuote(ctx context.Context, id uuid.UUID) (*Quote
 	for rows.Next() {
 		var (
 			l                                            QuoteLine
-			uom                                          string
+			uom, lineType                                string
 			qty, uomQty, priceUomQty, price, cost, total int64
 			created                                      time.Time
 			stockQty                                     *int64
 			thick, width                                 *string
 		)
-		if err := rows.Scan(&l.ID, &l.QuoteID, &l.ProductID, &l.SKU, &l.Description, &l.CustomerNote,
+		if err := rows.Scan(&l.ID, &l.QuoteID, &lineType, &l.ParentLineID, &l.ProductID, &l.SKU, &l.Description, &l.CustomerNote,
 			&qty, &uom, &l.PriceUOM, &uomQty, &priceUomQty, &price, &cost, &total, &created,
 			&l.StockUOM, &stockQty, &thick, &width); err != nil {
 			return nil, fmt.Errorf("failed to scan quote line: %w", err)
+		}
+		l.LineType = salesdoc.LineType(lineType)
+		if l.LineType == "" {
+			l.LineType = salesdoc.LineProduct
 		}
 		l.UOM = productUOM(uom)
 		l.Quantity, l.UOMQty, l.PriceUOMQty = httpx.Quantity(qty), httpx.Quantity(uomQty), httpx.Quantity(priceUomQty)
@@ -602,7 +652,45 @@ func (r *PostgresRepository) GetQuote(ctx context.Context, id uuid.UUID) (*Quote
 			}
 		}
 	}
+	// The margin, from the components' cost (QE-05-a): a kit's cost is what
+	// its component lines carry, never the kit row's own average cost, so a
+	// kit quoted below its parts reads negative here. The arithmetic is the
+	// order's own cost read (order repository summaryColumns): the quantity
+	// in the stocking unit times the product's average cost, rounded once per
+	// line, summed over product and component lines only, and the margin is
+	// the document's total less that, so a converted quote's margin and its
+	// order's agree to the cent.
+	q.MarginTotalCents = q.TotalCents - lineCostsCents(q.Lines)
 	return q, nil
+}
+
+// lineCostsCents sums the cost a margin reads: every product and component
+// line with a product, the stocking quantity (the quantity when the line
+// carries no stocking pair) times the product's average cost, rounded once
+// per line to cents. A kit line carries none (its components carry it) and a
+// non stock line has no product to cost.
+func lineCostsCents(lines []QuoteLine) httpx.Cents {
+	one := httpx.Quantity(10000)
+	var total httpx.Cents
+	for i := range lines {
+		l := &lines[i]
+		if l.LineType != salesdoc.LineProduct && l.LineType != salesdoc.LineComponent {
+			continue
+		}
+		if l.ProductID == nil || l.UnitCost == 0 {
+			continue
+		}
+		qty := l.Quantity
+		if l.StockQuantity != nil {
+			qty = *l.StockQuantity
+		}
+		cost, err := httpx.Extend(qty, one, one, l.UnitCost)
+		if err != nil {
+			continue // an unextendable cost is no cost; a sale is never stopped by it
+		}
+		total += cost
+	}
+	return total
 }
 
 // tallyRowsOf maps the wire rows onto the arithmetic's input shape.

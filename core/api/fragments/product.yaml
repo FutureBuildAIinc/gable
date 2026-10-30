@@ -1251,7 +1251,7 @@ components:
         reorder_point, reorder_qty, on_hand, allocated, available, revision,
         created_at, updated_at, sale_uom, price_uom, purchase_uom,
         board_thickness_in, board_width_in, board_length_ft, random_length,
-        units, image_url, density_lb_per_cy, density_volume_state]
+        units, image_url, density_lb_per_cy, density_volume_state, is_kit]
       properties:
         id:
           type: string
@@ -1357,6 +1357,12 @@ components:
           description: >-
             The product's picture path while the catalog.product_images
             setting is on; null while it is off or the product has none.
+        is_kit:
+          type: boolean
+          description: >-
+            True when a line that names this product explodes into a kit line
+            and its component lines (ADR 0005 section 2.6). The definition
+            itself is the kit components route's.
         created_at:
           type: string
           format: date-time

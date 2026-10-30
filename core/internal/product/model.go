@@ -135,6 +135,13 @@ type Product struct {
 	// setting in its statement), nil for a product with none.
 	ImageURL *string `json:"-"`
 
+	// IsKit says the product is sold as a kit of other products (ADR 0005
+	// section 2.6): a line that names it explodes into a kit line and one
+	// component line per row of product_kit_components. Set by the kit
+	// components write (a non empty list makes a kit), read so a desk screen
+	// can mark one.
+	IsKit bool `json:"-"`
+
 	CreatedAt httpx.Timestamp `json:"-"`
 	UpdatedAt httpx.Timestamp `json:"-"`
 }
@@ -198,6 +205,11 @@ type View struct {
 	DensityLbPerCY     *httpx.Quantity `json:"density_lb_per_cy"`
 	DensityVolumeState *string         `json:"density_volume_state"`
 
+	// IsKit says a line that names this product explodes into a kit line and
+	// its component lines (ADR 0005 section 2.6): the mark a desk screen
+	// shows on a kit. The kit's definition is the kit components route's.
+	IsKit bool `json:"is_kit"`
+
 	// ImageURL is the product's picture path while the catalog.product_images
 	// setting is on; null when it is off or the product has no picture.
 	ImageURL *string `json:"image_url"`
@@ -248,7 +260,7 @@ func ViewOf(p *Product) View {
 		BoardThicknessIn: p.BoardThicknessIn, BoardWidthIn: p.BoardWidthIn,
 		BoardLengthFT: p.BoardLengthFT, RandomLength: p.RandomLength,
 		DensityLbPerCY: p.DensityLbPerCY, DensityVolumeState: p.DensityVolumeState,
-		Units: p.Units, ImageURL: p.ImageURL,
+		Units: p.Units, ImageURL: p.ImageURL, IsKit: p.IsKit,
 	}
 }
 

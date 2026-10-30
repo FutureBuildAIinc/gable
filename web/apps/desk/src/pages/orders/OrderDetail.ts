@@ -18,8 +18,20 @@ import { SalesTeamService } from '../../services/SalesTeamService.ts';
 import { type Order, type OrderStatus, formatOrderStatus, getStatusColor } from '../../types/order.ts';
 import type { SalesPerson } from '../../types/salesteam.ts';
 import type { Alert } from '../../types/customer.ts';
-import { Check, Printer, User, DollarSign, Mail, Phone, XCircle, LockOpen, Wallet } from 'lucide';
+import { Check, Printer, User, DollarSign, Mail, Phone, XCircle, LockOpen, Wallet, Boxes } from 'lucide';
 import { formatCents, formatPrice4 } from '../../lib/utils.ts';
+import { groupKitLines, isKitLine, type KitLineGroup } from '../../lib/kit-lines.ts';
+import type { OrderLine } from '../../types/order.ts';
+
+/**
+ * The order's lines with the kit's parts filed under the kit they belong to.
+ * A kit on an order is one kit line with a component line per part (ADR 0005
+ * sections 2.1 and 2.6); the parts carry the stock the kit draws on, so the
+ * dealer sees them indented under the kit rather than lost.
+ */
+function orderLineGroups(order: Order): KitLineGroup<OrderLine>[] {
+    return groupKitLines<OrderLine>(order.lines ?? []);
+}
 
 
 @customElement('gable-order-detail')
@@ -438,39 +450,58 @@ export class GableOrderDetail extends LitElement {
                                     </tr>
                                 </thead>
                                 <tbody class="divide-y divide-white/5">
-                                    ${order.lines?.filter(l => l.line_type !== 'component').map(line => html`
+                                    ${orderLineGroups(order).map(group => html`
                                         <tr>
                                             <td class="p-4 text-white">
                                                 <div class="font-mono text-sm">
-                                                    ${line.sku || line.charge_code || (line.line_type === 'text' ? 'Note' : line.description.slice(0, 24))}
-                                                    <span class="ml-2 text-[10px] uppercase tracking-wide text-zinc-500">${line.line_type}</span>
-                                                    ${line.price_source === 'override' ? html`<span class="ml-2 text-[10px] uppercase tracking-wide text-amber-400">override</span>` : ''}
-                                                    ${line.discount_percent !== null || line.discount_cents !== null ? html`<span class="ml-2 text-[10px] uppercase tracking-wide text-blue-400">discount</span>` : ''}
+                                                    ${group.line.sku || group.line.charge_code || (group.line.line_type === 'text' ? 'Note' : group.line.description.slice(0, 24))}
+                                                    <span class="ml-2 text-[10px] uppercase tracking-wide text-zinc-500">${group.line.line_type}</span>
+                                                    ${isKitLine(group.line) ? html`<span data-testid="order-kit-mark" class="ml-2 inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wide bg-gable-green/15 text-gable-green border border-gable-green/25">${icon(Boxes, 10, 'w-2.5 h-2.5')} Kit</span>` : ''}
+                                                    ${group.line.price_source === 'override' ? html`<span class="ml-2 text-[10px] uppercase tracking-wide text-amber-400">override</span>` : ''}
+                                                    ${group.line.discount_percent !== null || group.line.discount_cents !== null ? html`<span class="ml-2 text-[10px] uppercase tracking-wide text-blue-400">discount</span>` : ''}
                                                 </div>
-                                                <div class="text-xs text-muted-foreground">${line.description}</div>
+                                                <div class="text-xs text-muted-foreground">${group.line.description}</div>
                                             </td>
                                             <td class="p-4 text-white font-mono text-right">
-                                                ${line.quantity ?? '—'}
-                                                ${line.uom ? html`<span class="text-xs text-zinc-500 ml-1">${line.uom}</span>` : ''}
-                                                ${line.price_uom && line.uom && line.price_uom !== line.uom
-                                                    ? html`<div class="text-[10px] text-zinc-500">per ${line.price_uom}</div>` : ''}
+                                                ${group.line.quantity ?? '—'}
+                                                ${group.line.uom ? html`<span class="text-xs text-zinc-500 ml-1">${group.line.uom}</span>` : ''}
+                                                ${group.line.price_uom && group.line.uom && group.line.price_uom !== group.line.uom
+                                                    ? html`<div class="text-[10px] text-zinc-500">per ${group.line.price_uom}</div>` : ''}
                                             </td>
                                             <td class="p-4 font-mono text-right text-xs text-zinc-500" data-testid="line-stock">
-                                                ${line.line_type === 'product' && line.product_id !== null ? html`
-                                                    <div class="text-zinc-300">${line.quantity_allocated} allocated</div>
-                                                    ${line.quantity_backordered !== '0' ? html`<div class="text-amber-400">${line.quantity_backordered} back ordered</div>` : nothing}
-                                                    ${line.quantity_fulfilled !== '0' ? html`<div class="text-gable-green">${line.quantity_fulfilled} shipped</div>` : nothing}
+                                                ${group.line.line_type === 'product' && group.line.product_id !== null ? html`
+                                                    <div class="text-zinc-300">${group.line.quantity_allocated} allocated</div>
+                                                    ${group.line.quantity_backordered !== '0' ? html`<div class="text-amber-400">${group.line.quantity_backordered} back ordered</div>` : nothing}
+                                                    ${group.line.quantity_fulfilled !== '0' ? html`<div class="text-gable-green">${group.line.quantity_fulfilled} shipped</div>` : nothing}
                                                 ` : '—'}
                                             </td>
                                             <td class="p-4 text-white font-mono text-right">
-                                                ${line.unit_price_ten_thousandths !== null
-                                                    ? html`${formatPrice4(line.unit_price_ten_thousandths)}`
+                                                ${group.line.unit_price_ten_thousandths !== null
+                                                    ? html`${formatPrice4(group.line.unit_price_ten_thousandths)}`
                                                     : '—'}
                                             </td>
                                             <td class="p-4 text-gable-green font-mono text-right font-medium">
-                                                ${line.line_total_cents !== null ? formatCents(line.line_total_cents) : '—'}
+                                                ${group.line.line_total_cents !== null ? formatCents(group.line.line_total_cents) : '—'}
                                             </td>
                                         </tr>
+                                        ${group.components.map(part => html`
+                                            <tr data-testid="order-kit-component">
+                                                <td class="p-4 pl-10 text-zinc-300">
+                                                    <div class="font-mono text-sm">
+                                                        ${part.sku ?? ''}
+                                                        <span class="ml-2 text-[10px] uppercase tracking-wide text-zinc-600">part</span>
+                                                    </div>
+                                                    <div class="text-xs text-muted-foreground">${part.description}</div>
+                                                </td>
+                                                <td class="p-4 text-zinc-300 font-mono text-right">
+                                                    ${part.quantity ?? '—'}
+                                                    ${part.uom ? html`<span class="text-xs text-zinc-500 ml-1">${part.uom}</span>` : ''}
+                                                </td>
+                                                <td class="p-4 font-mono text-right text-xs text-zinc-600">—</td>
+                                                <td class="p-4 text-zinc-600 font-mono text-right">—</td>
+                                                <td class="p-4 text-zinc-600 font-mono text-right">—</td>
+                                            </tr>
+                                        `)}
                                     `)}
                                 </tbody>
                                 <tfoot class="bg-white/5">

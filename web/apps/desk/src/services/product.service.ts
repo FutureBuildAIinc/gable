@@ -6,7 +6,7 @@
  * every PATCH, integer ten thousandths prices, decimal string quantities and the one error
  * envelope. Every failure is thrown as an ApiError.
  */
-import type { Product, ProductCreate, ProductPage } from '../types/product';
+import type { Product, ProductCreate, ProductPage, KitComponentList } from '../types/product';
 import { fetchWithAuth } from './fetchClient';
 import { ifMatch, parseApiError } from './apiError';
 
@@ -126,6 +126,40 @@ export const ProductService = {
         const response = await expectOk(
             await fetchWithAuth(`${API_URL}/api/v1/products/${id}`),
             'Failed to fetch product',
+        );
+        return response.json();
+    },
+
+    /**
+     * A kit's definition (ADR 0005 section 2.6): what it holds per one kit, in
+     * each part's own stocking unit. The answer carries the product's revision,
+     * which the write below needs.
+     */
+    async getKitComponents(id: string): Promise<KitComponentList> {
+        const response = await expectOk(
+            await fetchWithAuth(`${API_URL}/api/v1/products/${id}/kit-components`),
+            'Failed to fetch the kit components',
+        );
+        return response.json();
+    },
+
+    /**
+     * Replaces a kit's whole component list at the product's revision (If-Match
+     * or the body revision, as every write). A non empty list makes the product
+     * a kit; an empty list clears the definition.
+     */
+    async putKitComponents(
+        id: string,
+        components: { component_product_id: string; quantity: string }[],
+        revision: number,
+    ): Promise<KitComponentList> {
+        const response = await expectOk(
+            await fetchWithAuth(`${API_URL}/api/v1/products/${id}/kit-components`, {
+                method: 'PUT',
+                headers: { ...JSON_HEADERS, 'If-Match': ifMatch(revision) },
+                body: JSON.stringify({ revision, components }),
+            }),
+            'Failed to save the kit components',
         );
         return response.json();
     },

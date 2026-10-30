@@ -1146,6 +1146,8 @@
             "description": "2x4x8 SPF Premium",
             "id": "<id-6>",
             "line_total_cents": 0,
+            "line_type": "product",
+            "parent_line_id": null,
             "price_uom": "PCS",
             "price_uom_qty": "1",
             "product_id": "<id-4>",
@@ -1166,6 +1168,8 @@
             "description": "Custom cedar bracket",
             "id": "<id-7>",
             "line_total_cents": 0,
+            "line_type": "product",
+            "parent_line_id": null,
             "price_uom": "EA",
             "price_uom_qty": "1",
             "product_id": null,
@@ -1181,7 +1185,7 @@
             "uom_qty": "1"
           }
         ],
-        "margin_total_cents": 0,
+        "margin_total_cents": -4200,
         "number": "Q-000034",
         "original_content_type": null,
         "original_filename": null,
@@ -1234,6 +1238,8 @@
             "description": "2x4x8 SPF Premium",
             "id": "<id-9>",
             "line_total_cents": 0,
+            "line_type": "product",
+            "parent_line_id": null,
             "price_uom": "PCS",
             "price_uom_qty": "1",
             "product_id": "<id-4>",
@@ -1249,7 +1255,7 @@
             "uom_qty": "1"
           }
         ],
-        "margin_total_cents": 0,
+        "margin_total_cents": -700,
         "number": "Q-000035",
         "original_content_type": null,
         "original_filename": null,

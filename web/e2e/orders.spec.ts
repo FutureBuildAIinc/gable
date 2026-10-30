@@ -38,9 +38,10 @@ async function firstCustomerAndProduct(request: import('@playwright/test').APIRe
   if (seeded) return seeded;
   const customers = (await (await request.get('/api/v1/customers?limit=200')).json()) as { items: { id: string; name: string; account_number: string }[] };
   const customer = customers.items.find((c) => !c.account_number.startsWith('E2E-'))!;
-  const products = (await (await request.get('/api/v1/products?limit=200')).json()) as { items: { id: string; sku: string; stock_uom: string }[] };
+  const products = (await (await request.get('/api/v1/products?limit=200')).json()) as { items: { id: string; sku: string; stock_uom: string; is_kit: boolean }[] };
   // The product list is the cursor envelope, newest first; the product spec adds E2E- SKUs.
-  const product = products.items.find((p) => !p.sku.startsWith('E2E-') && p.stock_uom === 'EA')!;
+  // A kit is not stocked, so it is skipped: this flow converts a one line quote.
+  const product = products.items.find((p) => !p.sku.startsWith('E2E-') && !p.is_kit && p.stock_uom === 'EA')!;
   seeded = { customer, product };
   return seeded;
 }
