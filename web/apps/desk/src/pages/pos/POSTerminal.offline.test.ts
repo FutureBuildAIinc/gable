@@ -194,6 +194,89 @@ describe('the counter when the connection drops', () => {
     el.remove();
   });
 
+  // ADR 0011 5.3: on reconnect the page drains the queue FIRST, then reads the
+  // unknown cart. A default linked offline sale still waiting means the cart
+  // has not been matched yet: it must stay result unknown, not return to the
+  // screen to be completed online a second time.
+  it('keeps the cart result unknown while the drain failed and a linked sale still waits', async () => {
+    localStorage.setItem('gable.pos.offline.unknown-cart.REG-01', 's1');
+    core.refuse['sync_offline_queue'] = { code: 'server_unreachable', message: 'The server cannot be reached' };
+    core.queue = { ...core.queue, waiting_count: 1, items: [{ device_seq: 1, state: 'waiting', reason_code: null, reason_message: null, invoice_id: null, invoice_number: null,
+      sale: { client_id: 'off-1', offline_ref: 'REG-01-2-000001', replaces_sale_id: 's1' } as never }] };
+    svc.getSale.mockResolvedValue(sale('open'));
+    const el = await mount();
+    await settle(el);
+    expect(localStorage.getItem('gable.pos.offline.unknown-cart.REG-01')).toBe('s1');
+    expect(svc.getSale).not.toHaveBeenCalled();
+    el.remove();
+  });
+
+  it('keeps the cart result unknown while the sync answered but a linked sale still waits', async () => {
+    localStorage.setItem('gable.pos.offline.unknown-cart.REG-01', 's1');
+    core.queue = { ...core.queue, waiting_count: 1, items: [{ device_seq: 1, state: 'pending', reason_code: null, reason_message: null, invoice_id: null, invoice_number: null,
+      sale: { client_id: 'off-1', offline_ref: 'REG-01-2-000001', replaces_sale_id: 's1' } as never }] };
+    core.sync = () => ({ sent: 1, posted: 0, refused: 0, held: 0, resolved: 0, errors: 1, confirmed_seq: 0, open_exception_count: 0, queue: core.queue });
+    svc.getSale.mockResolvedValue(sale('open'));
+    const el = await mount();
+    await settle(el);
+    expect(localStorage.getItem('gable.pos.offline.unknown-cart.REG-01')).toBe('s1');
+    expect(svc.getSale).not.toHaveBeenCalled();
+    el.remove();
+  });
+
+  // ADR 0011 5.3: a terminal call sent and not answered is result unknown
+  // too: the cart is never converted and no offline tender is offered for it.
+  it('does not carry a cart whose card is waiting at the terminal into the offline mode', async () => {
+    const el = await mount();
+    (el as unknown as { _cardIntent: unknown })._cardIntent = { id: 'ti-1', state: 'pending_at_device', amount_cents: 8650 };
+    goOffline();
+    await settle(el);
+    const offline = q(el, 'pos-offline-mode') as HTMLElement & { seed: unknown; unknownCartId: string | null };
+    expect(offline).toBeTruthy();
+    expect(offline.seed).toBeNull();
+    expect(offline.unknownCartId).toBe('s1');
+    expect(localStorage.getItem('gable.pos.offline.unknown-card.REG-01')).toBe('ti-1');
+    el.remove();
+  });
+
+  it('does not carry a cart whose card read was in flight when the connection dropped', async () => {
+    const el = await mount();
+    svc.getTerminalIntent.mockImplementation(() => new Promise(() => {}));
+    void (el as unknown as { _watchCard(id: string): Promise<void> })._watchCard('ti-2');
+    goOffline();
+    await settle(el);
+    const offline = q(el, 'pos-offline-mode') as HTMLElement & { seed: unknown; unknownCartId: string | null };
+    expect(offline.seed).toBeNull();
+    expect(offline.unknownCartId).toBe('s1');
+    el.remove();
+  });
+
+  it('reads the unknown cart\'s card leg on reconnect and keeps the cart unknown while the terminal holds it', async () => {
+    localStorage.setItem('gable.pos.offline.unknown-cart.REG-01', 's1');
+    localStorage.setItem('gable.pos.offline.unknown-card.REG-01', 'ti-1');
+    svc.getTerminalIntent.mockResolvedValue({ id: 'ti-1', state: 'pending_at_device', amount_cents: 8650 });
+    svc.getSale.mockResolvedValue(sale('open'));
+    const el = await mount();
+    await settle(el);
+    expect(svc.getTerminalIntent).toHaveBeenCalledWith('ti-1');
+    expect(svc.getSale).not.toHaveBeenCalled();
+    expect(localStorage.getItem('gable.pos.offline.unknown-cart.REG-01')).toBe('s1');
+    el.remove();
+  });
+
+  it('settles the unknown cart once its card leg is answered', async () => {
+    localStorage.setItem('gable.pos.offline.unknown-cart.REG-01', 's1');
+    localStorage.setItem('gable.pos.offline.unknown-card.REG-01', 'ti-1');
+    svc.getTerminalIntent.mockResolvedValue({ id: 'ti-1', state: 'declined', amount_cents: 8650 });
+    svc.getSale.mockResolvedValue(sale('open'));
+    const el = await mount();
+    await settle(el);
+    expect(svc.getSale).toHaveBeenCalledWith('s1');
+    expect(localStorage.getItem('gable.pos.offline.unknown-cart.REG-01')).toBeNull();
+    expect(localStorage.getItem('gable.pos.offline.unknown-card.REG-01')).toBeNull();
+    el.remove();
+  });
+
   it('keeps the online only refusal in a browser tab, which has no core', async () => {
     setOfflineInvoke(null);
     const el = await mount();
