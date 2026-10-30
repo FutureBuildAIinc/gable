@@ -19,6 +19,8 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -73,6 +75,7 @@ func (f *fixture) resetIndexSource() {
 func TestQE07_IndexSourceDefaultsManual(t *testing.T) {
 	f := newFixture(t)
 	f.resetIndexSource()
+	t.Cleanup(f.resetIndexSource)
 	get := f.do("GET", "/api/v1/admin/settings/market-index-source", nil)
 	if get.status != http.StatusOK {
 		t.Fatalf("GET = %d: %s", get.status, get.raw)
@@ -121,6 +124,10 @@ func TestQE07_IndexSourceKeyNeverReturned(t *testing.T) {
 	// this test reads, so the service gets the real logger.
 	f.svc.WithAuditLog(audit.NewLogger(f.db))
 	f.resetIndexSource()
+	// The settings row is one row for the whole database, so this test puts
+	// it back the way it found it: another package may read it while this
+	// one runs.
+	t.Cleanup(f.resetIndexSource)
 
 	// A write with no precondition is refused, nothing written.
 	bare := f.do("PUT", "/api/v1/admin/settings/market-index-source",
@@ -279,6 +286,7 @@ func TestQE07_IndexSourceKeyNeverReturned(t *testing.T) {
 func TestQE07_IndexSourceFeedRefusals(t *testing.T) {
 	f := newFixture(t)
 	f.resetIndexSource()
+	t.Cleanup(f.resetIndexSource)
 	for name, body := range map[string]map[string]any{
 		"a relative address":  {"feed_url": "connect.example.test/feed"},
 		"a plaintext address": {"feed_url": "http://connect.example.test/feed"},
@@ -290,6 +298,36 @@ func TestQE07_IndexSourceFeedRefusals(t *testing.T) {
 		put := f.do("PUT", "/api/v1/admin/settings/market-index-source", body, "If-Match", `"1"`)
 		if put.status != http.StatusBadRequest {
 			t.Errorf("PUT with %s = %d, want 400", name, put.status)
+		}
+	}
+}
+
+// RULE: the contract's settings document names no secret either. The
+// document is the only way the settings are read, so a schema that named
+// the URL or the key would be a way to read them whatever the model says.
+func TestQE07_IndexSourceContractNamesNoSecret(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("..", "..", "api", "openapi.yaml"))
+	if err != nil {
+		t.Fatalf("read the contract: %v", err)
+	}
+	doc := string(raw)
+	start := strings.Index(doc, "    MarketIndexSourceSettings:")
+	if start < 0 {
+		t.Fatal("the contract names no MarketIndexSourceSettings schema")
+	}
+	end := strings.Index(doc[start:], "\n    AdminSaveMarketIndexSourceRequest:")
+	if end < 0 {
+		t.Fatal("the contract's settings schema has no end")
+	}
+	schema := doc[start : start+end]
+	for _, forbidden := range []string{"feed_url:", "feed_key:", "feed_key_hint:"} {
+		if strings.Contains(schema, forbidden) {
+			t.Errorf("the settings schema names %s: %s", forbidden, schema)
+		}
+	}
+	for _, wanted := range []string{"feed_url_set:", "feed_key_set:", "feed_key_header:"} {
+		if !strings.Contains(schema, wanted) {
+			t.Errorf("the settings schema does not name %s: %s", wanted, schema)
 		}
 	}
 }
