@@ -26,9 +26,10 @@ func TestDecide235_HeldSaleSoldPastAWarningIsReoffered(t *testing.T) {
 	f := newFixture(t, testutil.RequireDB(t))
 	offlinePolicyOn(t, f)
 	b := newOfflineBench(t, f)
+	alert := uuid.New()
 	mustExec(t, f.db, `INSERT INTO customer_alerts (id, customer_id, kind, text, show_at_counter, acknowledge_required,
 		created_by, created_at) VALUES ($1, $2, 'warning', 'check the yard first', TRUE, TRUE, 'office', NOW())`,
-		uuid.New(), f.customerID)
+		alert, f.customerID)
 	r1, s1 := b.build(t, saleSpec{lines: []offlineLine{line(f.productID, "1")}})
 	r2, s2 := b.build(t, saleSpec{lines: []offlineLine{line(f.productID, "1")}})
 	r3, s3 := b.build(t, saleSpec{customer: uuidPtr(f.customerID), lines: []offlineLine{line(f.productID, "1")}})
@@ -46,6 +47,15 @@ func TestDecide235_HeldSaleSoldPastAWarningIsReoffered(t *testing.T) {
 	wantOutcome(t, res, s3, pos.OfflinePosted, "")
 	if seq, _ := b.deviceMark(t); seq != 3 {
 		t.Errorf("mark = %d, want 3", seq)
+	}
+	// the sale's one exception row carries the warning, open for a manager
+	if n := countOf(t, f.db, `SELECT count(*) FROM pos_offline_exceptions WHERE sale_id = $1`, s3.ClientID); n != 1 {
+		t.Errorf("%d exception rows for the held sale, want 1", n)
+	}
+	if n := countOf(t, f.db, `SELECT count(*) FROM pos_offline_exceptions WHERE sale_id = $1
+		AND reason_code = 'sold_past_warning' AND status = 'open' AND posted_sale_id = $1 AND warning_alert_id = $2
+		AND warning_alert_ids = jsonb_build_array($2::text)`, s3.ClientID, alert); n != 1 {
+		t.Errorf("the held sale's row does not carry the warning it was sold past, open")
 	}
 }
 
