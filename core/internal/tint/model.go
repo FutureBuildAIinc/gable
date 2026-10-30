@@ -112,3 +112,13 @@ type SavedColor struct {
 	CreatedBy  string     `json:"created_by"`
 	CreatedAt  Timestamp  `json:"created_at"`
 }
+
+// BaseUpdate is a partial change to a base. SetProduct says the product link
+// is named: a nil ProductID then clears it. The code and system never change.
+type BaseUpdate struct {
+	Name         *string
+	SetProduct   bool
+	ProductID    *uuid.UUID
+	FillVolumeOZ *int
+	IsDeepest    *bool
+}

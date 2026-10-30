@@ -4,11 +4,32 @@
 package tint
 
 import (
+	"encoding/json"
+	"net/http"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/gablelbm/gable/internal/platform/httpx"
 )
+
+// maxBaseName is the paint_bases.name column's CHECK bound, in characters.
+const maxBaseName = 120
+
+// unprocessable is a 422 whose details name the one field the caller must fix.
+func unprocessable(field, message string) *httpx.Error {
+	return &httpx.Error{Status: http.StatusUnprocessableEntity, Code: httpx.CodeValidationFailed,
+		Message: "one or more fields failed validation",
+		Details: []httpx.FieldError{{Field: field, Message: message}}}
+}
+
+// checkBaseName refuses a name the column would, before the store is reached.
+func checkBaseName(name string) error {
+	if utf8.RuneCountInString(name) > maxBaseName {
+		return unprocessable("name", "must be at most 120 characters")
+	}
+	return nil
+}
 
 // systemRequest is POST /api/v1/tint/systems.
 type systemRequest struct {
@@ -72,6 +93,9 @@ func (r *baseRequest) parse() (*BaseDraft, error) {
 	}
 	v.Required("code", d.Code)
 	v.Required("name", d.Name)
+	if err := checkBaseName(d.Name); err != nil {
+		return nil, err
+	}
 	if r.ManufacturerBaseCode != nil {
 		d.ManufacturerBaseCode = *r.ManufacturerBaseCode
 	}
@@ -309,4 +333,44 @@ func deref(s *string) string {
 		return ""
 	}
 	return *s
+}
+
+// baseUpdateRequest is PATCH /api/v1/tint/bases/{id}. Every field is optional;
+// product_id is raw so an absent key (leave the link) differs from null (clear it).
+type baseUpdateRequest struct {
+	Name         *string         `json:"name"`
+	ProductID    json.RawMessage `json:"product_id"`
+	FillVolumeOZ *int            `json:"fill_volume_oz"`
+	IsDeepest    *bool           `json:"is_deepest"`
+}
+
+func (r *baseUpdateRequest) parse() (*BaseUpdate, error) {
+	v := &httpx.Validator{}
+	u := &BaseUpdate{Name: r.Name, FillVolumeOZ: r.FillVolumeOZ, IsDeepest: r.IsDeepest}
+	if r.ProductID != nil {
+		u.SetProduct = true
+		if string(r.ProductID) != "null" {
+			var raw string
+			if err := json.Unmarshal(r.ProductID, &raw); err != nil {
+				v.Check(false, "product_id", "must be a product id or null")
+			} else if id, ok := v.UUID("product_id", &raw, true); ok {
+				u.ProductID = &id
+			}
+		}
+	}
+	if r.Name != nil {
+		v.Required("name", *r.Name)
+		if err := checkBaseName(*r.Name); err != nil {
+			return nil, err
+		}
+	}
+	if r.FillVolumeOZ != nil {
+		v.Check(*r.FillVolumeOZ > 0, "fill_volume_oz", "must be a positive whole number of ounces")
+	}
+	v.Check(u.SetProduct || r.Name != nil || r.FillVolumeOZ != nil || r.IsDeepest != nil,
+		"body", "names no field to change")
+	if err := v.Err(); err != nil {
+		return nil, err
+	}
+	return u, nil
 }

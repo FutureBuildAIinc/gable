@@ -117,3 +117,48 @@ func TestTintSavedColoursReadCarriesTheCustomerWall(t *testing.T) {
 		t.Errorf("the dealer wide read lost another customer's saved colour: %s", buf)
 	}
 }
+
+// RULE: the base update is a catalogue write (row CP-16, item 341): admin and
+// owner change a base and its product link, and no other desk role does, the
+// cashier included.
+func TestTintBaseUpdateIsAdminAndOwnerOnly(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	db := testutil.RequireDB(t)
+	f := newWallFixture(t, db, true)
+	A := f.branchA.String()
+	sys, _ := seedTintColor(t, f)
+	base := uuid.New()
+	if _, err := f.db.Pool.Exec(t.Context(), `INSERT INTO paint_bases (id, tint_system_id, code, name, fill_volume_oz)
+		VALUES ($1, $2, 'DEEP', 'Deep base', 122)`, base, sys); err != nil {
+		t.Fatalf("seed base: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = f.db.Pool.Exec(context.Background(), `DELETE FROM paint_bases WHERE id = $1`, base)
+	})
+	path := "/api/v1/tint/bases/" + base.String()
+	body := `{"name":"Deep base, walled"}`
+	for _, role := range []string{"cashier", "sales", "warehouse", "finance", "purchasing"} {
+		if got := f.call(t, "PATCH", path, body, role, "u-a", A); got != http.StatusForbidden {
+			t.Errorf("%s updating a base = %d, want 403", role, got)
+		}
+	}
+	for _, role := range []string{"admin", "owner"} {
+		if got := f.call(t, "PATCH", path, body, role, "u-a", A); got != http.StatusOK {
+			t.Errorf("%s updating a base = %d, want 200", role, got)
+		}
+	}
+	if got := f.call(t, "PATCH", "/api/v1/tint/bases/"+uuid.NewString(), body, "admin", "u-a", A); got != http.StatusNotFound {
+		t.Errorf("updating an unknown base = %d, want 404", got)
+	}
+	for what, body := range map[string]string{
+		"an unknown product": `{"product_id":"` + uuid.NewString() + `"}`,
+		"a long name":        `{"name":"` + strings.Repeat("n", 121) + `"}`,
+	} {
+		if got := f.call(t, "PATCH", path, body, "admin", "u-a", A); got != http.StatusUnprocessableEntity {
+			t.Errorf("updating a base with %s = %d, want 422", what, got)
+		}
+	}
+	if got := f.call(t, "PATCH", path, `{}`, "admin", "u-a", A); got != http.StatusUnprocessableEntity && got != http.StatusBadRequest {
+		t.Errorf("an empty update = %d, want a 4xx refusal", got)
+	}
+}

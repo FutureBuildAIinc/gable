@@ -202,7 +202,7 @@ describe('router: role gate', () => {
 
   it('gates the counter rules and market indices pages to admin and owner', async () => {
     const { routes } = await import('../routes')
-    for (const path of ['/admin/counter-rules', '/admin/market-indices']) {
+    for (const path of ['/admin/counter-rules', '/admin/tint-catalogue', '/admin/market-indices']) {
       expect(routes.find((r) => r.path === path)?.roles).toEqual(ADMIN_OWNER)
     }
   })

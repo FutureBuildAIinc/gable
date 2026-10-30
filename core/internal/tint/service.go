@@ -43,6 +43,8 @@ func httpErr(err error) error {
 	switch {
 	case errors.Is(err, ErrNotFound):
 		return httpx.NotFound("no such tint row")
+	case errors.Is(err, ErrUnknownProduct):
+		return unprocessable("product_id", "names no product")
 	case errors.Is(err, ErrDuplicate):
 		return &httpx.Error{Status: 409, Code: httpx.CodeDuplicate,
 			Message: "a tint row with this key already exists"}
@@ -71,6 +73,16 @@ func (s *Service) CreateBase(ctx context.Context, d *BaseDraft) (*Base, error) {
 	err := s.inTx(ctx, func(ctx context.Context) error {
 		var err error
 		out, err = s.repo.CreateBase(ctx, d)
+		return err
+	})
+	return out, httpErr(err)
+}
+
+func (s *Service) UpdateBase(ctx context.Context, id uuid.UUID, u *BaseUpdate) (*Base, error) {
+	var out *Base
+	err := s.inTx(ctx, func(ctx context.Context) error {
+		var err error
+		out, err = s.repo.UpdateBase(ctx, id, u)
 		return err
 	})
 	return out, httpErr(err)

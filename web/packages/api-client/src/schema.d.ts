@@ -10197,6 +10197,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/tint/bases/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Update a base
+         * @description Changes the fields the body names. A product_id sets the link to the stocked base paint can the counter sells; null clears it. The code and the tint system never change. A product_id naming no product, or a name over 120 characters, answers 422 with a field error. Admin and owner.
+         */
+        patch: operations["tintBaseUpdate"];
+        trace?: never;
+    };
     "/api/v1/tint/colorants": {
         parameters: {
             query?: never;
@@ -22286,6 +22306,13 @@ export interface components {
             /** Format: uuid */
             product_id?: string;
             fill_volume_oz: number;
+            is_deepest?: boolean;
+        };
+        TintBaseUpdate: {
+            name?: string;
+            /** Format: uuid */
+            product_id?: string | null;
+            fill_volume_oz?: number;
             is_deepest?: boolean;
         };
         TintBasePage: {
@@ -43840,6 +43867,39 @@ export interface operations {
             400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            422: components["responses"]["UnprocessableEntity"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    tintBaseUpdate: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TintBaseUpdate"];
+            };
+        };
+        responses: {
+            /** @description The updated base. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TintBase"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalError"];
         };
     };

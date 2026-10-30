@@ -30,6 +30,7 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux, read, write, counter func(h
 	mux.Handle("POST /api/v1/tint/systems", write(http.HandlerFunc(h.handleCreateSystem)))
 	mux.Handle("GET /api/v1/tint/bases", read(http.HandlerFunc(h.handleListBases)))
 	mux.Handle("POST /api/v1/tint/bases", write(http.HandlerFunc(h.handleCreateBase)))
+	mux.Handle("PATCH /api/v1/tint/bases/{id}", write(http.HandlerFunc(h.handleUpdateBase)))
 	mux.Handle("GET /api/v1/tint/colorants", read(http.HandlerFunc(h.handleListColorants)))
 	mux.Handle("POST /api/v1/tint/colorants", write(http.HandlerFunc(h.handleCreateColorant)))
 	mux.Handle("GET /api/v1/tint/colors", read(http.HandlerFunc(h.handleListColors)))
@@ -135,6 +136,30 @@ func (h *Handler) handleCreateBase(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Location", "/api/v1/tint/bases/"+out.Code)
 	writeJSON(w, http.StatusCreated, out)
+}
+
+func (h *Handler) handleUpdateBase(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
+		httpx.WriteError(w, r, httpx.NotFound("no such tint row"))
+		return
+	}
+	var req baseUpdateRequest
+	if err := httpx.DecodeJSON(r, &req); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	update, err := req.parse()
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	out, err := h.service.UpdateBase(r.Context(), id, update)
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 func (h *Handler) handleListColorants(w http.ResponseWriter, r *http.Request) {

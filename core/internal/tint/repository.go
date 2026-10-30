@@ -20,6 +20,10 @@ import (
 // ErrNotFound is the repository's answer for a row that does not exist.
 var ErrNotFound = errors.New("tint row not found")
 
+// ErrUnknownProduct is the repository's answer for a base whose product_id
+// names no product: a refusal of the request's own field, not a missing row.
+var ErrUnknownProduct = errors.New("no such product")
+
 // ErrDuplicate is a unique key another row already holds.
 var ErrDuplicate = errors.New("a tint row with this key already exists")
 
@@ -86,6 +90,7 @@ type Repository interface {
 	CreateSystem(ctx context.Context, d *SystemDraft) (*System, error)
 	ListBases(ctx context.Context, systemID, productID *uuid.UUID) ([]Base, error)
 	CreateBase(ctx context.Context, d *BaseDraft) (*Base, error)
+	UpdateBase(ctx context.Context, id uuid.UUID, u *BaseUpdate) (*Base, error)
 	ListColorants(ctx context.Context, systemID *uuid.UUID) ([]Colorant, error)
 	CreateColorant(ctx context.Context, d *ColorantDraft) (*Colorant, error)
 	ListColors(ctx context.Context, systemID *uuid.UUID, q string) ([]Color, error)
@@ -124,6 +129,16 @@ func mapInsert(err error, what string) error {
 		}
 	}
 	return fmt.Errorf("%s: %w", what, err)
+}
+
+// mapBaseWrite is mapInsert for a base write, where a foreign key violation on
+// product_id is the caller's field to fix, not a missing tint row.
+func mapBaseWrite(err error, what string) error {
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && pgErr.Code == "23503" && pgErr.ConstraintName == "paint_bases_product_id_fkey" {
+		return ErrUnknownProduct
+	}
+	return mapInsert(err, what)
 }
 
 func notFound(err error) error {
@@ -198,9 +213,31 @@ func (r *PostgresRepository) CreateBase(ctx context.Context, d *BaseDraft) (*Bas
 		d.TintSystemID, d.Code, d.Name, d.ManufacturerBaseCode, d.ProductID, d.FillVolumeOZ, d.IsDeepest).
 		Scan(&b.ID, &b.CreatedAt)
 	if err != nil {
-		return nil, mapInsert(err, "failed to create the base")
+		return nil, mapBaseWrite(err, "failed to create the base")
 	}
 	return b, nil
+}
+
+func (r *PostgresRepository) UpdateBase(ctx context.Context, id uuid.UUID, u *BaseUpdate) (*Base, error) {
+	var b Base
+	err := r.db.GetExecutor(ctx).QueryRow(ctx, `
+		UPDATE paint_bases SET
+		    name           = COALESCE($2, name),
+		    product_id     = CASE WHEN $3 THEN $4::uuid ELSE product_id END,
+		    fill_volume_oz = COALESCE($5, fill_volume_oz),
+		    is_deepest     = COALESCE($6, is_deepest)
+		WHERE id = $1
+		RETURNING id, tint_system_id, code, name, manufacturer_base_code, product_id, fill_volume_oz, is_deepest, created_at`,
+		id, u.Name, u.SetProduct, u.ProductID, u.FillVolumeOZ, u.IsDeepest).
+		Scan(&b.ID, &b.TintSystemID, &b.Code, &b.Name, &b.ManufacturerBaseCode, &b.ProductID,
+			&b.FillVolumeOZ, &b.IsDeepest, &b.CreatedAt)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, mapBaseWrite(err, "failed to update the base")
+	}
+	return &b, nil
 }
 
 func (r *PostgresRepository) ListColorants(ctx context.Context, systemID *uuid.UUID) ([]Colorant, error) {

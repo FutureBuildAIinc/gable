@@ -29,6 +29,14 @@ async function post<T>(path: string, body: unknown, fallback: string): Promise<T
     }), fallback)).json();
 }
 
+async function send<T>(method: 'PATCH', path: string, body: unknown, fallback: string): Promise<T> {
+    return (await expectOk(await fetchWithAuth(`${API_URL}${path}`, {
+        method,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+    }), fallback)).json();
+}
+
 export interface TintSystem {
     id: string;
     code: string;
@@ -96,7 +104,41 @@ export interface TintSavedColor {
     note: string;
 }
 
+/** The fields the base update may change; product_id null clears the link. */
+export interface TintBaseUpdate {
+    name?: string;
+    product_id?: string | null;
+    fill_volume_oz?: number;
+    is_deepest?: boolean;
+}
+
+export interface TintFormulaDraft {
+    color_id: string;
+    base_id: string;
+    container_size_code: string;
+    container_volume_oz: number;
+    source: string;
+    components: { colorant_id: string; whole_oz: number; increments_coarse: number; increments_fine: number; unit_denominator: number }[];
+}
+
 export const tintService = {
+    createSystem: (body: { code: string; name: string; manufacturer?: string; unit_denominator: number; unit_label?: string }) =>
+        post<TintSystem>('/api/v1/tint/systems', body, 'Failed to create the tint system'),
+    createBase: (body: { tint_system_id: string; code: string; name: string; fill_volume_oz: number; product_id?: string; is_deepest?: boolean }) =>
+        post<TintBase>('/api/v1/tint/bases', body, 'Failed to create the base'),
+    /** Changes a base: the link to its stocked base paint product, or its name, fill and tier. */
+    updateBase: (id: string, body: TintBaseUpdate) =>
+        send<TintBase>('PATCH', `/api/v1/tint/bases/${id}`, body, 'Failed to update the base'),
+    colorants: (tintSystemId?: string) =>
+        get<{ items: TintColorant[] }>(`/api/v1/tint/colorants${tintSystemId ? `?tint_system_id=${tintSystemId}` : ''}`,
+            'Failed to read the colorants'),
+    createColorant: (body: { tint_system_id: string; code: string; name: string }) =>
+        post<TintColorant>('/api/v1/tint/colorants', body, 'Failed to create the colorant'),
+    createColor: (body: { tint_system_id: string; manufacturer_code?: string; name: string }) =>
+        post<TintColor>('/api/v1/tint/colors', body, 'Failed to create the colour'),
+    createFormula: (body: TintFormulaDraft) =>
+        post<TintFormula>('/api/v1/tint/formulas', body, 'Failed to create the formula'),
+
     systems: () => get<{ items: TintSystem[] }>('/api/v1/tint/systems', 'Failed to read the tint systems'),
     bases: (params: { product_id?: string; tint_system_id?: string } = {}) => {
         const q = new URLSearchParams(Object.entries(params).filter(([, v]) => v) as [string, string][]);

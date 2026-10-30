@@ -86,6 +86,7 @@ export const routes: RouteConfig[] = [
   { path: '/admin/branches', load: () => import('./pages/admin/branches/Branches.ts'), layout: 'erp' },
   { path: '/admin/tax-zones', load: () => import('./pages/admin/taxzones/TaxZones.ts'), layout: 'erp', roles: ADMIN_OWNER_FINANCE },
   { path: '/admin/market-indices', load: () => import('./pages/admin/MarketIndices.ts'), layout: 'erp', roles: ADMIN_OWNER },
+  { path: '/admin/tint-catalogue', load: () => import('./pages/admin/TintCatalogue.ts'), layout: 'erp', roles: ADMIN_OWNER },
   { path: '/admin/counter-rules', load: () => import('./pages/admin/CounterRules.ts'), layout: 'erp', roles: ADMIN_OWNER },
   { path: '/admin/offline-counter', load: () => import('./pages/admin/OfflineCounter.ts'), layout: 'erp', roles: ADMIN_OWNER_FINANCE },
   { path: '/admin', load: () => import('./pages/admin/tech_admin/TechAdminPage.ts'), layout: 'erp', roles: ADMIN_OWNER },
