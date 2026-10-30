@@ -383,7 +383,13 @@ only (section 4); the one time secret it brings back is spent by the core.
   (the magic link's included) per client address and per email, and the
   shell's code redemption and refresh per
   client address, refusing past the limit with the same fixed answer plus
-  `Retry-After`. The portal login keeps its own limiter.
+  `Retry-After`. The portal login keeps its own limiter. Read at source in
+  the pinned Appwrite 2.1.0: it has no account lockout (a wrong password and
+  an unknown email both answer invalid credentials, and nothing is counted),
+  and its route abuse limit is skipped for API key calls, so the core's
+  limiter is the only guard. Appwrite answers an unknown email sooner than a
+  wrong password; the core's answers are identical and the shared budget
+  bounds probing, but the timing is not made constant.
 - **Audit.** Sign in, every refusal (with the attempted email and a fixed
   reason, never the password), sign out, a revocation at refresh (removal,
   block or deletion), a shell refresh token rotation and a reuse that
@@ -421,8 +427,8 @@ only (section 4); the one time secret it brings back is spent by the core.
   Appwrite. Email and password is posted from the shell's own door to the
   core's `POST /api/v1/auth/shell/signin`, which answers the shell's token
   pair in the body, never a cookie, and refuses any request that carries an
-  `Origin` (every browser POST does), so no page can use it. Every redirect method opens the system browser on the core's start
-  route with a PKCE challenge (S256) and the shell's return target; the core
+  `Origin` (every browser POST does), so no page can use it. Every redirect
+  method opens the system browser on the core's start route with a PKCE challenge (S256) and the shell's return target; the core
   runs the sign in and finishes by redirecting to the shell with a one time
   code. The core accepts as the return target only the registered `gable`
   scheme with its fixed callback path, or `http://127.0.0.1:<port>` or
