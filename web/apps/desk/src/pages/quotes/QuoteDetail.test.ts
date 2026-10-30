@@ -280,3 +280,22 @@ describe('QuoteDetail original blob lifecycle', () => {
   })
 })
 
+describe('QuoteDetail Convert button', () => {
+  async function detailWith(status: string) {
+    fetchMock.mockImplementation(async (url: string) => {
+      const path = new URL(url, 'http://localhost').pathname
+      if (path === '/api/v1/quotes/q1') return jsonResponse({ ...QUOTE, status })
+      return jsonResponse({ message: 'none' }, 404)
+    })
+    return detail()
+  }
+  const convert = (el: HTMLElement) => Array.from(el.querySelectorAll('button')).find((b) => text(b).includes('Convert to Order'))
+
+  it.each(['draft', 'sent', 'accepted'])('shows Convert to Order on a %s quote', async (status) => {
+    expect(convert(await detailWith(status))).toBeDefined()
+  })
+
+  it.each(['rejected', 'expired'])('hides Convert to Order on a %s quote', async (status) => {
+    expect(convert(await detailWith(status))).toBeUndefined()
+  })
+})

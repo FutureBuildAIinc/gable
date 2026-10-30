@@ -9,6 +9,7 @@ export default {
   content: [
     './index.html',
     './customer.html',
+    './dealer.html',
     './src/**/*.{ts,tsx,js,jsx}',
     '../../packages/design-system/src/**/*.{ts,tsx,js,jsx}',
   ],

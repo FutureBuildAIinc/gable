@@ -6,9 +6,10 @@ import { defineConfig, type Plugin } from 'vite'
 
 function publicQuoteRoute(): Plugin {
   const rewrite = (req: { url?: string }, _res: unknown, next: () => void) => {
-    if (req.url?.startsWith('/q/')) {
+    const entry = req.url?.startsWith('/q/') ? '/customer.html' : req.url?.startsWith('/dq/') ? '/dealer.html' : null
+    if (entry !== null && req.url !== undefined) {
       const query = req.url.indexOf('?')
-      req.url = `/customer.html${query >= 0 ? req.url.slice(query) : ''}`
+      req.url = `${entry}${query >= 0 ? req.url.slice(query) : ''}`
     }
     next()
   }
@@ -33,6 +34,7 @@ export default defineConfig({
       input: {
         main: resolve(__dirname, 'index.html'),
         customer: resolve(__dirname, 'customer.html'),
+        dealer: resolve(__dirname, 'dealer.html'),
       },
     },
   },
