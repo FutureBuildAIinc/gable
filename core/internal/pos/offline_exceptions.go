@@ -471,6 +471,16 @@ func (s *Service) acceptedVerdict(ctx context.Context, branch uuid.UUID, it *off
 	if reg == nil || *reg != branch {
 		return nil, refuse("out_of_wall", "the sale's register is not of the exception's branch")
 	}
+	// An accept judges no price, tax or cap again, but it posts through the
+	// completion with no charge, so a tender no terminal ran (a card) is
+	// never posted from a stored sale (CP-05 P3-4).
+	for _, t := range sale.Tenders {
+		switch m := strings.ToLower(strings.TrimSpace(t.Method)); m {
+		case "cash", "check", "account":
+		default:
+			return nil, refuse("tender_not_offline", "a %s tender is not taken offline", m)
+		}
+	}
 	return &offlineVerdict{snapshotID: snapID, taxCents: sale.TaxCents, taxRate: sale.TaxRate, exempt: sale.TaxExempt,
 		businessDate: session.BusinessDate, item: it}, nil
 }
