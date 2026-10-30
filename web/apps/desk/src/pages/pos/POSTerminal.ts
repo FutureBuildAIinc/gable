@@ -400,7 +400,7 @@ export class POSTerminal extends LitElement {
     const s = authCustody.session;
     if (s === null) return { key: 'anon', cashierId: NIL };
     if (s.kind === 'dev') return { key: `dev-${s.name}`, cashierId: NIL };
-    const sub = s.claims.sub ?? '';
+    const sub = s.kind === 'staff' ? s.sub : (s.claims.sub ?? '');
     const isId = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(sub);
     return { key: sub !== '' ? sub : 'anon', cashierId: isId ? sub.toLowerCase() : NIL };
   }

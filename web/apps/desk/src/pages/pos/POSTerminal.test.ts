@@ -1472,6 +1472,18 @@ describe('the register and the sale when the cashier moves', () => {
     return el;
   };
 
+  it('files a staff session\'s sale under its subject, the cashier id the server stamps', async () => {
+    serve([lk]);
+    authCustody.signInStaff({ sub: CASHIER_A, roles: ['cashier'] });
+    const aSale = sale({ id: 'a-staff', register_id: 'REG-LK', lines: [], cashier_id: CASHIER_A });
+    svc.startSale.mockResolvedValue(aSale);
+    (await mountLk()).remove();
+    expect(svc.startSale).toHaveBeenCalledTimes(1);
+    expect(localStorage.getItem(`gable.pos.sale.${CASHIER_A}.REG-LK`)).toBe('a-staff');
+    authCustody.signOut();
+    expect(localStorage.getItem(`gable.pos.sale.${CASHIER_A}.REG-LK`)).toBeNull();
+  });
+
   it('does not hand one cashier the empty sale another cashier left on the register', async () => {
     serve([lk]);
     authCustody.signInWithToken(tokenFor(CASHIER_A));

@@ -19,7 +19,7 @@ paths:
         labelled door (read from the single dealer_profile row), and the
         dealer's allowed sign in methods in the stored order, each with what
         the front door needs to render it: the kind (form, passkey, link or
-        redirect), the label, the start URL (the portal login for the form
+        redirect), the label, the start URL (the staff sign in for the form
         method, the start route for the others) and, for oidc, the issuer URL
         and client id. A strict allowlist response type: it never carries a
         secret, an internal host or another tenant's data. The dealer is the
