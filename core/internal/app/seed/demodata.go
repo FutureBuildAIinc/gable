@@ -31,6 +31,7 @@ import (
 	"time"
 
 	"github.com/gablelbm/gable/internal/staff"
+	"github.com/gablelbm/gable/pkg/devauth"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/stdlib"
 )
@@ -188,7 +189,7 @@ type staffRow struct {
 // DemoCounterPIN is the counter PIN of the demo's counter manager (STF-046)
 // on a local dev stack only. It is a published local fixture, like the demo
 // people, and never a secret; the seed stores only its argon2id hash, as the
-// staff screen would, and refuses to write it unless AUTH_MODE is dev.
+// staff screen would, and refuses to write it unless the build carries the devauth tag and AUTH_MODE is dev.
 const DemoCounterPIN = "4826"
 
 // demoManagerPINEnv names the environment value a deployed demo takes its
@@ -197,15 +198,16 @@ const demoManagerPINEnv = "DEMO_MANAGER_PIN"
 
 // demoCounterPIN answers the PIN the counter manager gets, and false when the
 // manager gets none: the environment's value wins in any mode (a bad one is an
-// error); otherwise the fixed local PIN, and only when authMode is "dev".
-func demoCounterPIN(envPIN, authMode string) (string, bool, error) {
+// error); otherwise the fixed local PIN, and only when the build carries the devauth
+// tag (devBuild) and authMode is "dev", the pair the serve start check uses.
+func demoCounterPIN(envPIN, authMode string, devBuild bool) (string, bool, error) {
 	if envPIN != "" {
 		if err := staff.ValidateCounterPIN(envPIN); err != nil {
 			return "", false, fmt.Errorf("%s is not a usable counter PIN: %w", demoManagerPINEnv, err)
 		}
 		return envPIN, true, nil
 	}
-	if strings.EqualFold(authMode, "dev") {
+	if devBuild && strings.EqualFold(authMode, "dev") {
 		return DemoCounterPIN, true, nil
 	}
 	return "", false, nil
@@ -802,12 +804,12 @@ func importStaff(ctx context.Context, db *sql.DB, yards map[string]uuid.UUID) er
 		sid := uuid.MustParse(staffID)
 		count++
 		if row.CounterPINDemo {
-			pin, ok, perr := demoCounterPIN(os.Getenv(demoManagerPINEnv), os.Getenv("AUTH_MODE"))
+			pin, ok, perr := demoCounterPIN(os.Getenv(demoManagerPINEnv), os.Getenv("AUTH_MODE"), devauth.Enabled)
 			if perr != nil {
 				return perr
 			}
 			if !ok {
-				log.Printf("Seed: %s is unset and AUTH_MODE is not dev: the demo manager %s gets no counter PIN", demoManagerPINEnv, row.Email)
+				log.Printf("Seed: %s is unset and this is not a devauth build in AUTH_MODE=dev: the demo manager %s gets no counter PIN", demoManagerPINEnv, row.Email)
 				continue
 			}
 			hash, herr := staff.HashCounterPIN(pin)

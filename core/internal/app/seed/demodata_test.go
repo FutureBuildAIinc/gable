@@ -1504,27 +1504,32 @@ func TestLumberVendorRowIsNotTheDealersOwnFeed(t *testing.T) {
 	}
 }
 
-// The fixed counter PIN is a local dev fixture: outside dev mode the seed
-// refuses it, in dev mode it writes it, and the environment's value wins
-// in any mode (CP walk B, P2 7).
+// The fixed counter PIN is a local dev fixture: it is written only when the
+// build carries the devauth tag and AUTH_MODE is dev, the same pair the serve
+// start check uses. The environment's value wins in any mode (CP walk B,
+// P2 7; Round 2 item 2).
 func TestDemoCounterPINIsFixedOnlyInDevMode(t *testing.T) {
 	for _, mode := range []string{"", "production", "staging"} {
-		if pin, ok, err := demoCounterPIN("", mode); ok || pin != "" || err != nil {
+		if pin, ok, err := demoCounterPIN("", mode, true); ok || pin != "" || err != nil {
 			t.Errorf("AUTH_MODE %q: got (%q, %v, %v), want the fixed PIN refused", mode, pin, ok, err)
 		}
 	}
 	for _, mode := range []string{"dev", "DEV"} {
-		if pin, ok, err := demoCounterPIN("", mode); !ok || pin != DemoCounterPIN || err != nil {
+		if pin, ok, err := demoCounterPIN("", mode, true); !ok || pin != DemoCounterPIN || err != nil {
 			t.Errorf("AUTH_MODE %q: got (%q, %v, %v), want the fixed PIN written", mode, pin, ok, err)
 		}
+		// An untagged build never writes it, whatever AUTH_MODE says.
+		if pin, ok, err := demoCounterPIN("", mode, false); ok || pin != "" || err != nil {
+			t.Errorf("AUTH_MODE %q on an untagged build: got (%q, %v, %v), want the fixed PIN refused", mode, pin, ok, err)
+		}
 	}
-	if pin, ok, err := demoCounterPIN("7391", "production"); !ok || pin != "7391" || err != nil {
+	if pin, ok, err := demoCounterPIN("7391", "production", false); !ok || pin != "7391" || err != nil {
 		t.Errorf("an environment PIN outside dev: got (%q, %v, %v), want it used", pin, ok, err)
 	}
-	if pin, _, _ := demoCounterPIN("7391", "dev"); pin != "7391" {
+	if pin, _, _ := demoCounterPIN("7391", "dev", true); pin != "7391" {
 		t.Errorf("the environment PIN must win in dev mode, got %q", pin)
 	}
-	if _, ok, err := demoCounterPIN("1234", "dev"); ok || err == nil {
+	if _, ok, err := demoCounterPIN("1234", "dev", true); ok || err == nil {
 		t.Errorf("a plain run PIN from the environment must be refused, got ok=%v err=%v", ok, err)
 	}
 }
