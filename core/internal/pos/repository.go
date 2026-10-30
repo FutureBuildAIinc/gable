@@ -145,6 +145,8 @@ type Repository interface {
 	ListPendingSignoffs(ctx context.Context, branch *uuid.UUID, after *time.Time, afterID *uuid.UUID, limit int) ([]TillSession, bool, error)
 	GetVariancePolicy(ctx context.Context, branch uuid.UUID) (*VariancePolicy, error)
 	SetVariancePolicy(ctx context.Context, branch uuid.UUID, cents *int64, actor string) error
+	GetOfflinePolicy(ctx context.Context, branch uuid.UUID) (*OfflinePolicy, error)
+	SetOfflinePolicy(ctx context.Context, branch uuid.UUID, in *OfflinePolicyInput, actor string) error
 	// The branch day (CP-09).
 	BranchZone(ctx context.Context, branch uuid.UUID) (string, bool, error)
 	LockBranchDay(ctx context.Context, branch uuid.UUID) error
