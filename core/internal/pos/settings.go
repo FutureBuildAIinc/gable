@@ -81,6 +81,70 @@ type PosRules struct {
 	// back. Off unless the dealer says so, because the rule is a dealer
 	// policy and not a law.
 	TintedNoReturn bool `json:"tinted_no_return"`
+	// CardSurcharge is the active branch's card fee switch (CP-15). On a
+	// read it is the branch the caller works in (null with no branch in
+	// context); on a write, omitted leaves it as it is.
+	CardSurcharge *CardSurcharge `json:"card_surcharge"`
+}
+
+// MaxCardSurchargeBps is the card brands' cap on a surcharge, 3 percent, in
+// basis points. The server refuses a rate above it.
+const MaxCardSurchargeBps = 300
+
+// CardSurcharge is one branch's card fee rule (CP-15): the switch (off by
+// default) and the rate, in basis points, the clerk and customer are told. It
+// records the dealer's intent and the disclosure; the processor's enrolment
+// decides the charge, and the answer's figure is what books.
+type CardSurcharge struct {
+	BranchID uuid.UUID `json:"branch_id"`
+	Enabled  bool      `json:"enabled"`
+	RateBps  int       `json:"rate_bps"`
+}
+
+// BranchCardSurcharge reads the branch's card fee rule: off at zero for a
+// branch that never set it.
+func (r *PostgresRepository) BranchCardSurcharge(ctx context.Context, branchID uuid.UUID) (CardSurcharge, error) {
+	cs := CardSurcharge{BranchID: branchID}
+	err := r.ex(ctx).QueryRow(ctx,
+		`SELECT card_surcharge_enabled, card_surcharge_bps FROM locations WHERE id = $1`, branchID).Scan(&cs.Enabled, &cs.RateBps)
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return cs, err
+	}
+	return cs, nil
+}
+
+// settingsBranch is the branch a branch rule on the counter settings speaks
+// for: the branch the caller works in, or in a single branch deployment (the
+// branch switch off, no branch in context) the system's default branch. Nil
+// when neither is known.
+func (r *PostgresRepository) settingsBranch(ctx context.Context) (*uuid.UUID, error) {
+	if b := middleware.BranchIDForQuery(ctx); b != nil {
+		return b, nil
+	}
+	var id uuid.UUID
+	err := r.ex(ctx).QueryRow(ctx,
+		`SELECT value::uuid FROM system_settings WHERE key = 'default_branch_id' AND value ~* '^[0-9a-f-]{36}$'`).Scan(&id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &id, nil
+}
+
+// writeBranchCardSurcharge writes the branch's rule inside the settings act.
+func (r *PostgresRepository) writeBranchCardSurcharge(ctx context.Context, cs CardSurcharge) error {
+	tag, err := r.ex(ctx).Exec(ctx,
+		`UPDATE locations SET card_surcharge_enabled = $2, card_surcharge_bps = $3, updated_at = NOW() WHERE id = $1`,
+		cs.BranchID, cs.Enabled, cs.RateBps)
+	if err != nil {
+		return errSettingWrite(err)
+	}
+	if tag.RowsAffected() == 0 {
+		return httpx.NotFound("branch not found")
+	}
+	return nil
 }
 
 // effectiveRestockingFees states the closed list's fees in force: a reason's
@@ -333,11 +397,23 @@ func (s *Service) PosSettings(ctx context.Context) (*PosSettings, error) {
 	if err != nil {
 		return nil, err
 	}
-	out := &PosSettings{Revision: rev, Rules: PosRules{CheckIDRequired: idRuleOf(idRule),
+	var surcharge *CardSurcharge
+	branch, err := s.repo.settingsBranch(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if branch != nil {
+		cs, err := s.repo.BranchCardSurcharge(ctx, *branch)
+		if err != nil {
+			return nil, err
+		}
+		surcharge = &cs
+	}
+	out := &PosSettings{Revision: rev, Rules: PosRules{CheckIDRequired: idRuleOf(idRule), CardSurcharge: surcharge,
 		RestockingFees:        effectiveRestockingFees(feeRows),
 		RestockingFeeDefaults: maps.Clone(defaultRestockingFeeBps),
-		TintCharge:           chargeRule,
-		TintedNoReturn:       noReturn}}
+		TintCharge:            chargeRule,
+		TintedNoReturn:        noReturn}}
 	if limit != nil {
 		c := httpx.Cents(*limit)
 		out.Rules.CheckLimitCents = &c
@@ -414,6 +490,26 @@ func (s *Service) SavePosSettings(ctx context.Context, in *SavePosSettingsInput)
 		if err := s.repo.writeTintedNoReturn(ctx, in.Rules.TintedNoReturn); err != nil {
 			return err
 		}
+		// the card fee switch (CP-15) of the branch the caller works in:
+		// omitted leaves it alone; the rate is capped at the brands' 3 percent
+		var surchargeWritten *CardSurcharge
+		if in.Rules.CardSurcharge != nil {
+			branch, err := s.repo.settingsBranch(ctx)
+			if err != nil {
+				return err
+			}
+			if branch == nil {
+				return conflict("branch_required", "the card fee is a branch's rule: work in one branch to change it")
+			}
+			if in.Rules.CardSurcharge.RateBps < 0 || in.Rules.CardSurcharge.RateBps > MaxCardSurchargeBps {
+				return invalid("rules.card_surcharge.rate_bps", "must be from 0 to 300 basis points: the card brands cap a surcharge at 3 percent")
+			}
+			cs := CardSurcharge{BranchID: *branch, Enabled: in.Rules.CardSurcharge.Enabled, RateBps: in.Rules.CardSurcharge.RateBps}
+			if err := s.repo.writeBranchCardSurcharge(ctx, cs); err != nil {
+				return err
+			}
+			surchargeWritten = &cs
+		}
 		next := rev + 1
 		if err := s.repo.bumpPosSettingsRevision(ctx, next); err != nil {
 			return err
@@ -421,10 +517,15 @@ func (s *Service) SavePosSettings(ctx context.Context, in *SavePosSettingsInput)
 		if s.auditLog != nil {
 			changes := map[string]any{"resource": posSettingsResource, "revision": next,
 				"check_limit_cents": in.Rules.CheckLimitCents, "check_id_required": in.Rules.CheckIDRequired.Mode,
-				"restocking_fees": in.Rules.RestockingFees,
+				"restocking_fees":   in.Rules.RestockingFees,
 				"tint_charge_cents": in.Rules.TintCharge.FlatCents,
 				"tint_charge_tiers": in.Rules.TintCharge.Tiers,
 				"tinted_no_return":  in.Rules.TintedNoReturn}
+			if surchargeWritten != nil {
+				changes["card_surcharge_branch_id"] = surchargeWritten.BranchID
+				changes["card_surcharge_enabled"] = surchargeWritten.Enabled
+				changes["card_surcharge_bps"] = surchargeWritten.RateBps
+			}
 			if in.Rules.CheckIDRequired.OverCents != nil {
 				changes["check_id_over_cents"] = int64(*in.Rules.CheckIDRequired.OverCents)
 			}
@@ -453,6 +554,7 @@ type posSettingsRequest struct {
 		RestockingFees json.RawMessage `json:"restocking_fees"`
 		TintCharge     json.RawMessage `json:"tint_charge"`
 		TintedNoReturn json.RawMessage `json:"tinted_no_return"`
+		CardSurcharge  json.RawMessage `json:"card_surcharge"`
 	} `json:"rules"`
 	Revision json.RawMessage `json:"revision"`
 }
@@ -576,6 +678,26 @@ func (r *posSettingsRequest) parse() (*SavePosSettingsInput, error) {
 			out.Rules.TintedNoReturn = on
 		}
 	}
+	if raw := bytes.TrimSpace(r.Rules.CardSurcharge); len(raw) > 0 && !bytes.Equal(raw, []byte("null")) {
+		var body struct {
+			Enabled json.RawMessage `json:"enabled"`
+			RateBps json.RawMessage `json:"rate_bps"`
+		}
+		if err := json.Unmarshal(raw, &body); err != nil {
+			v.Check(false, "rules.card_surcharge", "must be an object with enabled and rate_bps")
+		} else {
+			cs := &CardSurcharge{}
+			if err := json.Unmarshal(body.Enabled, &cs.Enabled); err != nil {
+				v.Check(false, "rules.card_surcharge.enabled", "must be true or false")
+			}
+			if n, ok := v.Int("rules.card_surcharge.rate_bps", body.RateBps, true); ok {
+				v.Check(n >= 0 && n <= MaxCardSurchargeBps, "rules.card_surcharge.rate_bps",
+					"must be from 0 to 300 basis points: the card brands cap a surcharge at 3 percent")
+				cs.RateBps = int(n)
+			}
+			out.Rules.CardSurcharge = cs
+		}
+	}
 	v.Enum("rules.check_id_required.mode", r.Rules.CheckIDRequired.Mode,
 		IDRuleNever, IDRuleEveryCheck, IDRuleOverAmount)
 	out.Rules.CheckIDRequired.Mode = r.Rules.CheckIDRequired.Mode
@@ -661,4 +783,27 @@ func decodePosSettings(r *http.Request) (*SavePosSettingsInput, error) {
 		return nil, err
 	}
 	return req.parse()
+}
+
+// flagUnexpectedSurcharge writes the audit row of a fee the processor added
+// at a branch whose switch is off (enrolment ahead of the setting, CP-15).
+// The money moved, so the fee is stored and booked all the same; the row is
+// what a manager finds it by. It runs inside the act that books the fee.
+func (s *Service) flagUnexpectedSurcharge(ctx context.Context, branchID, saleID uuid.UUID, feeCents int64, actor string) error {
+	if feeCents <= 0 || s.auditLog == nil {
+		return nil
+	}
+	rule, err := s.repo.BranchCardSurcharge(ctx, branchID)
+	if err != nil {
+		return err
+	}
+	if rule.Enabled {
+		return nil
+	}
+	if err := s.auditLog.Log(ctx, audit.Entry{
+		Action: "pos.surcharge_unexpected", EntityType: "pos_transaction", EntityID: saleID, UserID: actor,
+		Changes: map[string]any{"branch_id": branchID, "surcharge_cents": feeCents, "switch": "off"}}); err != nil {
+		return fmt.Errorf("failed to write the audit row: %w", err)
+	}
+	return nil
 }

@@ -138,10 +138,11 @@ func TestRunTerminalReadStageFailureDeclines(t *testing.T) {
 }
 
 // TestRunTerminalAuthorizedAnswerBooksOnlyTheLegAmount: an approval is booked
-// only when the card was charged exactly the leg's amount with no fee. A
-// surcharged answer (the card charged subtotal plus fee) and a short approval
-// land nothing until surcharge booking is built: the sweep carries the leg to
-// a person. A waived fee and an equal amount authorize.
+// only when the card was charged exactly the leg's amount plus the fee the
+// answer names (CP-15). A short or over approval, a fee that does not add up
+// to the figure charged and a fee the driver cannot read land nothing: the
+// sweep carries the leg to a person. A waived fee and an equal amount
+// authorize with no fee; a surcharged answer authorizes with its fee in cents.
 func TestRunTerminalAuthorizedAnswerBooksOnlyTheLegAmount(t *testing.T) {
 	approved := func(amount any, fee any) map[string]any {
 		r := chargeResult("A", "TRX-AMT", "00", "VISA")
@@ -155,8 +156,10 @@ func TestRunTerminalAuthorizedAnswerBooksOnlyTheLegAmount(t *testing.T) {
 		name   string
 		result map[string]any
 	}{
-		{"surcharged", approved("25.75", "0.75")},
-		{"surcharged with a numeric fee", approved("25.75", 0.75)},
+		{"fee that does not add up", approved("25.75", "0.50")},
+		{"fee named but not charged", approved("25.00", "0.75")},
+		{"fee in fractions of a cent", approved("25.75", "0.755")},
+		{"a negative fee", approved("24.25", "-0.75")},
 		{"short approval", approved("20.00", nil)},
 		{"over approval", approved("25.01", nil)},
 		{"no amount", approved("", nil)},
@@ -179,6 +182,27 @@ func TestRunTerminalAuthorizedAnswerBooksOnlyTheLegAmount(t *testing.T) {
 		{"equal amount", approved("25.00", nil)},
 		{"waived fee", approved("25.00", "0.00")},
 		{"numeric amount", approved(25, nil)},
+	}
+	fees := []struct {
+		name   string
+		result map[string]any
+		want   int64
+	}{
+		{"surcharged", approved("25.75", "0.75"), 75},
+		{"surcharged with a numeric fee", approved("25.75", 0.75), 75},
+		{"surcharged with one decimal", approved("27.50", "2.5"), 250},
+	}
+	for _, tc := range fees {
+		t.Run(tc.name, func(t *testing.T) {
+			fs := newRunFake(t)
+			fs.fake.pollStep = endStep("succeeded", tc.result)
+			var sink recordingSink
+			dispatchSaleLeg(t, newSinkDriver(fs, &sink, true))
+			got := sink.waitForAnswer(t)
+			if got.Verdict != "authorized" || got.FeeCents != tc.want {
+				t.Fatalf("answer %+v, want authorized with a fee of %d cents", got, tc.want)
+			}
+		})
 	}
 	for _, tc := range booked {
 		t.Run(tc.name, func(t *testing.T) {

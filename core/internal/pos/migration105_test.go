@@ -500,6 +500,13 @@ func mig105ServiceDB(t *testing.T) *database.DB {
 	// and the weight block the counter line carries from 144 (the line
 	// projection reads it)
 	mig105Apply(t, conn, "../../migrations/144_scale_tickets.sql")
+	// and the card fee columns of migration 153 the tender read and the card
+	// refund claim name (the rest of 153 reads tables this stage has not built)
+	if _, err := conn.Exec(context.Background(), `
+		ALTER TABLE pos_tenders ADD COLUMN surcharge_cents BIGINT NOT NULL DEFAULT 0;
+		ALTER TABLE pos_refund_intents ADD COLUMN IF NOT EXISTS fee_cents BIGINT NOT NULL DEFAULT 0;`); err != nil {
+		t.Fatalf("add the card fee columns: %v", err)
+	}
 	conn.Close(context.Background())
 	db, err := database.Connect(url)
 	if err != nil {

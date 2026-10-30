@@ -1,0 +1,366 @@
+# SPDX-License-Identifier: LicenseRef-OpenLBM-Commons-1.0
+# SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
+#
+# Staff sessions (ADR 0012 slice 2): the email and password sign in the core
+# makes through Appwrite server side, the membership refresh, the sign out
+# and the read of the signed in person's display data. The session is the
+# HttpOnly cookie the sign in sets; a state changing request authenticated by
+# it must also carry the X-Gable-CSRF header. Sign in, refresh and sign out
+# are public paths of the auth layer (they read the cookie themselves).
+paths:
+  /api/v1/auth/signin:
+    post:
+      operationId: authSignIn
+      tags: [auth]
+      summary: Sign a staff member in with email and password
+      description: >-
+        Public. The core opens an Appwrite session server side, reads the
+        account and the membership in the dealer's Team, ends the Appwrite
+        session at once and, when the person is admitted, issues its own
+        session: a fresh random id every time (a presented one is ignored),
+        set as an HttpOnly, Secure, SameSite=Strict cookie on Path /api with
+        no Domain. The request must carry the X-Gable-CSRF header or an
+        Origin that is Gable's own. Every refusal (wrong credentials,
+        unconfirmed or absent membership, blocked or deleted user, unverified
+        email, no mapped role, an Appwrite Team owner, multi factor on) gets
+        the one fixed 401 answer. Limited per client address and per email;
+        past the limit a 429 with Retry-After.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/StaffSignInRequest"
+      responses:
+        "200":
+          description: Signed in; the session cookie is set.
+          headers:
+            Set-Cookie:
+              description: The gable_session cookie (HttpOnly, Secure, SameSite=Strict, Path=/api, no Domain).
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StaffIdentity"
+        "400":
+          $ref: "#/components/responses/WireBadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "429":
+          description: Too many attempts; retry after the Retry-After seconds.
+          headers:
+            Retry-After:
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WireError"
+        "503":
+          $ref: "#/components/responses/WireUnavailable"
+  /api/v1/auth/refresh:
+    post:
+      operationId: authRefresh
+      tags: [auth]
+      summary: Re-read the signed in person's membership now
+      description: >-
+        The session cookie and the X-Gable-CSRF header are required. The core
+        re-reads the account and the membership with its key; a definite
+        answer that the person may no longer enter revokes the session (401),
+        changed roles replace the snapshot. An answer that is not definite
+        keeps the session on its snapshot until the snapshot reaches its
+        maximum age.
+      security:
+        - StaffSession: []
+      responses:
+        "200":
+          description: The roles the session now holds.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StaffIdentity"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /api/v1/auth/signout:
+    post:
+      operationId: authSignOut
+      tags: [auth]
+      summary: Sign out
+      description: >-
+        Revokes the session behind the cookie and clears the cookie. The
+        X-Gable-CSRF header is required. Answers 204 whatever the cookie held.
+      security:
+        - StaffSession: []
+      responses:
+        "204":
+          description: Signed out; the cookie is cleared.
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /api/v1/auth/session:
+    get:
+      operationId: authSession
+      tags: [auth]
+      summary: The signed in person's display data
+      description: >-
+        The subject and role set of the session behind the cookie. No email:
+        a staff session carries none.
+      security:
+        - StaffSession: []
+      responses:
+        "200":
+          description: The subject and roles.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StaffIdentity"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /api/v1/auth/start/magic_link:
+    post:
+      operationId: authStartMagicLink
+      tags: [auth]
+      summary: Email a sign in link to a member
+      description: >-
+        Public. Looks the email up and, only for an existing user who is a
+        confirmed Team member with a mapped role and a verified address, asks
+        Appwrite to email a link whose target is Gable's callback. It never
+        creates a user, and it answers the same body and sets a state cookie of
+        the same shape whether or not a link was sent. The request must carry
+        the X-Gable-CSRF header or an Origin that is Gable's own. Limited per
+        client address and per email.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/StaffMagicLinkRequest"
+      responses:
+        "200":
+          description: The fixed reply; the state cookie is set.
+          headers:
+            Set-Cookie:
+              description: The gable_signin_state cookie (HttpOnly, Secure, SameSite=Lax, Path=/api, no Domain).
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StaffMagicLinkReply"
+        "400":
+          $ref: "#/components/responses/WireBadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "429":
+          description: Too many attempts; retry after the Retry-After seconds.
+          headers:
+            Retry-After:
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WireError"
+        "503":
+          $ref: "#/components/responses/WireUnavailable"
+  /api/v1/auth/callback:
+    get:
+      operationId: authCallback
+      tags: [auth]
+      summary: Where every redirect sign in ends
+      description: >-
+        Public. Appwrite (or the magic link) sends the browser here with the
+        state, and the user id and one time secret. The state in the query must
+        equal the state cookie, and its pending row is claimed with one
+        conditional update, committed, before Appwrite is called, so a state is
+        spent once. The core exchanges the secret server side, reads the
+        account and the membership, ends the Appwrite session and issues its
+        own. The answer carries Referrer-Policy no-referrer and clears the
+        state cookie. Success is a 303 to the desk with the session cookie set;
+        every refusal (a missing, wrong, reused or expired state, a replayed
+        secret, a person Gable does not admit) is a 303 to one fixed address.
+      security: []
+      parameters:
+        - {name: state, in: query, schema: {type: string}}
+        - {name: userId, in: query, schema: {type: string}}
+        - {name: secret, in: query, schema: {type: string}}
+        - {name: failure, in: query, schema: {type: string}}
+      responses:
+        "303":
+          description: To the desk (session cookie set) or to the one fixed refusal address.
+          headers:
+            Referrer-Policy:
+              schema:
+                type: string
+            Location:
+              schema:
+                type: string
+        "429":
+          description: Too many attempts; retry after the Retry-After seconds.
+          headers:
+            Retry-After:
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WireError"
+        "503":
+          $ref: "#/components/responses/WireUnavailable"
+  /api/v1/admin/staff/sign-in-people:
+    get:
+      operationId: adminStaffSignInPeople
+      tags: [auth]
+      summary: The people who have signed in, for the roster link
+      description: >-
+        Owner and admin. The distinct subjects the core's sessions have seen,
+        each with the email read from Appwrite by the stored Appwrite user id
+        (the session row holds none) and the staff row it is linked to, if
+        any. This is the list the staff screen picks from to link a roster
+        row.
+      security:
+        - BearerJWT: []
+        - StaffSession: []
+      responses:
+        "200":
+          description: The people.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StaffSignInPeople"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/v1/admin/staff/{id}/sign-in-link:
+    put:
+      operationId: adminStaffSignInLinkSet
+      tags: [auth]
+      summary: Link a staff row to a person who has signed in
+      description: >-
+        Owner and admin. Sets the staff row's sub to a person the sessions
+        have seen, audited. A sub no session has seen is a 400, an unknown
+        staff row a 404, and a staff row or a person already linked a 409
+        (the link is unique when set).
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: The staff row.
+          schema:
+            type: string
+            format: uuid
+      security:
+        - BearerJWT: []
+        - StaffSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/StaffSignInLinkRequest"
+      responses:
+        "204":
+          description: Linked.
+        "400":
+          $ref: "#/components/responses/WireBadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "409":
+          $ref: "#/components/responses/WireConflict"
+    delete:
+      operationId: adminStaffSignInLinkClear
+      tags: [auth]
+      summary: Clear a staff row's sign in link
+      description: Owner and admin. Clears the link, audited; clearing an unlinked row is a no-op.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: The staff row.
+          schema:
+            type: string
+            format: uuid
+      security:
+        - BearerJWT: []
+        - StaffSession: []
+      responses:
+        "204":
+          description: Cleared.
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+components:
+  schemas:
+    StaffMagicLinkRequest:
+      type: object
+      additionalProperties: false
+      required: [email]
+      properties:
+        email:
+          type: string
+    StaffMagicLinkReply:
+      type: object
+      additionalProperties: false
+      required: [message]
+      properties:
+        message:
+          type: string
+    StaffSignInPeople:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            type: object
+            required: [sub, email, linked_staff_id]
+            properties:
+              sub:
+                type: string
+                format: uuid
+              email:
+                type: string
+              linked_staff_id:
+                type: [string, 'null']
+                format: uuid
+    StaffSignInLinkRequest:
+      type: object
+      required: [sub]
+      properties:
+        sub:
+          type: string
+          format: uuid
+    StaffSignInRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email:
+          type: string
+        password:
+          type: string
+    StaffIdentity:
+      type: object
+      required: [sub, roles]
+      properties:
+        sub:
+          type: string
+          format: uuid
+          description: The name based subject UUID of the Appwrite user.
+        roles:
+          type: array
+          description: The Gable roles of the person, in the fixed role order.
+          items:
+            type: string
+            enum: [owner, admin, sales, finance, purchasing, warehouse, cashier, driver]

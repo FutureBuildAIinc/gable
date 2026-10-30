@@ -145,6 +145,9 @@ func (h *Handler) Start(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, r, httpx.Forbidden("sign in by "+method+" is not allowed for this dealer"))
 	case StartNoRoute:
 		httpx.WriteError(w, r, httpx.BadRequest("email and password sign in is the form at the door; it has no start route"))
+	case StartByNavigation:
+		w.Header().Set("Allow", http.MethodGet)
+		httpx.WriteError(w, r, httpx.MethodNotAllowed("sign in by "+method+" starts by navigating to this address (GET)"))
 	case StartNotImplemented:
 		httpx.WriteError(w, r, &httpx.Error{
 			Status:  http.StatusNotImplemented,

@@ -466,11 +466,12 @@ func TestOfflineResolve_WhoMayResolveAndWhat(t *testing.T) {
 	wantNothingPosted(t, f, sale)
 }
 
-// RULE (ADR 0011 6.2, the room, O4): an account sale refused for stock and
-// retried is judged against the room without its own exception row, and a
-// written off account sale no longer holds any room: only open and held rows
-// are subtracted.
-func TestOfflineResolve_TheAccountRoomCountsOnlyOpenRows(t *testing.T) {
+// RULE (ADR 0011 6.2 and 3.4, the room, O4): an account sale refused for
+// stock and retried is judged against the room without its own exception
+// row ($4), and a written off account sale still leaves the room of the
+// snapshot it was recorded under: its goods left on the account unbilled,
+// so a second account sale that crosses the room is cap_exceeded.
+func TestOfflineResolve_TheAccountRoomCountsEveryRecordedTender(t *testing.T) {
 	f := newFixture(t, testutil.RequireDB(t))
 	offlinePolicyOn(t, f)
 	b := newOfflineBench(t, f)
@@ -481,13 +482,20 @@ func TestOfflineResolve_TheAccountRoomCountsOnlyOpenRows(t *testing.T) {
 	mustExec(t, f.db, `UPDATE inventory SET quantity = 1 WHERE product_id = $1`, f.productID)
 	rA, sA := b.build(t, onAccount)
 	idA := *wantOutcome(t, b.sync(t, rA), sA, pos.OfflineRefused, "insufficient_stock").ExceptionID
-	// the first written off holds no room
-	mustResolve(t, f, idA, pos.ResolveWriteOff)
+	// retried, it is not counted against itself
+	mustExec(t, f.db, `UPDATE inventory SET quantity = 100 WHERE product_id = $1`, f.productID)
+	wantPosted(t, f, mustResolve(t, f, idA, pos.ResolveRetry), sA)
+
+	// a new snapshot: its room counts nothing recorded before it
+	b.issue(t)
+	mustExec(t, f.db, `UPDATE inventory SET quantity = 1 WHERE product_id = $1`, f.productID)
 	rB, sB := b.build(t, onAccount)
 	idB := *wantOutcome(t, b.sync(t, rB), sB, pos.OfflineRefused, "insufficient_stock").ExceptionID
-	// the second, retried, is not counted against itself
+	// written off, it still leaves the room
+	mustResolve(t, f, idB, pos.ResolveWriteOff)
 	mustExec(t, f.db, `UPDATE inventory SET quantity = 100 WHERE product_id = $1`, f.productID)
-	wantPosted(t, f, mustResolve(t, f, idB, pos.ResolveRetry), sB)
+	rC, sC := b.build(t, onAccount)
+	wantOutcome(t, b.sync(t, rC), sC, pos.OfflineRefused, "cap_exceeded")
 }
 
 // RULE (ADR 0011 3.4, the chain): a held item above another held one is

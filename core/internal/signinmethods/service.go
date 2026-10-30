@@ -6,9 +6,6 @@ package signinmethods
 import (
 	"context"
 	"errors"
-	"net/http"
-	"net/url"
-	"strings"
 	"time"
 
 	"github.com/gablelbm/gable/internal/platform/httpx"
@@ -99,8 +96,9 @@ func (s *Service) Allowlist(ctx context.Context) (*AllowlistResponse, error) {
 
 // Check validates a replacement allowlist. The list must hold at least one
 // method, every code must be one of the six, no code twice, and the oidc
-// fields belong to oidc alone: oidc needs an https issuer URL and a client
-// id; any other method carrying them is refused.
+// label belongs to oidc alone. The issuer and client id are retired (ADR
+// 0012 section 4): the issuer is configured in Appwrite, so the fields are
+// refused for every method.
 func Check(in []Input) error {
 	if len(in) == 0 {
 		return httpx.BadRequest("the allowlist must hold at least one sign in method",
@@ -117,19 +115,11 @@ func Check(in []Input) error {
 				httpx.FieldError{Field: "methods", Message: "each method at most once"})
 		}
 		seen[m.Method] = true
+		if m.OIDCIssuerURL != "" || m.OIDCClientID != "" {
+			return httpx.BadRequest("the oidc issuer is configured in Appwrite, not in Gable",
+				httpx.FieldError{Field: "methods", Message: "oidc_issuer_url and oidc_client_id are not accepted"})
+		}
 		if m.Method == MethodOIDC {
-			issuer := strings.TrimSpace(m.OIDCIssuerURL)
-			u, err := url.Parse(issuer)
-			if issuer == "" || err != nil || u.Scheme != "https" || u.Host == "" {
-				return &httpx.Error{Status: http.StatusBadRequest, Code: httpx.CodeBadRequest,
-					Message: "the oidc issuer must be an https URL",
-					Details: []httpx.FieldError{{Field: "oidc_issuer_url", Message: "must be an https URL"}}}
-			}
-			if strings.TrimSpace(m.OIDCClientID) == "" {
-				return &httpx.Error{Status: http.StatusBadRequest, Code: httpx.CodeBadRequest,
-					Message: "the oidc method needs a client id",
-					Details: []httpx.FieldError{{Field: "oidc_client_id", Message: "must not be empty"}}}
-			}
 			continue
 		}
 		if m.OIDCIssuerURL != "" || m.OIDCClientID != "" || m.OIDCLabel != "" {
@@ -218,12 +208,16 @@ const (
 	// StartNotImplemented: allowed, rendered by the door, not built on this
 	// server yet.
 	StartNotImplemented
+	// StartByNavigation: a provider redirect method, which the browser starts
+	// by navigating (GET) to this route, served by the staff session layer.
+	StartByNavigation
 )
 
-// Start judges a start attempt. The one method the server implements as a
-// sign in path (email and password, the portal login) has no start route;
-// the other five are allowed by the allowlist alone until they are built,
-// and answer a plain refusal here.
+// Start judges a POST start attempt. Email and password has no start route;
+// the provider redirect methods start by navigation (GET), and the magic
+// link's POST is served by the staff session layer when Appwrite is
+// configured; what reaches here for them, and for passkey, which is deferred,
+// is the plain refusal.
 func (s *Service) Start(ctx context.Context, method string) StartOutcome {
 	if !IsCode(method) {
 		return StartNotKnown
@@ -233,6 +227,10 @@ func (s *Service) Start(ctx context.Context, method string) StartOutcome {
 	}
 	if method == MethodEmailPassword {
 		return StartNoRoute
+	}
+	switch method {
+	case MethodGoogle, MethodMicrosoft, MethodOIDC:
+		return StartByNavigation
 	}
 	return StartNotImplemented
 }

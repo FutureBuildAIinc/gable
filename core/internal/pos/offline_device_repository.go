@@ -170,6 +170,17 @@ func (r *PostgresRepository) RegisterOpenSession(ctx context.Context, register s
 	return s, nil
 }
 
+// UnknownTailRecorded answers whether the register already holds an unknown
+// tail item of an epoch, so a later enrolment never writes a second one.
+func (r *PostgresRepository) UnknownTailRecorded(ctx context.Context, register string, epoch int64) (bool, error) {
+	var found bool
+	if err := r.ex(ctx).QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM pos_offline_exceptions
+		WHERE register_id = $1 AND device_epoch = $2 AND reason_code = 'unknown_tail')`, register, epoch).Scan(&found); err != nil {
+		return false, fmt.Errorf("failed to read the register's unknown tail items: %w", err)
+	}
+	return found, nil
+}
+
 // InsertUnknownTail writes the unknown tail item a re-enrolment over a lost
 // or rolled back store leaves (ADR 0011 section 5.1): the old epoch, the
 // missing numbers as a range, the register's open session when one is open

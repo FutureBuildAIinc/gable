@@ -22,6 +22,7 @@ type registerDevice struct {
 	HighSeq      int64
 	ChainHead    string
 	ConfirmedSeq int64
+	ReportedSeq  int64
 	RevokedAt    *time.Time
 }
 
@@ -111,9 +112,9 @@ const offlineSessionDate = `(t.opened_at AT TIME ZONE COALESCE((SELECT l.timezon
 // (lock 0a, ADR 0011 3.2). Nil when no enrolment holds that epoch.
 func (r *PostgresRepository) LockRegisterDevice(ctx context.Context, register string, epoch int64) (*registerDevice, error) {
 	d := &registerDevice{}
-	err := r.ex(ctx).QueryRow(ctx, `SELECT id, public_key, high_seq, chain_head, confirmed_seq, revoked_at
+	err := r.ex(ctx).QueryRow(ctx, `SELECT id, public_key, high_seq, chain_head, confirmed_seq, reported_seq, revoked_at
 		FROM pos_register_devices WHERE register_id = $1 AND epoch = $2 FOR UPDATE`, register, epoch).
-		Scan(&d.ID, &d.PublicKey, &d.HighSeq, &d.ChainHead, &d.ConfirmedSeq, &d.RevokedAt)
+		Scan(&d.ID, &d.PublicKey, &d.HighSeq, &d.ChainHead, &d.ConfirmedSeq, &d.ReportedSeq, &d.RevokedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}
@@ -461,6 +462,27 @@ func (r *PostgresRepository) MarkHeldRelinked(ctx context.Context, id, saleID uu
 	return nil
 }
 
+// MarkHeldSoldPastWarning gives a re-offered held row whose sale posted past
+// an open counter warning that reason, the posted sale and the warnings (the
+// oldest in warning_alert_id), open for a manager's review.
+func (r *PostgresRepository) MarkHeldSoldPastWarning(ctx context.Context, id, saleID uuid.UUID, warnings []uuid.UUID,
+	code, message string) error {
+	ids, err := json.Marshal(warnings)
+	if err != nil {
+		return err
+	}
+	var first *uuid.UUID
+	if len(warnings) > 0 {
+		first = &warnings[0]
+	}
+	if _, err := r.ex(ctx).Exec(ctx, `UPDATE pos_offline_exceptions SET reason_code = $3, reason_message = $4,
+		status = 'open', posted_sale_id = $2, warning_alert_id = $5, warning_alert_ids = $6::jsonb,
+		revision = revision + 1, updated_at = NOW() WHERE id = $1`, id, saleID, code, message, first, string(ids)); err != nil {
+		return fmt.Errorf("failed to write the warning onto the held item: %w", err)
+	}
+	return nil
+}
+
 // OfflineSnapshotByID reads a stored snapshot.
 func (r *PostgresRepository) OfflineSnapshotByID(ctx context.Context, id uuid.UUID) (*offlineSnapshotRow, error) {
 	s := &offlineSnapshotRow{}
@@ -505,20 +527,22 @@ func (r *PostgresRepository) BranchDayClosedOn(ctx context.Context, branch uuid.
 
 // OfflineAccountUsedSince sums the offline account tenders of a register on
 // an account the server recorded after a time (ADR 0011 6.2): posted sales
-// and verified exception rows still open or held, each sale once, whatever
-// snapshot it names: a resolved row is posted (and counted as the sale) or
-// written off, and a row a manager is resolving is no longer open.
-func (r *PostgresRepository) OfflineAccountUsedSince(ctx context.Context, register string, customer uuid.UUID, since time.Time) (int64, error) {
+// and verified exception rows, each sale once, whatever snapshot it names.
+// The sale being judged is left out: a re-offered held sale's own held row
+// is not counted against it.
+func (r *PostgresRepository) OfflineAccountUsedSince(ctx context.Context, register string, customer uuid.UUID, since time.Time,
+	sale uuid.UUID) (int64, error) {
 	var used int64
 	err := r.ex(ctx).QueryRow(ctx, `SELECT
 		COALESCE((SELECT SUM(ROUND(tn.amount * 100))::bigint FROM pos_tenders tn JOIN pos_transactions t ON t.id = tn.transaction_id
 			WHERE t.register_id = $1 AND t.customer_id = $2 AND t.offline_ref IS NOT NULL AND t.created_at > $3
 			AND tn.method = 'ACCOUNT'), 0)
 		+ COALESCE((SELECT SUM(e.account_cents) FROM pos_offline_exceptions e
-			WHERE e.register_id = $1 AND e.customer_id = $2 AND e.created_at > $3 AND e.status IN ('open', 'held')
+			WHERE e.register_id = $1 AND e.customer_id = $2 AND e.created_at > $3
 			AND e.reason_code NOT IN ('bad_signature', 'replay_mismatch', 'sequence_gap', 'sold_past_warning')
+			AND e.sale_id <> $4
 			AND NOT EXISTS (SELECT 1 FROM pos_transactions p WHERE p.id = e.sale_id)), 0)`,
-		register, customer, since).Scan(&used)
+		register, customer, since, sale).Scan(&used)
 	if err != nil {
 		return 0, fmt.Errorf("failed to read the account's offline room: %w", err)
 	}
