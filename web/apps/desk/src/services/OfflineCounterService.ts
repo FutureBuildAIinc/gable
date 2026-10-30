@@ -36,11 +36,11 @@ const SERVER_UNREACHABLE = 'The server cannot be reached: the register keeps its
 
 /** The words for each fixed code the shell's password sign in answers. */
 const PASSWORD_WORDS: Record<string, string> = {
-    sign_in_refused: 'That email and password did not sign this register in.',
+    sign_in_refused: 'That email and password did not sign this register in. Type the password again.',
     sign_in_limited: 'Too many tries. Wait a little, then try again.',
     sign_in_not_allowed: 'This sign in is not allowed for this register. Ask a manager.',
     sign_in_unavailable: SERVER_UNREACHABLE,
-    no_server: 'This register has no server set: it has no server to sign in to. Ask a manager.',
+    no_server: 'This register has no server set, so it cannot sign in. Ask a manager.',
 };
 
 /** Maps a raw shell answer to a coded error whose words come from the table above, never from the answer. */

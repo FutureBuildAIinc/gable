@@ -94,11 +94,11 @@ describe('offlineCounter.signInWithPassword', () => {
   });
 
   it.each([
-    ['sign_in_refused', 'That email and password did not sign this register in.'],
+    ['sign_in_refused', 'That email and password did not sign this register in. Type the password again.'],
     ['sign_in_limited', 'Too many tries. Wait a little, then try again.'],
     ['sign_in_not_allowed', 'Ask a manager'],
     ['sign_in_unavailable', 'The server cannot be reached'],
-    ['no_server', 'no server'],
+    ['no_server', 'This register has no server set, so it cannot sign in. Ask a manager.'],
   ])('maps the shell code %s to its own words', async (code, words) => {
     invoke.mockRejectedValue(code);
     const e = await offlineCounter.signInWithPassword('a@b.example', 'hunter2').then(() => null, (x: unknown) => x);

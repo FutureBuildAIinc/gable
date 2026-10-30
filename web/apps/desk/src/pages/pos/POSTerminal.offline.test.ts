@@ -341,11 +341,11 @@ describe('the counter when the connection drops', () => {
     });
 
     it.each([
-      ['sign_in_refused', 'That email and password did not sign this register in.'],
+      ['sign_in_refused', 'That email and password did not sign this register in. Type the password again.'],
       ['sign_in_limited', 'Too many tries. Wait a little, then try again.'],
       ['sign_in_not_allowed', 'Ask a manager'],
       ['sign_in_unavailable', 'The server cannot be reached'],
-      ['no_server', 'no server'],
+      ['no_server', 'This register has no server set, so it cannot sign in. Ask a manager.'],
     ])('shows the words for %s, empties the password field, and keeps the form', async (code, words) => {
       const el = await openForm();
       core.refuse['sign_in_with_password'] = code;
