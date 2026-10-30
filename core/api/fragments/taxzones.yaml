@@ -200,7 +200,7 @@ components:
           description: The part was exempted (PST exemptions land with A2); false today.
     TaxSetup:
       type: object
-      required: [canadian, gst_hst_number_missing, unzoned_provinces]
+      required: [canadian, gst_hst_number_missing, unzoned_provinces, incomplete_ship_tos]
       properties:
         canadian:
           type: boolean
@@ -224,6 +224,12 @@ components:
                 type: integer
                 format: int64
                 description: How many active ship-tos sit there.
+        incomplete_ship_tos:
+          type: integer
+          format: int64
+          description: >-
+            Active ship-tos with no country, or a Canadian one with no province: no zone can
+            answer them, so a delivery there is refused until the address is completed.
     TaxZoneRatePart:
       type: object
       required: [name, rate, effective_from]

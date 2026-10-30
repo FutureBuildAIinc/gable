@@ -76,6 +76,9 @@ func (e *PartsNotConfiguredError) Error() string {
 // ClerkWords is what the clerk reads (item 365): the province, and the two
 // ways forward for a delivery.
 func (e *PartsNotConfiguredError) ClerkWords() string {
+	if e.Destination && strings.TrimSpace(e.Province) == "" {
+		return "This ship-to has no province: complete its address, or take the sale as a pickup."
+	}
 	if e.Destination {
 		return "No tax zone covers " + ProvinceName(e.Province) + ": ask an admin to add one, or take the sale as a pickup."
 	}
@@ -333,6 +336,10 @@ type Setup struct {
 	Canadian            bool              `json:"canadian"`
 	GSTHSTNumberMissing bool              `json:"gst_hst_number_missing"`
 	UnzonedProvinces    []UnzonedProvince `json:"unzoned_provinces"`
+	// IncompleteShipTos counts active ship-tos with no country, or a
+	// Canadian one with no province: no zone can answer them, so a delivery
+	// there is refused until the address is completed.
+	IncompleteShipTos int64 `json:"incomplete_ship_tos"`
 }
 
 // ReadSetup reads the standing warnings on the day. A dealer with no
@@ -352,12 +359,18 @@ func (r *Repository) ReadSetup(ctx context.Context, on time.Time) (*Setup, error
 		out.GSTHSTNumberMissing = false
 		return out, nil
 	}
+	if err := exec.QueryRow(ctx, `
+		SELECT COUNT(*) FROM customer_ship_tos s
+		WHERE s.is_active AND (TRIM(COALESCE(s.country, '')) = ''
+		   OR (UPPER(TRIM(s.country)) = 'CA' AND TRIM(COALESCE(s.region, '')) = ''))`).Scan(&out.IncompleteShipTos); err != nil {
+		return nil, fmt.Errorf("failed to count the incomplete ship-tos: %w", err)
+	}
 	// The same matching as Lookup: a live province zone of the region, or a
 	// live postal zone whose range holds the code.
 	rows, err := exec.Query(ctx, `
 		SELECT UPPER(TRIM(COALESCE(s.region, ''))) AS province, COUNT(*)
 		FROM customer_ship_tos s
-		WHERE s.is_active AND UPPER(TRIM(COALESCE(s.country, ''))) = 'CA'
+		WHERE s.is_active AND UPPER(TRIM(COALESCE(s.country, ''))) = 'CA' AND TRIM(COALESCE(s.region, '')) <> ''
 		  AND NOT EXISTS (
 		    SELECT 1 FROM tax_zones z
 		    WHERE z.effective_from <= $1::date AND (z.effective_to IS NULL OR z.effective_to >= $1::date)

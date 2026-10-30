@@ -88,6 +88,11 @@ export class GableTaxSetup extends LitElement {
             out.push({ id: `zone-${p.province || 'blank'}`,
                 words: `No tax zone covers ${p.name} (${count}): a delivery there is refused until the province's tax zone is added on the Tax Zones screen.` });
         }
+        if (w.incomplete_ship_tos > 0) {
+            const count = w.incomplete_ship_tos === 1 ? '1 ship-to has' : `${w.incomplete_ship_tos} ship-tos have`;
+            out.push({ id: 'incomplete-ship-tos',
+                words: `${count} no province or country: a delivery there is refused until its address is completed on the customer's ship-tos.` });
+        }
         return out;
     }
 

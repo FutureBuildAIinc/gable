@@ -113,6 +113,16 @@ func TestCanadaRule(t *testing.T) {
 		}
 	})
 
+	t.Run("a delivery to a ship-to with no province is refused in its own words", func(t *testing.T) {
+		_, err := taxzone.Canada(ctx, db, taxzone.CanadaInput{BranchID: branchIn(t, db, "CA", "BC", "V1X 7K2"), On: on,
+			ShipTo: &taxzone.Place{}})
+		var e *taxzone.PartsNotConfiguredError
+		want := "This ship-to has no province: complete its address, or take the sale as a pickup."
+		if !errors.As(err, &e) || e.ClerkWords() != want {
+			t.Fatalf("err = %v, want %q", err, want)
+		}
+	})
+
 	t.Run("a delivery takes the destination's zone, never the branch's", func(t *testing.T) {
 		dest := &taxzone.Snapshot{ZoneID: uuid.New(), CombinedRate: "0.130000", Country: "CA", Province: "ON",
 			Parts: []taxzone.Part{{Name: taxzone.PartGoodsTax, Rate: "0.130000"}}}
@@ -211,6 +221,19 @@ func TestReadSetupNamesTheGaps(t *testing.T) {
 	}
 	if u := yt(got); u == nil || u.Name != "Yukon" || u.ShipTos != 2 {
 		t.Fatalf("unzoned = %+v, want Yukon with two ship-tos", got.UnzonedProvinces)
+	}
+	// A ship-to with no country, and a Canadian one with no province, are
+	// counted as incomplete, never named as a province.
+	before := got.IncompleteShipTos
+	if _, err := db.Pool.Exec(ctx, `INSERT INTO customer_ship_tos (id, customer_id, code, name, line1, is_default, is_active)
+		VALUES ($1, $2, 'C', 'Site', '1 Way', FALSE, TRUE), ($3, $2, 'D', 'Site', '1 Way', FALSE, TRUE)`, uuid.New(), customer, uuid.New()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Pool.Exec(ctx, `UPDATE customer_ship_tos SET country = 'CA' WHERE customer_id = $1 AND code = 'D'`, customer); err != nil {
+		t.Fatal(err)
+	}
+	if got, err = repo.ReadSetup(ctx, on); err != nil || got.IncompleteShipTos != before+2 {
+		t.Fatalf("incomplete = %d (before %d), %v; want two more", got.IncompleteShipTos, before, err)
 	}
 
 	mustCreate(t, repo, provinceDraft("YT", part(taxzone.PartGoodsTax, "0.050000")))

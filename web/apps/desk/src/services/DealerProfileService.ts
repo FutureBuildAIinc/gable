@@ -41,6 +41,8 @@ export interface TaxSetupWarnings {
     canadian: boolean;
     gst_hst_number_missing: boolean;
     unzoned_provinces: UnzonedProvince[];
+    /** Active ship-tos with no country, or a Canadian one with no province: a delivery there is refused until completed. */
+    incomplete_ship_tos: number;
 }
 
 export const dealerProfileService = {

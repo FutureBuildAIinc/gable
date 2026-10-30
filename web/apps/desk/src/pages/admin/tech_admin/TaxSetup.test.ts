@@ -21,7 +21,7 @@ let refuse: Response | null
 beforeEach(() => {
   localStorage.setItem('token', 'test-token')
   profile = { ...PROFILE }
-  setup = { canadian: true, gst_hst_number_missing: true, unzoned_provinces: [] }
+  setup = { canadian: true, gst_hst_number_missing: true, unzoned_provinces: [], incomplete_ship_tos: 0 }
   puts = []
   refuse = null
   vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -89,8 +89,14 @@ describe('Tax setup panel', () => {
     expect(el.querySelector('[data-testid="setup-warning-gst-hst"]')).not.toBeNull()
   })
 
+  it('counts the ship-tos with no province or country', async () => {
+    setup = { ...setup, incomplete_ship_tos: 4 }
+    const el = await open()
+    expect(text(q(el, '[data-testid="setup-warning-incomplete-ship-tos"]'))).toContain('4 ship-tos have no province or country')
+  })
+
   it('shows no warnings for a dealer with no Canadian branch', async () => {
-    setup = { canadian: false, gst_hst_number_missing: false, unzoned_provinces: [] }
+    setup = { canadian: false, gst_hst_number_missing: false, unzoned_provinces: [], incomplete_ship_tos: 0 }
     const el = await open()
     expect(el.querySelector('[data-testid="setup-warnings"]')).toBeNull()
   })

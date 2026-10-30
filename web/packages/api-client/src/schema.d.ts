@@ -22247,6 +22247,11 @@ export interface components {
                  */
                 ship_tos: number;
             }[];
+            /**
+             * Format: int64
+             * @description Active ship-tos with no country, or a Canadian one with no province: no zone can answer them, so a delivery there is refused until the address is completed.
+             */
+            incomplete_ship_tos: number;
         };
         TaxZoneRatePart: {
             /** @enum {string} */
