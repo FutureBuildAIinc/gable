@@ -1578,7 +1578,7 @@ components:
         balance_due_after_deposits_cents:
           type: integer
           format: int64
-          description: 'The order total less everything taken on it: what the customer still owes on the order.'
+          description: 'The order total less everything taken on it and less what its invoices were already paid otherwise: what the customer still owes on the order.'
         deposits:
           type: array
           description: 'The posted payments taken against this order (deposits), oldest first, each with the invoices it settled.'

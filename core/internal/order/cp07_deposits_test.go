@@ -73,11 +73,11 @@ func (f *fixture) serveOrdersAndPayments() *spyGateway {
 		WithAuditLog(audit.NewLogger(f.db)).WithInvoices(inv).WithDeposits(acct)
 	osvc = osvc.WithInventory(inventory.NewService(inventory.NewRepository(f.db)))
 	gw := &spyGateway{}
-	psvc := payment.NewService(f.db, payment.NewRepository(f.db), acct).WithGateway(gw, "pk_test").
-		WithAuditLog(audit.NewLogger(f.db)).WithOutbox(outbox.NewWriter(f.db, ""))
 	posSvc := pos.NewService(f.db, pos.NewRepository(f.db), slog.Default()).
 		WithAR(acct).WithLedger(glSvc).WithInvoices(inv).WithTxRunner(f.db).
 		WithAuditLog(audit.NewLogger(f.db)).WithOutbox(outbox.NewWriter(f.db, ""))
+	psvc := payment.NewService(f.db, payment.NewRepository(f.db), acct).WithGateway(gw, "pk_test").
+		WithAuditLog(audit.NewLogger(f.db)).WithOutbox(outbox.NewWriter(f.db, "")).WithTillCheckGuard(posSvc)
 	mux := http.NewServeMux()
 	order.NewHandler(osvc).RegisterRoutes(mux)
 	payment.NewHandler(psvc).RegisterRoutes(mux)

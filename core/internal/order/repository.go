@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gablelbm/gable/internal/account"
 	"github.com/gablelbm/gable/internal/customer/customerlink"
 	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/gablelbm/gable/internal/salesdoc"
@@ -410,7 +411,11 @@ func (r *PostgresRepository) GetOrder(ctx context.Context, id uuid.UUID) (*Order
 		taken += int64(d.AmountCents)
 	}
 	o.DepositTotalCents = httpx.Cents(taken)
-	o.BalanceDueAfterDepositsCents = o.TotalCents - httpx.Cents(taken)
+	var paidOther int64
+	if err := r.db.GetExecutor(ctx).QueryRow(ctx, account.OrderInvoicePaidCentsSQL, id).Scan(&paidOther); err != nil {
+		return nil, fmt.Errorf("failed to read what the order's invoices were paid: %w", err)
+	}
+	o.BalanceDueAfterDepositsCents = o.TotalCents - httpx.Cents(taken) - httpx.Cents(paidOther)
 	return o, nil
 }
 
