@@ -128,6 +128,7 @@ const staticZones: AppZone[] = [
     { label: 'Apps', path: '/admin/apps', roles: ADMIN_OWNER },
     { label: 'Market Indices', path: '/admin/market-indices', roles: ADMIN_OWNER },
     { label: 'Counter Rules', path: '/admin/counter-rules', roles: ADMIN_OWNER },
+    { label: 'Tint Catalogue', path: '/admin/tint-catalogue', roles: ADMIN_OWNER },
     { label: 'Offline Selling', path: '/admin/offline-counter', roles: ADMIN_OWNER_FINANCE },
   ] },
   { prefix: '/sales', key: 'quote', label: 'Quotes', icon: FileText },
