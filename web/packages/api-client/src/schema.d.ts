@@ -20075,8 +20075,8 @@ export interface components {
             index_code: string;
             name: string;
             current_value: number;
-            /** Format: date-time */
-            newest_date?: string | null;
+            /** Format: date */
+            newest_date: string | null;
             /** @description How many days old the newest value is; -1 when the index's newest value carries no day, which says nothing about how old it is. */
             days_old: number;
             stale: boolean;
@@ -20528,8 +20528,8 @@ export interface components {
             recorded_by?: string;
             source: string;
             /**
-             * Format: date-time
-             * @description The day the value is for, as the source states it. Null for a value typed by hand, whose only date is when it was recorded.
+             * Format: date
+             * @description The day the value is for, as the source states it (YYYY-MM-DD). Null for a value typed by hand, whose only date is when it was recorded.
              */
             as_of_date?: string | null;
             /** @description Where the value came from. */

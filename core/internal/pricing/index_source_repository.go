@@ -12,7 +12,6 @@ import (
 	"github.com/gablelbm/gable/pkg/database"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgtype"
 )
 
 // IndexSourceRepository is the market index source reader (QE-07-b1): the
@@ -57,13 +56,13 @@ type IndexSourceRepository interface {
 
 // IndexFreshness is one active index and the day of its newest value.
 type IndexFreshness struct {
-	IndexID      uuid.UUID  `json:"index_id"`
-	IndexCode    string     `json:"index_code"`
-	Name         string     `json:"name"`
-	CurrentValue float64    `json:"current_value"`
-	NewestDate   *time.Time `json:"newest_date"`
-	DaysOld      int        `json:"days_old"`
-	Stale        bool       `json:"stale"`
+	IndexID      uuid.UUID `json:"index_id"`
+	IndexCode    string    `json:"index_code"`
+	Name         string    `json:"name"`
+	CurrentValue float64   `json:"current_value"`
+	NewestDate   *string   `json:"newest_date"`
+	DaysOld      int       `json:"days_old"`
+	Stale        bool      `json:"stale"`
 }
 
 // PostgresIndexSourceRepository is the PostgreSQL reader.
@@ -116,14 +115,11 @@ func (r *PostgresIndexSourceRepository) ListFreshness(ctx context.Context) ([]In
 	out := []IndexFreshness{}
 	for rows.Next() {
 		var f IndexFreshness
-		var newest pgtype.Date
+		var newest *time.Time
 		if err := rows.Scan(&f.IndexID, &f.IndexCode, &f.Name, &f.CurrentValue, &newest); err != nil {
 			return nil, fmt.Errorf("scan index freshness: %w", err)
 		}
-		if newest.Valid {
-			t := newest.Time
-			f.NewestDate = &t
-		}
+		f.NewestDate = dayPtr(newest)
 		out = append(out, f)
 	}
 	return out, rows.Err()
@@ -138,8 +134,7 @@ func (r *PostgresIndexSourceRepository) HistoryByAsOf(ctx context.Context, index
 		WHERE market_index_id = $1 AND as_of_date = $2 AND source = $3`
 	asOfArg := time.Date(asOf.Year(), asOf.Month(), asOf.Day(), 0, 0, 0, 0, time.UTC)
 	var h MarketIndexHistory
-	var asOfOut pgtype.Date
-	var fetched pgtype.Timestamptz
+	var asOfOut, fetched *time.Time
 	err := r.db.GetExecutor(ctx).QueryRow(ctx, q, indexID, asOfArg, source).Scan(
 		&h.ID, &h.MarketIndexID, &h.Value, &h.RecordedAt, &h.RecordedBy, &h.Source,
 		&asOfOut, &h.SourceURL, &fetched)
@@ -149,14 +144,8 @@ func (r *PostgresIndexSourceRepository) HistoryByAsOf(ctx context.Context, index
 		}
 		return nil, fmt.Errorf("read market index history by as of: %w", err)
 	}
-	if asOfOut.Valid {
-		t := asOfOut.Time
-		h.AsOfDate = &t
-	}
-	if fetched.Valid {
-		t := fetched.Time
-		h.FetchedAt = &t
-	}
+	h.AsOfDate = dayPtr(asOfOut)
+	h.FetchedAt = fetched
 	return &h, nil
 }
 // LockMarketIndex takes the market index row FOR UPDATE, so the check of
@@ -180,15 +169,11 @@ func (r *PostgresIndexSourceRepository) LockMarketIndex(ctx context.Context, id 
 // it counts too.
 func (r *PostgresIndexSourceRepository) NewestStoredDay(ctx context.Context, id uuid.UUID) (*time.Time, error) {
 	const q = `SELECT MAX(COALESCE(as_of_date, recorded_at::date)) FROM market_index_history WHERE market_index_id = $1`
-	var newest pgtype.Date
+	var newest *time.Time
 	if err := r.db.GetExecutor(ctx).QueryRow(ctx, q, id).Scan(&newest); err != nil {
 		return nil, fmt.Errorf("read the newest stored day: %w", err)
 	}
-	if !newest.Valid {
-		return nil, nil
-	}
-	t := newest.Time
-	return &t, nil
+	return newest, nil
 }
 
 // InsertHistoryIfAbsent writes one history row unless one is already stored
@@ -209,7 +194,7 @@ func (r *PostgresIndexSourceRepository) InsertHistoryIfAbsent(ctx context.Contex
 	const q = `
 		INSERT INTO market_index_history
 			(id, market_index_id, value, recorded_at, recorded_by, source, as_of_date, source_url, fetched_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, NULLIF($8, ''), $9)
+		VALUES ($1, $2, $3, $4, $5, $6, $7::date, NULLIF($8, ''), $9)
 		ON CONFLICT (market_index_id, as_of_date, source) WHERE as_of_date IS NOT NULL
 		DO NOTHING`
 	tag, err := r.db.GetExecutor(ctx).Exec(ctx, q,

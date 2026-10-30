@@ -58,8 +58,16 @@ func (s *IndexStalenessService) Staleness(ctx context.Context, now time.Time) (*
 			f.DaysOld = -1
 			f.Stale = false
 		} else {
-			newest := f.NewestDate.UTC().Truncate(24 * time.Hour)
-			f.DaysOld = int(today.Sub(newest).Hours() / 24)
+			newest, err := time.Parse(dayFormat, *f.NewestDate)
+			if err != nil {
+				// A day the server cannot read says nothing about how old
+				// the value is.
+				f.DaysOld = -1
+				f.Stale = false
+				out.Indices = append(out.Indices, f)
+				continue
+			}
+			f.DaysOld = int(today.Sub(newest.UTC()).Hours() / 24)
 			f.Stale = f.DaysOld > days
 		}
 		out.Indices = append(out.Indices, f)

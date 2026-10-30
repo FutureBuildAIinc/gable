@@ -248,7 +248,7 @@ func (s *IndexImportService) Preview(ctx context.Context, data []byte) (*IndexIm
 			out.RefusedCount++
 			continue
 		}
-		asOf, err := time.Parse("2006-01-02", raw.asOfDate)
+		asOf, err := time.Parse(dayFormat, raw.asOfDate)
 		if err != nil {
 			row.Status = importStatusRefused
 			row.Reason = importReasonBadDate
@@ -257,7 +257,7 @@ func (s *IndexImportService) Preview(ctx context.Context, data []byte) (*IndexIm
 			continue
 		}
 		row.asOf = asOf
-		key := idx.ID.String() + "|" + asOf.Format("2006-01-02")
+		key := idx.ID.String() + "|" + asOf.Format(dayFormat)
 		if seen[key] {
 			row.Status = importStatusRefused
 			row.Reason = importReasonDuplicate
@@ -337,7 +337,7 @@ func (s *IndexImportService) Apply(ctx context.Context, data []byte, recordedBy 
 		if err != nil {
 			return nil, fmt.Errorf("read the imported row's value: %w", err)
 		}
-		asOf, err := time.Parse("2006-01-02", row.AsOfDate)
+		asOf, err := time.Parse(dayFormat, row.AsOfDate)
 		if err != nil {
 			return nil, fmt.Errorf("read the imported row's day: %w", err)
 		}
@@ -371,7 +371,7 @@ func (s *IndexImportService) recordValue(ctx context.Context, indexID uuid.UUID,
 		Value:         value,
 		Source:        source,
 		RecordedBy:    recordedBy,
-		AsOfDate:      asOf,
+		AsOfDate:      dayPtr(asOf),
 		SourceURL:     sourceURL,
 	}
 	err := s.db.RunInTx(ctx, func(txCtx context.Context) error {
@@ -399,7 +399,7 @@ func (s *IndexImportService) recordValue(ctx context.Context, indexID uuid.UUID,
 			// An older day is history only.
 			return nil
 		}
-		if newestStored != nil && hist.AsOfDate != nil && hist.AsOfDate.Before(*newestStored) {
+		if newestStored != nil && asOf != nil && asOf.Before(*newestStored) {
 			// A value for a day older than the index's newest stored day
 			// never replaces a newer day's value.
 			return nil

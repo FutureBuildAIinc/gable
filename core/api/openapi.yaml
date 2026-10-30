@@ -37401,7 +37401,7 @@ components:
       type: object
       description: >-
         Go type pricing.IndexFreshness. One active index and the day of its newest stored value. An index whose newest value carries no day cannot be judged old, so it is not stale.
-      required: [index_id, index_code, name, current_value, days_old, stale]
+      required: [index_id, index_code, name, current_value, newest_date, days_old, stale]
       properties:
         index_id:
           type: string
@@ -37414,7 +37414,7 @@ components:
           type: number
         newest_date:
           type: [string, "null"]
-          format: date-time
+          format: date
         days_old:
           type: integer
           description: >-
@@ -37899,9 +37899,9 @@ components:
         source: {type: string}
         as_of_date:
           type: [string, "null"]
-          format: date-time
+          format: date
           description: >-
-            The day the value is for, as the source states it. Null for a value typed by hand, whose only date is when it was recorded.
+            The day the value is for, as the source states it (YYYY-MM-DD). Null for a value typed by hand, whose only date is when it was recorded.
         source_url:
           type: string
           description: Where the value came from.

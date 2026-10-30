@@ -128,7 +128,7 @@ export interface MarketIndexHistory {
   recorded_at: string;
   recorded_by?: string;
   source: string;
-  /** The day the value is for, as the source states it. */
+  /** The day the value is for, as the source states it (YYYY-MM-DD). */
   as_of_date?: string | null;
   /** Where the value came from. */
   source_url?: string;
@@ -183,7 +183,8 @@ export interface MarketIndexFreshness {
   index_code: string;
   name: string;
   current_value: number;
-  newest_date?: string | null;
+  /** The day the newest value is for (YYYY-MM-DD); null when it carries no day. */
+  newest_date: string | null;
   /** How many days old the newest value is; -1 when the index has no value. */
   days_old: number;
   stale: boolean;
