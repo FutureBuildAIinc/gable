@@ -8157,7 +8157,7 @@ export interface paths {
         put?: never;
         /**
          * Apply a market index file
-         * @description Guarded admin or owner. The file is the same CSV the preview takes. Every row the preview accepted is written through the same path a manual refresh takes: the newest as of date an index's rows carry becomes the index's current value, older rows are history only, and the exposure scan runs once for each index whose value moved. A value for one index, day and source is stored once, so importing the same file twice changes nothing the second time and scans nothing.
+         * @description Guarded admin or owner. The file is the same CSV the preview takes. Every row the preview accepted is written through the same path a manual refresh takes: the newest as of date an index's rows carry becomes the index's current value, older rows are history only, and the exposure scan runs once for each index whose value moved. A value for a day older than the index's newest stored day is history only too: it never replaces a newer day's value. A value for one index, day and source is stored once, so importing the same file twice changes nothing the second time and scans nothing.
          */
         post: operations["marketIndexImportApply"];
         delete?: never;
@@ -39715,7 +39715,10 @@ export interface operations {
     marketIndexImportPreview: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
             path?: never;
             cookie?: never;
         };
@@ -39750,7 +39753,10 @@ export interface operations {
     marketIndexImportApply: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
             path?: never;
             cookie?: never;
         };
