@@ -12,6 +12,7 @@ import type { QuoteSummary, QuoteStatus } from '../../types/quote.ts';
 import { formatCents } from '../../lib/utils.ts';
 import { onBranchChanged } from '../../lib/branch-listener.ts';
 import { formatDate } from '../../lib/dates.ts';
+import { isQuoteExpired } from './quoteExpiry.ts';
 
 @customElement('gable-quote-view-tabs')
 export class GableQuoteViewTabs extends LitElement {
@@ -214,6 +215,7 @@ export class GableQuoteList extends LitElement {
                             <tr class="border-b border-white/10 bg-white/5">
                                 <th class="p-4 font-medium text-muted-foreground">Quote ID</th>
                                 <th class="p-4 font-medium text-muted-foreground">Date</th>
+                                <th class="p-4 font-medium text-muted-foreground">Valid until</th>
                                 <th class="p-4 font-medium text-muted-foreground">Customer</th>
                                 <th class="p-4 font-medium text-muted-foreground">Source</th>
                                 <th class="p-4 font-medium text-muted-foreground">Fulfillment</th>
@@ -225,20 +227,25 @@ export class GableQuoteList extends LitElement {
                         <tbody class="divide-y divide-white/5">
                             ${this.loading ? html`
                                 <tr>
-                                    <td colspan="8" class="p-8 text-center text-muted-foreground">Loading quotes...</td>
+                                    <td colspan="9" class="p-8 text-center text-muted-foreground">Loading quotes...</td>
                                 </tr>
                             ` : this.quotes.length === 0 ? html`
                                 <tr>
-                                    <td colspan="8" class="p-8 text-center text-muted-foreground">
+                                    <td colspan="9" class="p-8 text-center text-muted-foreground">
                                         No quotes found. Create your first quote to get started.
                                     </td>
                                 </tr>
                             ` : this.quotes.map(quote => {
                                 const isBusy = this.converting === quote.id || this.updatingState === quote.id;
+                                const expired = isQuoteExpired(quote);
                                 return html`
                                     <tr class="hover:bg-white/5 transition-colors cursor-pointer" @click=${() => router.navigate(`/quotes/${quote.id}`)}>
                                         <td class="p-4 font-mono text-white/80">${quote.number}</td>
                                         <td class="p-4 text-white/80">${formatDate(quote.created_at)}</td>
+                                        <td class="p-4 text-white/80" data-testid="quote-valid-until">
+                                            ${quote.expires_at ? formatDate(quote.expires_at) : html`<span class="text-zinc-500">No date</span>`}
+                                            ${isQuoteExpired(quote) ? html`<span class="ml-2 inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium border uppercase bg-amber-500/20 text-amber-400 border-amber-500/30" data-testid="quote-expired-mark">Expired</span>` : nothing}
+                                        </td>
                                         <td class="p-4 text-white font-medium">${quote.customer_name || quote.customer_id.slice(0, 8)}</td>
                                         <td class="p-4">
                                             ${quote.source === 'ai' ? html`
@@ -276,13 +283,13 @@ export class GableQuoteList extends LitElement {
                                                         ${icon(Pencil, 14)}
                                                     </button>
                                                 ` : nothing}
-                                                ${quote.status === 'draft' ? html`
+                                                ${quote.status === 'draft' && !expired ? html`
                                                     <button @click=${() => this.handleStateChange(quote, 'sent')} ?disabled=${isBusy}
                                                         class="text-blue-400 hover:text-blue-300 transition-colors p-1 rounded hover:bg-white/5 disabled:opacity-50" title="Mark Sent" aria-label="Mark sent">
                                                         ${icon(Send, 14)}
                                                     </button>
                                                 ` : nothing}
-                                                ${(quote.status === 'draft' || quote.status === 'sent') ? html`
+                                                ${(quote.status === 'draft' || quote.status === 'sent') && !expired ? html`
                                                     <button @click=${() => this.handleStateChange(quote, 'accepted')} ?disabled=${isBusy}
                                                         class="text-emerald-400 hover:text-emerald-300 transition-colors p-1 rounded hover:bg-white/5 disabled:opacity-50" title="Accept" aria-label="Accept quote">
                                                         ${icon(Check, 14)}
@@ -292,7 +299,7 @@ export class GableQuoteList extends LitElement {
                                                         ${icon(X, 14)}
                                                     </button>
                                                 ` : nothing}
-                                                ${(quote.status === 'draft' || quote.status === 'sent' || quote.status === 'accepted') ? html`
+                                                ${(quote.status === 'draft' || quote.status === 'sent' || quote.status === 'accepted') && !expired ? html`
                                                     <button @click=${() => this.handleConvert(quote)} ?disabled=${isBusy}
                                                         class="text-gable-green hover:text-gable-green/80 transition-colors flex items-center gap-1 text-xs font-medium disabled:opacity-50 p-1 rounded hover:bg-white/5"
                                                         title="Convert to Order" aria-label="Convert to order">
