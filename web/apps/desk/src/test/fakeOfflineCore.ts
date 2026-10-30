@@ -124,6 +124,8 @@ export function fakeOfflineCore(): FakeCore {
                     return core.queue;
                 case 'sync_offline_queue':
                     return core.sync();
+                case 'begin_sign_in':
+                    return null;
                 default:
                     throw { code: 'unknown_command', message: command };
             }

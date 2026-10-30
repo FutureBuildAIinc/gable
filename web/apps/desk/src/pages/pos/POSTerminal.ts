@@ -61,7 +61,7 @@ import { offlineCounter, OfflineCounterError } from '../../services/OfflineCount
 import type { OfflineQueue, OfflineSignedSale } from '../../types/offline';
 import {
   OFFLINE_BANNER, RESULT_UNKNOWN, SAME_GOODS_QUESTION, bannerFigures, carryCart, isLostAnswer,
-  NEEDS_CONNECTION, queueDrained, snapshotRefusalWords, syncWords, tillCloseWait, unknownCardKey, unknownCartKey, type CarriedCart,
+  NEEDS_CONNECTION, NO_SESSION_ASK, queueDrained, snapshotRefusalWords, syncWords, tillCloseWait, unknownCardKey, unknownCartKey, type CarriedCart,
 } from './offline';
 import { POS_SW_WARNING_ATTR } from '../../lib/pos-sw';
 
@@ -272,6 +272,7 @@ export class POSTerminal extends LitElement {
   @state() private _sameGoods: { cartId: string; saleId: string; offlineRef: string } | null = null;
   private _completing = false;
   private _reconnecting = false;
+  @state() private _needsSignIn = false;
 
   // The X report of the open drawer, and the register's stored Z reports (CP-08).
   @state() private _showXReport = false;
@@ -392,6 +393,19 @@ export class POSTerminal extends LitElement {
     return true;
   }
 
+  /** The strip's "Sign in this register": the shell's sign in, then the reconnect runs again. */
+  private async _signInRegister() {
+    try {
+      await offlineCounter.signIn();
+    } catch (err) {
+      this._offlineStrip = err instanceof Error ? err.message : null;
+      return;
+    }
+    this._offlineStrip = null;
+    this._needsSignIn = false;
+    await this._reconnect();
+  }
+
   /**
    * The connection returned: the queue drains first, then the core takes new
    * prices, then the unknown cart is read and followed (ADR 0011 5.3, 6.2).
@@ -405,6 +419,7 @@ export class POSTerminal extends LitElement {
       return;
     }
     this._reconnecting = true;
+    this._needsSignIn = false;
     const wasOffline = this._offline;
     let drained = false;
     try {
@@ -415,11 +430,15 @@ export class POSTerminal extends LitElement {
         this._offlineStrip = report.sent > 0 ? syncWords(report) : this._offlineStrip;
       } catch (err) {
         this._offlineStrip = err instanceof Error ? err.message : null;
+        if (err instanceof OfflineCounterError && err.code === 'no_session') this._needsSignIn = true;
       }
       try {
         await offlineCounter.refreshSnapshot();
       } catch (err) {
-        if (err instanceof OfflineCounterError && err.code !== 'no_core') {
+        if (err instanceof OfflineCounterError && err.code === 'no_session') {
+          this._needsSignIn = true;
+          this._offlineStrip = this._offlineStrip ?? err.message;
+        } else if (err instanceof OfflineCounterError && err.code !== 'no_core') {
           this._offlineStrip = [this._offlineStrip, snapshotRefusalWords(err.code, err.message)].filter(Boolean).join('. ');
         }
       }
@@ -3915,6 +3934,7 @@ export class POSTerminal extends LitElement {
       ${this._offlineStrip ? html`
         <div class="flex items-center justify-between gap-3 border-b border-blueprint-blue/30 bg-blueprint-blue/10 px-4 py-2 text-sm text-blueprint-blue" role="status" data-testid="pos-offline-strip">
           <span>${this._offlineStrip}</span>
+          ${this._needsSignIn ? html`<button type="button" data-testid="pos-offline-sign-in" class="min-h-11 rounded-lg bg-gable-green px-4 font-semibold text-deep-space" @click=${() => void this._signInRegister()}>${NO_SESSION_ASK}</button>` : nothing}
           <button type="button" class="min-h-11 px-2 text-lg" aria-label="Dismiss" @click=${() => { this._offlineStrip = null; }}>×</button>
         </div>` : nothing}
       ${this._sameGoods ? html`

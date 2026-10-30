@@ -35,6 +35,9 @@ const svc = vi.hoisted(() => ({
   answerReplacedCart: vi.fn(),
 }));
 
+const auth = vi.hoisted(() => ({ authMethodsConfig: vi.fn() }));
+vi.mock('@gable/auth', async (orig) => ({ ...(await orig<typeof import('@gable/auth')>()), authMethodsConfig: auth.authMethodsConfig }));
+
 vi.mock('../../services/POSService', async (orig) => {
   const real = await orig<typeof import('../../services/POSService')>();
   return { ...real, posService: svc };
@@ -42,7 +45,7 @@ vi.mock('../../services/POSService', async (orig) => {
 
 import './POSTerminal';
 import type { POSTerminal } from './POSTerminal';
-import { OFFLINE_BANNER, QUEUE_HOLDS_CLOSE, RESULT_UNKNOWN, SAME_GOODS_QUESTION, UNKNOWN_HOLDS_CLOSE } from './offline';
+import { NO_SESSION_ASK, OFFLINE_BANNER, QUEUE_HOLDS_CLOSE, RESULT_UNKNOWN, SAME_GOODS_QUESTION, UNKNOWN_HOLDS_CLOSE } from './offline';
 
 const REG_01 = { id: 'REG-01', name: 'Front till', branch_id: 'b-main', branch_code: 'MAIN', branch_name: 'main yard' };
 const q = (el: Element, id: string) => el.querySelector(`[data-testid="${id}"]`) as HTMLElement | null;
@@ -173,6 +176,83 @@ describe('the counter when the connection drops', () => {
     expect(q(el, 'pos-offline-strip')?.textContent).toContain('Sent 1, 1 needs a manager');
     expect(q(el, 'pos-offline-mode')).toBeNull();
     el.remove();
+  });
+
+  // Review of PR 246: a web sign in writes only the cookie, so the core's
+  // no_session needs the shell's own sign in (begin_sign_in) to put a token in
+  // the keychain, with the dealer's configured redirect method, then a re-run.
+  describe('the core answers no_session', () => {
+    const noSession = { code: 'no_session', message: 'Sign in on this register again.' };
+    const methods = (list: Array<{ method: string; kind: string }>) => ({
+      authMode: 'production', dealerName: null, dealerMarkUrl: null, degraded: false, notice: null,
+      methods: list.map((m) => ({ ...m, label: m.method, start_url: '/start', issuer_url: null, client_id: null })),
+    });
+    beforeEach(() => {
+      auth.authMethodsConfig.mockResolvedValue(methods([{ method: 'email_password', kind: 'form' }, { method: 'google', kind: 'redirect' }]));
+    });
+
+    it('offers Sign in this register on the strip when the sync answers no_session', async () => {
+      core.refuse['sync_offline_queue'] = noSession;
+      const el = await mount();
+      await settle(el);
+      const ask = q(el, 'pos-offline-sign-in') as HTMLButtonElement;
+      expect(ask.textContent).toContain(NO_SESSION_ASK);
+      expect(q(el, 'pos-offline-strip')?.textContent).toContain(noSession.message);
+      el.remove();
+    });
+
+    it('offers it when only the snapshot fetch answers no_session', async () => {
+      core.refuse['refresh_offline_snapshot'] = noSession;
+      const el = await mount();
+      await settle(el);
+      expect(q(el, 'pos-offline-sign-in')).toBeTruthy();
+      el.remove();
+    });
+
+    it('offers nothing for any other refusal', async () => {
+      core.refuse['sync_offline_queue'] = { code: 'server_unreachable', message: 'The server cannot be reached' };
+      const el = await mount();
+      await settle(el);
+      expect(q(el, 'pos-offline-sign-in')).toBeNull();
+      el.remove();
+    });
+
+    it('starts the shell sign in with the dealer redirect method, then re-runs the reconnect', async () => {
+      core.refuse['sync_offline_queue'] = noSession;
+      core.refuse['refresh_offline_snapshot'] = noSession;
+      const el = await mount();
+      await settle(el);
+      delete core.refuse['sync_offline_queue'];
+      delete core.refuse['refresh_offline_snapshot'];
+      core.calls.length = 0;
+      (q(el, 'pos-offline-sign-in') as HTMLButtonElement).click();
+      await settle(el);
+      const order = core.calls.map((c) => c.command).filter((c) => ['begin_sign_in', 'sync_offline_queue', 'refresh_offline_snapshot'].includes(c));
+      expect(order).toEqual(['begin_sign_in', 'sync_offline_queue', 'refresh_offline_snapshot']);
+      expect(core.calls.find((c) => c.command === 'begin_sign_in')?.args).toEqual({ method: 'google' });
+      expect(q(el, 'pos-offline-sign-in')).toBeNull();
+      el.remove();
+    });
+
+    it('says so, and keeps the ask, when the shell sign in is refused or no redirect method is allowed', async () => {
+      core.refuse['sync_offline_queue'] = noSession;
+      core.refuse['begin_sign_in'] = { code: 'timed_out', message: 'The sign in did not finish in time.' };
+      const el = await mount();
+      await settle(el);
+      (q(el, 'pos-offline-sign-in') as HTMLButtonElement).click();
+      await settle(el);
+      expect(q(el, 'pos-offline-strip')?.textContent).toContain('The sign in did not finish in time.');
+      expect(q(el, 'pos-offline-sign-in')).toBeTruthy();
+      delete core.refuse['begin_sign_in'];
+      auth.authMethodsConfig.mockResolvedValue(methods([{ method: 'email_password', kind: 'form' }]));
+      core.calls.length = 0;
+      (q(el, 'pos-offline-sign-in') as HTMLButtonElement).click();
+      await settle(el);
+      expect(core.calls.some((c) => c.command === 'begin_sign_in')).toBe(false);
+      expect(q(el, 'pos-offline-strip')?.textContent).toContain('no sign in method');
+      expect(q(el, 'pos-offline-sign-in')).toBeTruthy();
+      el.remove();
+    });
   });
 
   it('reads the unknown cart on reconnect: abandoned by a linked sale, the clerk is asked and the answer recorded', async () => {

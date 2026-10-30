@@ -155,6 +155,9 @@ export function tillCloseWait(queue: OfflineQueue | null, unknownCartId: string 
     return null;
 }
 
+/** The strip's action when the core holds no session: the shell's own sign in, not the web's cookie one. */
+export const NO_SESSION_ASK = 'Sign in this register';
+
 /** The words for a snapshot the shell could not take, with the item that waits (ADR 0011 section 4). */
 export function snapshotRefusalWords(code: string, message: string): string {
     if (code === 'queue_not_drained') return `${message} The register keeps selling on the prices it holds until the item is answered; a copy that never comes is settled by enrolling the register again.`;
