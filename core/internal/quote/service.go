@@ -774,6 +774,14 @@ func (s *Service) transition(ctx context.Context, id uuid.UUID, to QuoteState, p
 				return err
 			}
 		}
+		// The one expiry rule (QE-01-a) runs before the lifecycle table so
+		// every path that would send or accept a quote past its Valid until,
+		// from any state, is answered with the ruling's words.
+		if to == QuoteStateSent || to == QuoteStateAccepted {
+			if err := s.expiryRefusal(ctx, cur); err != nil {
+				return err
+			}
+		}
 		if err := validateStateTransition(cur.Status, to); err != nil {
 			return err
 		}
@@ -885,6 +893,11 @@ func (s *Service) convert(ctx context.Context, id uuid.UUID, pre *Precondition) 
 			if err := pre.check(cur.Revision); err != nil {
 				return err
 			}
+		}
+		// The one expiry rule (QE-01-a): a quote past its Valid until
+		// converts on no path, whatever its state, until it is re-dated.
+		if err := s.expiryRefusal(ctx, cur); err != nil {
+			return err
 		}
 		// A quote accepted first (on the desk or by the customer) converts
 		// as it is: the acceptance already happened, so the convert neither

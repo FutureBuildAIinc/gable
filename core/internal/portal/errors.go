@@ -86,6 +86,20 @@ var (
 	ErrQuoteApprovalRequired       = errors.New("converting a quote that is not yet accepted requires the approve_quotes capability")
 )
 
+// refusalWithReason is a refusal whose explanation is built at the moment it
+// is refused, because it carries a fact the static map cannot (the day a
+// quote expired): the sentinel picks the code and the status exactly as the
+// map's entry does, and Reason replaces the map's wording. The quote expiry
+// rule's words come from the quote module, so every path says the same ones.
+type refusalWithReason struct {
+	sentinel error
+	reason   string
+}
+
+func (e *refusalWithReason) Error() string { return e.reason }
+
+func (e *refusalWithReason) Unwrap() error { return e.sentinel }
+
 // refusalReasons maps a sentinel onto a short, customer-safe explanation.
 //
 // httputil.RespondError deliberately replaces every message with a generic one
@@ -148,29 +162,43 @@ func writeRefusal(w http.ResponseWriter, r *http.Request, err error, status int)
 	if status != http.StatusConflict {
 		return false
 	}
+	// A refusal built with its own words (the quote expiry rule's) keeps the
+	// sentinel's code and takes those words as the reason.
+	var withReason *refusalWithReason
+	if errors.As(err, &withReason) {
+		if detail, ok := refusalReasons[withReason.sentinel]; ok {
+			writeRefusalBody(w, r, err, detail.code, withReason.reason)
+			return true
+		}
+	}
 	for sentinel, detail := range refusalReasons {
-		if !errors.Is(err, sentinel) {
-			continue
+		if errors.Is(err, sentinel) {
+			writeRefusalBody(w, r, err, detail.code, detail.reason)
+			return true
 		}
-		reqID := w.Header().Get("X-Request-ID")
-		if reqID == "" {
-			reqID = r.Header.Get("X-Request-ID")
-		}
-		slog.Warn("portal refusal",
-			"error", err, "status", status, "method", r.Method, "path", r.URL.Path, "request_id", reqID)
-
-		var body portalRefusal
-		body.Error.Code = detail.code
-		body.Error.Message = "Conflict"
-		body.Error.Reason = detail.reason
-		body.Meta.RequestID = reqID
-
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(status)
-		_ = json.NewEncoder(w).Encode(body)
-		return true
 	}
 	return false
+}
+
+// writeRefusalBody writes the 409 envelope: the code of the sentinel the
+// refusal wraps and the reason it carries, the map's or the refusal's own.
+func writeRefusalBody(w http.ResponseWriter, r *http.Request, err error, code, reason string) {
+	reqID := w.Header().Get("X-Request-ID")
+	if reqID == "" {
+		reqID = r.Header.Get("X-Request-ID")
+	}
+	slog.Warn("portal refusal",
+		"error", err, "status", http.StatusConflict, "method", r.Method, "path", r.URL.Path, "request_id", reqID)
+
+	var body portalRefusal
+	body.Error.Code = code
+	body.Error.Message = "Conflict"
+	body.Error.Reason = reason
+	body.Meta.RequestID = reqID
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusConflict)
+	_ = json.NewEncoder(w).Encode(body)
 }
 
 // statusForPortalError maps a sentinel onto an HTTP status. Anything

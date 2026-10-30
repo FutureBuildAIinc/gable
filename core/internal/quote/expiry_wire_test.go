@@ -318,26 +318,17 @@ func TestQE01_ReopenRedateSendRetakesSnapshot(t *testing.T) {
 		t.Fatalf("send again: %v", err)
 	}
 
+	// A re-date replaces the quote's lines, so the old baseline goes with
+	// its old line; what must hold is one active row, a new one, taken now.
 	second := escalatorState(t, f, q.ID)
-	if len(second) != 2 {
-		t.Fatalf("baselines after the re-dated send = %d rows, want 2 (the old one and the fresh one)", len(second))
+	if len(second) != 1 || !second[0].active {
+		t.Fatalf("baselines after the re-dated send = %+v, want exactly one active row", second)
 	}
-	var old, freshRow *escalatorRow
-	for i := range second {
-		if second[i].active {
-			freshRow = &second[i]
-		} else {
-			old = &second[i]
-		}
+	if second[0].id == first[0].id {
+		t.Errorf("the baseline after the re-dated send reuses the old row %s", first[0].id)
 	}
-	if old == nil || freshRow == nil {
-		t.Fatalf("baselines after the re-dated send = %+v, want one active fresh row and the old one inactive", second)
-	}
-	if freshRow.id == old.id {
-		t.Errorf("the fresh baseline reuses the old row %s", freshRow.id)
-	}
-	if !freshRow.recordedAt.After(old.recordedAt) {
-		t.Errorf("the fresh baseline was recorded at %v, not after the old one's %v", freshRow.recordedAt, old.recordedAt)
+	if !second[0].recordedAt.After(first[0].recordedAt) {
+		t.Errorf("the fresh baseline was recorded at %v, not after the old one's %v", second[0].recordedAt, first[0].recordedAt)
 	}
 }
 

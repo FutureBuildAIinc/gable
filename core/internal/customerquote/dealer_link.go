@@ -281,7 +281,11 @@ func (s *Service) DealerQuoteDecide(ctx context.Context, token string, c Caller,
 	if err := v.Err(); err != nil {
 		return nil, err
 	}
-	if dealerQuoteStatus(doc, s.now()) != "open" {
+	// An expired quote is decided by the quote module's own lifecycle, the
+	// one expiry rule (QE-01-a): its refusal carries the ruling's words, so
+	// the link's accept agrees with the desk instead of answering its own
+	// phrasing. Every other closed state is still refused here.
+	if status := dealerQuoteStatus(doc, s.now()); status != "open" && status != "expired" {
 		return nil, ErrInvalidState
 	}
 	action := "quote.accepted_from_link"
