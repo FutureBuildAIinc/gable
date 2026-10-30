@@ -102,21 +102,24 @@ func (m *cqMail) lastCode() string {
 }
 
 type cqStack struct {
-	t      *testing.T
-	db     *database.DB
-	srv    *httptest.Server
-	logs   *cqSyncBuf
-	mail   *cqMail
-	svc    *customerquote.Service
-	branch uuid.UUID
-	custA  uuid.UUID
-	custB  uuid.UUID
-	projA  uuid.UUID
-	projB  uuid.UUID
-	catLum uuid.UUID
-	stud   uuid.UUID
-	ply    uuid.UUID
-	nail   uuid.UUID
+	t        *testing.T
+	db       *database.DB
+	srv      *httptest.Server
+	logs     *cqSyncBuf
+	mail     *cqMail
+	svc      *customerquote.Service
+	quoteSvc *quote.Service
+	mux      *http.ServeMux
+	wall     *branchWall
+	branch   uuid.UUID
+	custA    uuid.UUID
+	custB    uuid.UUID
+	projA    uuid.UUID
+	projB    uuid.UUID
+	catLum   uuid.UUID
+	stud     uuid.UUID
+	ply      uuid.UUID
+	nail     uuid.UUID
 }
 
 func newCQStack(t *testing.T, multiBranch ...bool) *cqStack {
@@ -210,6 +213,7 @@ func newCQStack(t *testing.T, multiBranch ...bool) *cqStack {
 	}
 	wall := newBranchWall(db)
 	quoteSvc := quote.NewService(quote.NewRepository(db)).WithOutbox(outbox.NewWriter(db, "")).WithTxRunner(db)
+	s.quoteSvc, s.mux, s.wall = quoteSvc, mux, wall
 	s.svc = wireCustomerQuotes(mux, customerQuoteDeps{
 		DB: db, Logger: logger, Portal: portalSvc, Pricing: pricingSvc, Customers: customerSvc, Products: productSvc,
 		Email: nil, Docs: document.NewService(product.NewRepository(db)), PublicURL: "https://quotes.example", Trusted: clientip.Trusted{},
