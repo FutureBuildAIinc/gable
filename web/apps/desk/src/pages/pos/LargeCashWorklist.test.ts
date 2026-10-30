@@ -100,7 +100,7 @@ describe("the manager's large cash worklist", () => {
         const rows = all(el, 'large-cash-row');
         expect(rows.length).toBe(2);
         expect(rows[0].textContent).toContain('Riverbend Builders');
-        expect(rows[0].textContent).toContain('$12000.00');
+        expect(rows[0].textContent).toContain('$12,000.00');
         expect(rows[0].textContent).toContain('Kelowna Main');
         expect(q(rows[0], 'large-cash-deadline').textContent).toContain('The filing is due 2026-03-17');
         expect(q(rows[0], 'large-cash-adviser').textContent).toContain('confirms each filing with its own adviser');

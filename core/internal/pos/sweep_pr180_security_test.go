@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gablelbm/gable/internal/payment"
 	"github.com/google/uuid"
@@ -24,12 +25,32 @@ import (
 func conflictAnswerItem(t *testing.T, f *fixture, recordedRef string) (intentID, itemID uuid.UUID) {
 	t.Helper()
 	saleID := f.openSale(t, nil)
-	if r := f.completeSale(saleID, f.cardAll(t, saleID)); r.status != http.StatusConflict {
+	r := f.completeSale(saleID, f.cardAll(t, saleID))
+	if r.status != http.StatusConflict {
 		t.Fatalf("declined completion = %d, wanted 409: %s", r.status, r.raw)
 	}
-	intentID, state, _ := f.terminalIntentOf(t, saleID)
-	if state != "declined" {
-		t.Fatalf("the declined leg is %s, wanted declined", state)
+	// The completion answers card_declined once the scripted decline beat it
+	// home, and terminal_answer_pending when its wait ran out first: the
+	// decline travels on the device's own goroutine and can land after the
+	// completion answered, so no other blocker belongs here, and the leg
+	// stands pending_at_device until it lands.
+	_, blockers, _ := errorOf(t, r)
+	if len(blockers) != 1 || (blockers[0] != "card_declined" && blockers[0] != "terminal_answer_pending") {
+		t.Fatalf("the declined completion's blockers are %v, wanted card_declined or terminal_answer_pending", blockers)
+	}
+	// Wait for the scripted decline the same bound the device's own answer
+	// carries, instead of assuming it beat the completion home.
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		var state string
+		intentID, state, _ = f.terminalIntentOf(t, saleID)
+		if state == "declined" {
+			break
+		}
+		if !time.Now().Before(deadline) {
+			t.Fatalf("the declined leg is %s at the wait bound, wanted declined", state)
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
 	ledger := payment.NewTerminalLedger(f.db)
 	if out, err := ledger.ApplyDeviceAnswer(context.Background(), payment.TerminalAnswer{

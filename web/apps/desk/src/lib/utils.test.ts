@@ -12,7 +12,7 @@
  * line, so it gets the deepest tests in this suite.
  */
 import { describe, it, expect } from 'vitest'
-import { cn, formatCents, formatPrice4 } from './utils'
+import { cn, formatCents, formatPrice2, formatPrice4 } from './utils'
 
 describe('test environment', () => {
   // formatCents() calls toLocaleString(undefined, ...) — it inherits the runtime's
@@ -162,6 +162,27 @@ describe('cn', () => {
 
   it('keeps non-conflicting utilities from the same group', () => {
     expect(cn('px-4', 'py-2')).toBe('px-4 py-2')
+  })
+})
+
+describe('formatPrice2', () => {
+  it('rounds the wire precision to cents, half up, for the eye only', () => {
+    expect(formatPrice2(165750)).toBe('$16.58')
+    expect(formatPrice2(14025)).toBe('$1.40')
+    expect(formatPrice2(13724)).toBe('$1.37')
+    expect(formatPrice2(50000)).toBe('$5.00')
+    expect(formatPrice2(0)).toBe('$0.00')
+  })
+
+  it('groups thousands and puts the minus outside the symbol', () => {
+    expect(formatPrice2(12345670000)).toBe('$1,234,567.00')
+    expect(formatPrice2(-15000)).toBe('-$1.50')
+  })
+
+  it('treats null, undefined and NaN as zero', () => {
+    expect(formatPrice2(null)).toBe('$0.00')
+    expect(formatPrice2(undefined)).toBe('$0.00')
+    expect(formatPrice2(NaN)).toBe('$0.00')
   })
 })
 

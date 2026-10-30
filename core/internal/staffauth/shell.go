@@ -196,21 +196,33 @@ func (s *Service) Redeem(ctx context.Context, code, verifier string) (ShellToken
 	case err != nil:
 		return refuse(refusalReason(err))
 	}
+	return s.issueShell(ctx, Identity{Sub: sub, Roles: roles}, awUserID, "")
+}
+
+// issueShell files a new shell session for an admitted person and answers
+// its access and refresh pair, the first of a new token family. method, when
+// set, names the sign in method on the audit row.
+func (s *Service) issueShell(ctx context.Context, who Identity, awUserID, method string) (ShellTokens, error) {
+	now := s.now().UTC().Truncate(time.Microsecond)
 	family := uuid.New()
 	access, refresh, err := newShellPair(family)
 	if err != nil {
 		return ShellTokens{}, err
 	}
 	row := Session{
-		IDHash: hashID(access), Sub: sub, AppwriteUserID: awUserID, ClientKind: "shell", Roles: roles,
+		IDHash: hashID(access), Sub: who.Sub, AppwriteUserID: awUserID, ClientKind: "shell", Roles: who.Roles,
 		RolesReadAt: now, CreatedAt: now, IdleSeconds: int(s.set.IdleLimit.Seconds()),
 		AbsoluteExpiresAt: now.Add(s.set.AbsoluteLimit), RefreshHash: hashID(refresh), TokenFamily: &family,
 	}
 	if err := s.store.Create(ctx, row); err != nil {
 		return ShellTokens{}, err
 	}
-	s.auditEvent(ctx, "staff.sign_in", sub, sub.String(), map[string]any{"client_kind": "shell", "roles": roles})
-	return ShellTokens{Access: access, Refresh: refresh, ExpiresIn: int(s.set.AbsoluteLimit.Seconds()), Identity: Identity{Sub: sub, Roles: roles}}, nil
+	changes := map[string]any{"client_kind": "shell", "roles": who.Roles}
+	if method != "" {
+		changes["method"] = method
+	}
+	s.auditEvent(ctx, "staff.sign_in", who.Sub, who.Sub.String(), changes)
+	return ShellTokens{Access: access, Refresh: refresh, ExpiresIn: int(s.set.AbsoluteLimit.Seconds()), Identity: who}, nil
 }
 
 // readAdmission reads the account and the membership with the key and

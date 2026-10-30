@@ -7,7 +7,7 @@
 // its own snapshot and runs the sync with the keychain's token. A browser tab
 // has no core, so the counter there sells online only and says so.
 
-import { authMethodsConfig } from '@gable/auth';
+import { authMethodsConfig, resetAuthMethodsCache } from '@gable/auth';
 import type {
     OfflineCartPreview,
     OfflineEnrolment,
@@ -93,9 +93,15 @@ export const offlineCounter = {
      * The shell's own sign in, which puts the token in the keychain the core
      * reads (a web sign in writes only the cookie). The method is the dealer's
      * first allowed redirect method; the shell starts redirect methods only.
+     * A degraded answer means the server did not answer: the register says
+     * so and forgets it, so the next tap asks the server again.
      */
     async signIn(): Promise<void> {
         const config = await authMethodsConfig(import.meta.env.VITE_API_URL || '');
+        if (config.degraded) {
+            resetAuthMethodsCache();
+            throw new OfflineCounterError({ code: 'server_unreachable', message: 'The server cannot be reached: the register keeps its sales and sends them when the connection returns.' });
+        }
         const method = config.methods.find((m) => m.kind === 'redirect');
         if (!method) throw new OfflineCounterError({ code: 'no_sign_in_method', message: 'This dealer allows no sign in method a register can start. Ask a manager.' });
         await call('begin_sign_in', { method: method.method });

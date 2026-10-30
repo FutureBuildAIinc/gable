@@ -31,6 +31,10 @@ services:
     build:
       context: .
       dockerfile: core/Dockerfile
+      args:
+        # AUTH_MODE=dev starts only in a binary built with this tag (ADR 0012
+        # section 7). Local stack only; no image to publish sets it.
+        GO_BUILD_TAGS: devauth
     image: gable-core:local
     command: ["sh", "-c", "./core migrate && ./core seed"]
     environment:

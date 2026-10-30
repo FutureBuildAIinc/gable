@@ -42,13 +42,24 @@ export class SignaturePad extends LitElement {
         return { x: ((e.clientX - (box?.left ?? 0)) * scaleX), y: ((e.clientY - (box?.top ?? 0)) * scaleY) };
     }
 
-    private _paint() {
-        const ctx = this._canvas?.getContext?.('2d') ?? null;
+    /** A theme token ("13 17 23") as a canvas colour, or the fallback when the token is not set. */
+    private _token(name: string, fallback: string): string {
+        const v = getComputedStyle(this).getPropertyValue(name).trim();
+        return v ? `rgb(${v.split(/\s+/).join(',')})` : fallback;
+    }
+
+    /**
+     * Draws the strokes. The box on screen takes the theme's field surface and
+     * text colour; the PNG that is kept is drawn apart, black on white, so the
+     * stored signature reads the same on a receipt in either theme.
+     */
+    private _paint(target: HTMLCanvasElement | null = this._canvas, record = false) {
+        const ctx = target?.getContext?.('2d') ?? null;
         if (!ctx) return;
         ctx.clearRect(0, 0, this.width, this.height);
-        ctx.fillStyle = '#ffffff';
+        ctx.fillStyle = record ? '#ffffff' : this._token('--gb-till-field', '#ffffff');
         ctx.fillRect(0, 0, this.width, this.height);
-        ctx.strokeStyle = '#111111';
+        ctx.strokeStyle = record ? '#111111' : this._token('--gb-till-text', '#111111');
         ctx.lineWidth = 2;
         ctx.lineCap = 'round';
         ctx.lineJoin = 'round';
@@ -94,7 +105,16 @@ export class SignaturePad extends LitElement {
     /** The canvas as the base64 payload of a PNG; null while blank or when no PNG came out. */
     png(): string | null {
         if (this.blank) return null;
-        const url = this._canvas?.toDataURL?.('image/png') ?? '';
+        const record = document.createElement('canvas');
+        record.width = this.width;
+        record.height = this.height;
+        let url = '';
+        if (record.getContext?.('2d')) {
+            this._paint(record, true);
+            url = record.toDataURL?.('image/png') ?? '';
+        } else {
+            url = this._canvas?.toDataURL?.('image/png') ?? '';
+        }
         return pngPayload(url);
     }
 
@@ -106,7 +126,7 @@ export class SignaturePad extends LitElement {
         return html`
             <canvas width=${this.width} height=${this.height} data-testid="signature-canvas"
                 aria-label="Signature box: draw the signature here"
-                style="touch-action:none;width:100%;max-width:${this.width}px;height:auto;background:#ffffff;border-radius:6px"
+                style="touch-action:none;width:100%;max-width:${this.width}px;height:auto;background:rgb(var(--gb-till-field));border-radius:6px"
                 class="block border border-white/20"
                 @pointerdown=${this._down} @pointermove=${this._move} @pointerup=${this._up}
                 @pointercancel=${this._up}></canvas>`;
