@@ -368,6 +368,25 @@ type Repository interface {
 	OpenOfflineExceptionsOfSession(ctx context.Context, session uuid.UUID) ([]string, error)
 	OpenOfflineExceptionsOfDay(ctx context.Context, branch uuid.UUID, date string) ([]string, error)
 	OfflineUndrained(ctx context.Context, register string) (epoch, reported, high int64, found bool, err error)
+	// Device enrolment and the snapshot (ADR 0011, slice O2)
+	LockRegisterForEnrolment(ctx context.Context, register string) (bool, error)
+	RegisterDevices(ctx context.Context, register string) (active, previous *RegisterDevice, maxEpoch int64, err error)
+	PublicKeyEnrolled(ctx context.Context, key string) (bool, error)
+	RevokeRegisterDevice(ctx context.Context, register string, epoch int64, by, reason string) (*RegisterDevice, error)
+	InsertRegisterDevice(ctx context.Context, register string, branch uuid.UUID, epoch int64, key, by string) (*RegisterDevice, error)
+	RecordedMark(ctx context.Context, register string, epoch int64) (int64, error)
+	OpenBadCopy(ctx context.Context, register string, epoch int64) (*int64, error)
+	RegisterOpenSession(ctx context.Context, register string) (*offlineOpenSession, error)
+	UnknownTailRecorded(ctx context.Context, register string, epoch int64) (bool, error)
+	InsertUnknownTail(ctx context.Context, register string, branch uuid.UUID, epoch, from, to int64,
+		session *uuid.UUID, businessDate time.Time, message string) (uuid.UUID, error)
+	SnapshotProducts(ctx context.Context, branch uuid.UUID) ([]snapshotProductRow, error)
+	SnapshotAccounts(ctx context.Context, branch, walkIn uuid.UUID) ([]snapshotAccountRow, error)
+	SnapshotJobs(ctx context.Context, customerID uuid.UUID) ([]snapshotJob, error)
+	OpenAccountExceptionCents(ctx context.Context, register string, customerID uuid.UUID) (int64, error)
+	LatestOfflineSnapshot(ctx context.Context, register string, epoch int64) (*IssuedSnapshot, error)
+	InsertOfflineSnapshot(ctx context.Context, id uuid.UUID, register string, branch uuid.UUID, epoch int64,
+		businessDate time.Time, content []byte, digest string) error
 
 	// The manager step up (CP-04 slice 3)
 	FindStepUpManager(ctx context.Context, manager string) (*StepUpManager, bool, error)

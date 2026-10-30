@@ -423,6 +423,10 @@ GET	/api/v1/pos/offline/exceptions/{id}	internal/pos	h.GetOfflineException
 POST	/api/v1/pos/offline/exceptions/{id}/resolve	internal/pos	h.ResolveOfflineException
 GET	/api/v1/pos/offline/policy	internal/pos	h.GetOfflinePolicy
 PUT	/api/v1/pos/offline/policy	internal/pos	h.PutOfflinePolicy
+GET	/api/v1/pos/offline/registers/{id}/device	internal/pos	h.GetRegisterDevice
+POST	/api/v1/pos/offline/registers/{id}/device	internal/pos	h.EnrolRegisterDevice
+POST	/api/v1/pos/offline/registers/{id}/device/revoke	internal/pos	h.RevokeRegisterDevice
+GET	/api/v1/pos/offline/snapshot	internal/pos	h.GetOfflineSnapshot
 GET	/api/v1/pos/products/search	internal/pos	h.SearchProducts
 GET	/api/v1/pos/refund-intents	internal/pos	h.ListRefundIntents
 POST	/api/v1/pos/refund-intents/{id}/payback	internal/pos	h.PaybackRefundIntent
