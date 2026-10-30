@@ -160,6 +160,24 @@ func TestDemoImport(t *testing.T) {
 			t.Errorf("demo alerts: %d acknowledge-required warnings and %d notes, want 1 and 1", warnings, notes)
 		}
 	})
+	t.Run("every demo yard has one active bank account on cash, and a reseed adds none", func(t *testing.T) {
+		count := func() (yards, accounts, onCash int) {
+			if err := db.QueryRow(`SELECT (SELECT COUNT(*) FROM locations WHERE type = 'BRANCH' AND active),
+				COUNT(*), COUNT(*) FILTER (WHERE g.code = '1010' AND b.is_active)
+				FROM bank_accounts b JOIN gl_accounts g ON g.id = b.gl_account_id`).Scan(&yards, &accounts, &onCash); err != nil {
+				t.Fatal(err)
+			}
+			return
+		}
+		yards, accounts, onCash := count()
+		if yards == 0 || accounts != yards || onCash != yards {
+			t.Errorf("%d yards, %d bank accounts, %d active on 1010: want one each", yards, accounts, onCash)
+		}
+		runCommand(t, dbURL, "./cmd/seed")
+		if y2, a2, c2 := count(); y2 != yards || a2 != accounts || c2 != onCash {
+			t.Errorf("a reseed moved the counts to %d, %d, %d from %d, %d, %d", y2, a2, c2, yards, accounts, onCash)
+		}
+	})
 	t.Run("the counter manager can approve with the demo PIN", func(t *testing.T) {
 		// P2 7 of walk B: a fresh demo had no approver. The seed's counter
 		// manager holds an approver role, an active row and a PIN that the

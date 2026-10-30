@@ -396,6 +396,13 @@ func Run() {
 			branchIDs[b.Code] = uuid.MustParse(id)
 		}
 	}
+	for _, b := range branches {
+		if _, ok := branchIDs[b.Code]; ok {
+			if err := seedDemoBankAccount(db, b.Name); err != nil {
+				log.Printf("Bank account for %s: %v", b.Name, err)
+			}
+		}
+	}
 	kelMainID := branchIDs["KEL-MAIN"]
 	wkID := branchIDs["WK"]
 	lkID := branchIDs["LK"]
@@ -1634,6 +1641,29 @@ func seedCustomer(db *sql.DB, c demoCustomer, profile uuid.UUID) (uuid.UUID, uui
 		return uuid.Nil, uuid.Nil, fmt.Errorf("mirror the primary branch: %w", err)
 	}
 	return uuid.MustParse(cid), uuid.MustParse(branch), nil
+}
+
+// demoBankAccountName is the name of a yard's demo bank account, the natural
+// key the seed upserts on (bank_accounts holds no unique column).
+func demoBankAccountName(yardName string) string { return yardName + " Operating" }
+
+// seedDemoBankAccount gives a demo yard one bank account on the GL account
+// the ledger posts cash to (1010), so "Deposit to" lists it on the end of day
+// and a cash day closes on a fresh demo. Reference data: found by its name and
+// repaired, else inserted; an operator's other accounts are never touched.
+func seedDemoBankAccount(db *sql.DB, yardName string) error {
+	name := demoBankAccountName(yardName)
+	res, err := db.Exec(`UPDATE bank_accounts SET gl_account_id = (SELECT id FROM gl_accounts WHERE code = '1010'), is_active = TRUE
+		WHERE name = $1`, name)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n > 0 {
+		return nil
+	}
+	_, err = db.Exec(`INSERT INTO bank_accounts (name, gl_account_id, is_active)
+		SELECT $1, id, TRUE FROM gl_accounts WHERE code = '1010'`, name)
+	return err
 }
 
 // demoCounterAlerts are what the demo leaves on its first two accounts so a
