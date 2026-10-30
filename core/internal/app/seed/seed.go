@@ -1538,6 +1538,10 @@ func Run() {
 		}
 	}
 
+	// QE slice additions, after every product the seed writes: the commodity
+	// backfill a migration cannot do for the seed (see qe.go).
+	seedQECommodities(db)
+
 	// =========================================================================
 	// 23. EDI TRADING PARTNERS
 	// =========================================================================

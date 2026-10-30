@@ -12,7 +12,9 @@
         "events": [],
         "exposure_dollars": 0,
         "exposure_state": "OK",
-        "indexes": [],
+        "indexes": [
+          "RL_FRAMING_COMP"
+        ],
         "last_checked_at": "<ts+0d>",
         "quote_id": "<id-1>",
         "required_action": ""
@@ -57,7 +59,9 @@
         ],
         "exposure_dollars": 0,
         "exposure_state": "OK",
-        "indexes": [],
+        "indexes": [
+          "RL_FRAMING_COMP"
+        ],
         "last_checked_at": "<ts+0d>",
         "quote_id": "<id-1>",
         "required_action": ""

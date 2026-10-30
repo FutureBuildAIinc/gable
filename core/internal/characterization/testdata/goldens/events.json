@@ -74,6 +74,7 @@
               "customer_id": "<id-4>",
               "customer_name": "",
               "event_type": "ACK_REQUIRED",
+              "index_code": "RL_FRAMING_COMP",
               "quote_id": "<id-5>",
               "quote_short_id": "<short-id>",
               "salesperson_id": "<id-6>",
