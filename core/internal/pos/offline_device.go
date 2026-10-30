@@ -289,7 +289,7 @@ func (s *Service) EnrolDevice(ctx context.Context, register string, in *EnrolDev
 		} else if !ok {
 			return httpx.NotFound("no such register")
 		}
-		active, _, maxEpoch, err := s.repo.RegisterDevices(ctx, register)
+		active, previous, maxEpoch, err := s.repo.RegisterDevices(ctx, register)
 		if err != nil {
 			return err
 		}
@@ -305,23 +305,37 @@ func (s *Service) EnrolDevice(ctx context.Context, register string, in *EnrolDev
 		by := m.ID.String()
 		var replaced *RegisterDevice
 		var tail *uuid.UUID
-		if active != nil {
-			// lock 0a on the epoch being replaced: a sync of it in flight
-			// finishes before the revocation, every later one reads it
-			if _, err := s.repo.LockRegisterDevice(ctx, register, active.DeviceEpoch); err != nil {
+		// the tail is the latest epoch's, live or already revoked (a manager
+		// may revoke a lost device before enrolling its replacement)
+		latest := active
+		if latest == nil {
+			latest = previous
+		}
+		if latest != nil {
+			// lock 0a on the latest epoch: a sync of it in flight finishes
+			// before the tail is read and the revocation, every later one
+			// reads them
+			locked, err := s.repo.LockRegisterDevice(ctx, register, latest.DeviceEpoch)
+			if err != nil {
 				return err
 			}
-			if in.PriorEpoch != nil && *in.PriorEpoch != active.DeviceEpoch {
+			if in.PriorEpoch != nil && *in.PriorEpoch != latest.DeviceEpoch {
 				return invalid("previous_epoch_mark.device_epoch",
-					fmt.Sprintf("must be the register's enrolled epoch, %d", active.DeviceEpoch))
+					fmt.Sprintf("must be the register's latest epoch, %d", latest.DeviceEpoch))
 			}
-			if in.PriorLastSeq != nil {
-				if tail, err = s.unknownTail(ctx, register, branch, active.DeviceEpoch, *in.PriorLastSeq); err != nil {
+			// the report is the higher of the device's last reported mark and
+			// the keychain's, when the shell still holds one
+			report := locked.ReportedSeq
+			if in.PriorLastSeq != nil && *in.PriorLastSeq > report {
+				report = *in.PriorLastSeq
+			}
+			if tail, err = s.unknownTail(ctx, register, branch, latest.DeviceEpoch, report); err != nil {
+				return err
+			}
+			if active != nil {
+				if replaced, err = s.repo.RevokeRegisterDevice(ctx, register, active.DeviceEpoch, by, "re-enrolled"); err != nil {
 					return err
 				}
-			}
-			if replaced, err = s.repo.RevokeRegisterDevice(ctx, register, active.DeviceEpoch, by, "re-enrolled"); err != nil {
-				return err
 			}
 		} else if in.PriorEpoch != nil {
 			return invalid("previous_epoch_mark", "the register holds no enrolment to replace")
@@ -362,10 +376,10 @@ func epochOf(d *RegisterDevice) *int64 {
 }
 
 // unknownTail records the unknown tail item of a re-enrolment over a lost or
-// rolled back store (ADR 0011 section 5.1): the numbers the shell's keychain
-// says it assigned under the old epoch that the server never recorded. It
-// names the register's open session, so it holds the till close until a
-// manager accepts it (slice O4).
+// rolled back store (ADR 0011 section 5.1): the numbers the device reported
+// or its keychain says it assigned under the old epoch that the server never
+// recorded. An epoch holds one item at most. It names the register's open
+// session, so it holds the till close until a manager accepts it (slice O4).
 func (s *Service) unknownTail(ctx context.Context, register string, branch uuid.UUID, epoch, lastSeq int64) (*uuid.UUID, error) {
 	mark, err := s.repo.RecordedMark(ctx, register, epoch)
 	if err != nil {
@@ -373,6 +387,9 @@ func (s *Service) unknownTail(ctx context.Context, register string, branch uuid.
 	}
 	if lastSeq <= mark {
 		return nil, nil
+	}
+	if found, err := s.repo.UnknownTailRecorded(ctx, register, epoch); err != nil || found {
+		return nil, err
 	}
 	session, err := s.repo.RegisterOpenSession(ctx, register)
 	if err != nil {

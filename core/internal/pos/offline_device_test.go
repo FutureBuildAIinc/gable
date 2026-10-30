@@ -23,6 +23,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/gablelbm/gable/internal/pos"
 	"github.com/gablelbm/gable/internal/testutil"
@@ -536,6 +537,66 @@ func TestOfflineDevice_UnknownTailAfterARevocation(t *testing.T) {
 	if r.status != http.StatusCreated || r.body["unknown_tail_exception_id"] == nil {
 		t.Errorf("re-enrol after a revocation with the keychain's mark at 4 (server at 1) = %d %s, want 201 with an unknown tail",
 			r.status, r.raw)
+	}
+	deviceCleanup(t, f, b.register)
+}
+
+// A sync of the revoked epoch holds lock 0a on its row and raises the
+// device's reported mark while a re-enrolment arrives: the enrolment waits
+// for it and writes the tail to the mark the sync left, never the one it read
+// before the lock.
+func TestOfflineDevice_UnknownTailWaitsForASyncOfTheRevokedEpoch(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	f := newFixture(t, testutil.RequireDBMaxConns(t, 4))
+	offlinePolicyOn(t, f)
+	b := newOfflineBench(t, f)
+	owner, _, _, _ := seedManager(t, f, "owner", devicePIN)
+	admin := []string{"X-Test-Role", "admin", "X-Test-Sub", mustUUID(t)}
+	path := "/api/v1/pos/offline/registers/" + b.register + "/device"
+	_, s1 := b.build(t, saleSpec{lines: []offlineLine{line(f.productID, "1")}})
+	b.sync(t, b.sign(t, s1))
+	if r := f.do("POST", path+"/revoke", map[string]any{"device_epoch": 1, "reason": "lost", "manager": owner, "pin": devicePIN},
+		admin...); r.status != http.StatusOK {
+		t.Fatalf("revoke = %d %s", r.status, r.raw)
+	}
+
+	// the sync in flight: lock 0a on epoch 1's row, its report raised to 6
+	ctx := context.Background()
+	tx, err := f.db.Pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if _, err := tx.Exec(ctx, `SELECT 1 FROM pos_register_devices WHERE register_id = $1 AND epoch = 1 FOR UPDATE`,
+		b.register); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tx.Exec(ctx, `UPDATE pos_register_devices SET reported_seq = 6 WHERE register_id = $1 AND epoch = 1`,
+		b.register); err != nil {
+		t.Fatal(err)
+	}
+	key, _ := newDeviceKey(t)
+	done := make(chan resp, 1)
+	go func() { done <- f.do("POST", path, enrolBody(2, key, owner, devicePIN), admin...) }()
+	select {
+	case r := <-done:
+		t.Fatalf("the enrolment did not wait for the sync's lock: %d %s", r.status, r.raw)
+	case <-time.After(500 * time.Millisecond):
+	}
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	r := <-done
+	if r.status != http.StatusCreated || r.body["unknown_tail_exception_id"] == nil {
+		t.Fatalf("re-enrol after the sync = %d %s, want 201 with an unknown tail", r.status, r.raw)
+	}
+	var from, to int64
+	if err := f.db.Pool.QueryRow(ctx, `SELECT gap_from_seq, gap_to_seq FROM pos_offline_exceptions WHERE id = $1`,
+		r.body["unknown_tail_exception_id"]).Scan(&from, &to); err != nil {
+		t.Fatal(err)
+	}
+	if from != 2 || to != 6 {
+		t.Errorf("unknown tail = %d..%d, want 2..6 (the mark the sync left)", from, to)
 	}
 	deviceCleanup(t, f, b.register)
 }

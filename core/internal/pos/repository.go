@@ -361,6 +361,7 @@ type Repository interface {
 	RecordedMark(ctx context.Context, register string, epoch int64) (int64, error)
 	OpenBadCopy(ctx context.Context, register string, epoch int64) (*int64, error)
 	RegisterOpenSession(ctx context.Context, register string) (*offlineOpenSession, error)
+	UnknownTailRecorded(ctx context.Context, register string, epoch int64) (bool, error)
 	InsertUnknownTail(ctx context.Context, register string, branch uuid.UUID, epoch, from, to int64,
 		session *uuid.UUID, businessDate time.Time, message string) (uuid.UUID, error)
 	SnapshotProducts(ctx context.Context, branch uuid.UUID) ([]snapshotProductRow, error)

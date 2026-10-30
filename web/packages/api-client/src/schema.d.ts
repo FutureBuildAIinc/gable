@@ -6904,7 +6904,7 @@ export interface paths {
         put?: never;
         /**
          * Enrol a register's device for offline selling
-         * @description Records the shell's Ed25519 public key for the register's next epoch and revokes the previous key in the same transaction (ADR 0011 section 6.1). An owner or admin act, never a machine key: the manager proves presence with their counter PIN (the step up's own check, failure count and lock). device_epoch must be the register's next_epoch (409 epoch_moved otherwise); a key is enrolled once (409 public_key_reused). previous_epoch_mark, the mark the shell's keychain kept for the epoch it replaces, records an unknown_tail exception over the numbers the server never recorded. Audited as pos.register_device.enrolled (and .revoked for the replaced key).
+         * @description Records the shell's Ed25519 public key for the register's next epoch and revokes the previous key in the same transaction (ADR 0011 section 6.1). An owner or admin act, never a machine key: the manager proves presence with their counter PIN (the step up's own check, failure count and lock). device_epoch must be the register's next_epoch (409 epoch_moved otherwise); a key is enrolled once (409 public_key_reused). The register's latest epoch, live or already revoked, gets an unknown_tail exception over the numbers the server never recorded: the higher of the device's last reported mark and previous_epoch_mark (the mark the shell's keychain kept for that epoch), less the server's recorded mark, once per epoch. Audited as pos.register_device.enrolled (and .revoked for the replaced key).
          */
         post: operations["posOfflineRegisterDeviceEnrol"];
         delete?: never;
