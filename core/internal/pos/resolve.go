@@ -450,6 +450,11 @@ func (s *Service) runVoidResolutionTx(ctx context.Context, rec *RefundIntentReco
 			return err
 		}
 		mergeEffects(&fxAll, rfx)
+		// the terminal returned the card fee with the goods (CP-15): it
+		// leaves the surcharge income account as the void itself would
+		if err := s.bookFeeRefund(ctx, rec.RefundIntent, &sale.BranchID, actor); err != nil {
+			return err
+		}
 		if s.auditLog != nil {
 			if err := s.auditLog.Log(ctx, entry); err != nil {
 				return fmt.Errorf("failed to write the resolution audit row: %w", err)
