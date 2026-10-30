@@ -22,6 +22,7 @@ import (
 // tables, with the parts summing to the named combined rate.
 func seedZone(t *testing.T, f *fixture, rate1, rate2 string) uuid.UUID {
 	t.Helper()
+	testutil.LockTaxZones(t)
 	// The zone tables start empty: a zone an earlier run left behind could
 	// win the lookup's lowest combined rule.
 	if _, err := f.db.Pool.Exec(context.Background(), `TRUNCATE tax_zone_boundaries, tax_zone_rates, tax_zones`); err != nil {

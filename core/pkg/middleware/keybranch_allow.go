@@ -324,6 +324,7 @@ var keyBranchRoutes = map[string]KeyBranchRouteNote{
 	"GET /api/v1/scheduling/windows/{id}":                          {KeyBranchClassWalled, "the branch middleware holds the pin"},
 	"GET /api/v1/ship-tos/{id}":                                    {KeyBranchClassWalled, "customer_ship_tos.customer_id to customer_branches"},
 	"GET /api/v1/tax/exemptions/{customerID}":                      {KeyBranchClassConfined, "CustomerBranch(path customer); TestKeyBranchPin_CustomerConfinedReads"},
+	"GET /api/v1/tax/setup":                                        {KeyBranchClassStatedLimit, "dealer wide tax setup warnings (the GST/HST number, every branch's ship-tos)"},
 	"GET /api/v1/tax/zones":                                        {KeyBranchClassStatedLimit, "dealer wide tax configuration"},
 	"GET /api/v1/tax/zones/{id}":                                   {KeyBranchClassStatedLimit, "dealer wide tax configuration"},
 	"GET /api/v1/tint/bases":                                       {KeyBranchClassStatedLimit, "the dealer wide tint catalogue"},

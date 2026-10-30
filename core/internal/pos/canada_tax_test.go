@@ -25,6 +25,7 @@ import (
 
 func (f *fixture) seedBCZone() {
 	f.t.Helper()
+	testutil.LockTaxZones(f.t)
 	mustExec(f.t, f.db, `TRUNCATE tax_zone_boundaries, tax_zone_rates, tax_zones`)
 	f.t.Cleanup(func() { mustExec(f.t, f.db, `TRUNCATE tax_zone_boundaries, tax_zone_rates, tax_zones`) })
 	if _, err := taxzone.NewRepository(f.db).Create(context.Background(), &taxzone.Draft{

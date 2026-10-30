@@ -18,6 +18,7 @@ import (
 )
 
 func TestTaxInputsReadTheZoneOnTheBranchBusinessDay(t *testing.T) {
+	testutil.LockTaxZones(t)
 	db := testutil.RequireDB(t)
 	ctx := context.Background()
 

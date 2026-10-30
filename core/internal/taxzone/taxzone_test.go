@@ -28,6 +28,7 @@ import (
 // zone an earlier run left behind would answer lookups with the wrong rate.
 func clearZones(t *testing.T, db *database.DB) {
 	t.Helper()
+	testutil.LockTaxZones(t)
 	if _, err := db.Pool.Exec(context.Background(), `TRUNCATE tax_zone_boundaries, tax_zone_rates, tax_zones`); err != nil {
 		t.Fatalf("clear the zone tables: %v", err)
 	}

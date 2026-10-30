@@ -28,6 +28,7 @@ import (
 // seedBCZone makes the BC province zone, GST 5 and PST 7.
 func seedBCZone(t *testing.T, f *fixture) uuid.UUID {
 	t.Helper()
+	testutil.LockTaxZones(t)
 	if _, err := f.db.Pool.Exec(context.Background(), `TRUNCATE tax_zone_boundaries, tax_zone_rates, tax_zones`); err != nil {
 		t.Fatalf("clear the zone tables: %v", err)
 	}

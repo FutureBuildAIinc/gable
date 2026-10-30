@@ -21,6 +21,7 @@ import (
 
 func TestResolveSaleTaxReadsTheZoneOnTheBranchBusinessDay(t *testing.T) {
 	testutil.LockOutboxTables(t)
+	testutil.LockTaxZones(t)
 	db := testutil.RequireDB(t)
 	ctx := context.Background()
 

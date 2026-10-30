@@ -107,14 +107,14 @@ type Sale struct {
 	// TaxLines are a completed Canadian sale's tax parts, read from its
 	// invoice's frozen zone (CP-14 A1); null on a cart and on a US sale.
 	TaxLines      []taxzone.TaxLine `json:"tax_lines"`
-	taxRateParts  []byte
-	TotalCents    httpx.Cents      `json:"total_cents"`
-	ChangeCents   httpx.Cents      `json:"change_cents"`
-	TillSessionID *uuid.UUID       `json:"till_session_id"`
-	Status        SaleStatus       `json:"status"`
-	InvoiceID     *uuid.UUID       `json:"invoice_id"`
-	CompletedAt   *httpx.Timestamp `json:"completed_at"`
-	CreatedAt     httpx.Timestamp  `json:"created_at"`
+	taxRateParts  []byte            `json:"-"`
+	TotalCents    httpx.Cents       `json:"total_cents"`
+	ChangeCents   httpx.Cents       `json:"change_cents"`
+	TillSessionID *uuid.UUID        `json:"till_session_id"`
+	Status        SaleStatus        `json:"status"`
+	InvoiceID     *uuid.UUID        `json:"invoice_id"`
+	CompletedAt   *httpx.Timestamp  `json:"completed_at"`
+	CreatedAt     httpx.Timestamp   `json:"created_at"`
 
 	// CustomerPO and JobID are the purchase order and job a charge sale
 	// names when the account asks for them.

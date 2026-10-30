@@ -58,6 +58,20 @@ func LockProductImageSetting(t *testing.T) {
 	lockKey(t, productImageLockKey, "product image setting")
 }
 
+// taxZoneLockKey is the advisory lock key every test that empties or seeds
+// the tax zone tables holds for its body.
+const taxZoneLockKey int64 = 0x7461787a6f6e65 // "taxzone"
+
+// LockTaxZones serialises the calling test against every other test, in any
+// package, that empties or seeds the tax zone tables (CP-10, CP-14): a zone
+// lookup reads the whole table, so a truncation in one package's test would
+// take the zone another package's test just made. Call it before the test
+// touches the tables.
+func LockTaxZones(t *testing.T) {
+	t.Helper()
+	lockKey(t, taxZoneLockKey, "tax zone tables")
+}
+
 func lockKey(t *testing.T, key int64, what string) {
 	t.Helper()
 	lockKeyMode(t, key, what, false)

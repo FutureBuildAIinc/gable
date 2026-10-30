@@ -22,6 +22,7 @@ import (
 // zoneFor seeds one postal zone through the zone tables and answers its id.
 func zoneFor(t *testing.T, f *fixture, code string, parts ...taxzone.RatePart) uuid.UUID {
 	t.Helper()
+	testutil.LockTaxZones(t)
 	// The zone tables start empty: a zone an earlier run left behind could
 	// answer the lookup with a lower rate and win the lowest combined rule.
 	mustExec(t, f.db, `TRUNCATE tax_zone_boundaries, tax_zone_rates, tax_zones`)
