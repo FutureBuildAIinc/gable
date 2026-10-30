@@ -232,6 +232,8 @@ func Run() {
 		os.Exit(1)
 	}
 	var authMw *middleware.AuthMiddleware
+	sweepCtx, sweepCancel := context.WithCancel(context.Background())
+	defer sweepCancel()
 	var staffHandler *staffauth.Handler
 	var staffLinks *staffauth.Links
 	var awClient *appwrite.Client
@@ -257,6 +259,7 @@ func Run() {
 			RefreshAfter: cfg.StaffSessionRefresh, SnapshotMaxAge: cfg.StaffSessionSnapshot,
 		}, logger).WithFloorWatch(awClient, time.Minute)
 		staffLinks = staffauth.NewLinks(db, awClient, auditLog)
+		go staffSvc.RunSweeper(sweepCtx, time.Hour)
 		staffHandler = staffauth.NewHandler(staffSvc, staffauth.HandlerConfig{Origin: cfg.PublicURL, Trusted: cfg.TrustedProxies})
 		am, err := middleware.NewAuthMiddleware(context.Background(), middleware.AuthConfig{
 			JWKSURL:     cfg.JWKSURL,

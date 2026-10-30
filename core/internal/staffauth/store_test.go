@@ -5,6 +5,7 @@ package staffauth
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -153,5 +154,41 @@ func TestStoreReplaceAfterRevokeChangesNothing(t *testing.T) {
 	got, _ := st.Get(ctx, row.IDHash)
 	if len(got.Roles) != 1 || got.Roles[0] != "sales" {
 		t.Fatalf("roles after a late replace = %v", got.Roles)
+	}
+}
+
+func TestStoreSweepRemovesOnlyTheDead(t *testing.T) {
+	db := testutil.RequireDB(t)
+	st := NewStore(db)
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	live, _ := newSessionID()
+	expired, _ := newSessionID()
+	old, _ := newSessionID()
+	rl, re, ro := newRow(t, live), newRow(t, expired), newRow(t, old)
+	re.AbsoluteExpiresAt = now.Add(-time.Hour)
+	for _, r := range []Session{rl, re, ro} {
+		if err := st.Create(ctx, r); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Cleanup(func() {
+		for _, r := range []Session{rl, re, ro} {
+			_, _ = db.Pool.Exec(ctx, `DELETE FROM staff_sessions WHERE id_hash = $1`, r.IDHash)
+		}
+	})
+	if _, err := st.Revoke(ctx, ro.IDHash, "sign_out", now.Add(-30*24*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.Sweep(ctx, now, now.Add(-7*24*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.Get(ctx, rl.IDHash); err != nil {
+		t.Fatalf("the live session was swept: %v", err)
+	}
+	for _, r := range []Session{re, ro} {
+		if _, err := st.Get(ctx, r.IDHash); !errors.Is(err, ErrNotFound) {
+			t.Fatalf("a dead session survived the sweep: %v", err)
+		}
 	}
 }

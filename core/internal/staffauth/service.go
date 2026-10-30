@@ -374,3 +374,23 @@ func (s *Service) revokeAtRefresh(ctx context.Context, row Session, now time.Tim
 	}
 	return row, ErrNoSession
 }
+
+// RunSweeper deletes sessions past their absolute limit, and revoked ones
+// older than a week, every interval until ctx ends.
+func (s *Service) RunSweeper(ctx context.Context, every time.Duration) {
+	t := time.NewTicker(every)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			now := s.now().UTC()
+			if n, err := s.store.Sweep(ctx, now, now.Add(-7*24*time.Hour)); err != nil {
+				s.log.Warn("session sweep failed", "error", err)
+			} else if n > 0 {
+				s.log.Info("expired staff sessions swept", "rows", n)
+			}
+		}
+	}
+}
