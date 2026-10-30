@@ -101,6 +101,11 @@ func TestRunTerminalUncertainEndWithoutReportingDeliversNothing(t *testing.T) {
 		{"succeeded with no result", "succeeded", nil},
 		{"failed at the charge stage", "failed", map[string]any{"stage_errors": map[string]any{"charge": "gateway timeout"}}},
 		{"cancelled past the read", "cancelled", map[string]any{"stage_errors": map[string]any{"signature": "not supported"}}},
+		{"succeeded with a charge stage error and no code", "succeeded", map[string]any{"result": "", "stage_errors": map[string]any{"charge": "gateway timeout"}}},
+		{"succeeded declined with a charge stage error", "succeeded", map[string]any{"result": "C", "stage_errors": map[string]any{"charge": "gateway timeout"}}},
+		{"succeeded retry with a charge stage error", "succeeded", map[string]any{"result": "B", "stage_errors": map[string]any{"charge": "gateway timeout"}}},
+		{"succeeded with an empty result code", "succeeded", map[string]any{"result": ""}},
+		{"succeeded with an unknown result code", "succeeded", map[string]any{"result": "E"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -155,6 +160,8 @@ func TestRunTerminalAuthorizedAnswerBooksOnlyTheLegAmount(t *testing.T) {
 		{"short approval", approved("20.00", nil)},
 		{"over approval", approved("25.01", nil)},
 		{"no amount", approved("", nil)},
+		{"a sign in the whole part", approved("+25.00", nil)},
+		{"a sign in the fraction", approved("25.+0", nil)},
 	}
 	for _, tc := range held {
 		t.Run(tc.name, func(t *testing.T) {

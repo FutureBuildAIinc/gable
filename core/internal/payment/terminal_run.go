@@ -313,6 +313,9 @@ func (d runDollars) cents() (int64, bool) {
 	for len(frac) < 2 {
 		frac += "0"
 	}
+	if !allDigits(whole) || !allDigits(frac) {
+		return 0, false
+	}
 	w, err := strconv.ParseInt(whole, 10, 64)
 	if err != nil {
 		return 0, false
@@ -322,6 +325,17 @@ func (d runDollars) cents() (int64, bool) {
 		return 0, false
 	}
 	return w*100 + f, true
+}
+
+// allDigits says whether s is ASCII digits only: ParseInt takes a sign, a
+// dollars figure has none in either part.
+func allDigits(s string) bool {
+	for _, r := range s {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 // stageFailed says whether the named stage carries an error.
@@ -570,7 +584,9 @@ type runVerdict struct {
 
 // answerOfInteraction maps one interaction status. A succeeded interaction
 // is the workflow's end, not the card's: result A authorized, C declined, B
-// declined too (no money moved; the cashier starts a new leg). An approval is
+// declined too (no money moved; the cashier starts a new leg), unless the
+// result names a charge stage error, which is uncertain; an empty or unknown
+// result code is uncertain too. An approval is
 // booked only when the card was charged exactly the leg's amount with no
 // fee: a surcharge (the card charged the subtotal plus a fee) or a partial
 // approval is held for a person until surcharge booking is built. A failed or
@@ -591,10 +607,22 @@ func answerOfInteraction(d TerminalDispatch, interaction string, st *runChargeCa
 		if st.Result.TransID != "" {
 			v.ProviderRef = st.Result.TransID
 		}
-		v.end = runEndFinal
-		if st.Result.Result != "A" {
+		switch st.Result.Result {
+		case "A":
+		case "B", "C":
+			// no money moved, unless the charge stage itself failed: a
+			// gateway fault is not a decline
+			v.end = runEndFinal
+			if st.Result.stageFailed("charge") {
+				v.end = runEndUncertain
+			}
+			return v
+		default:
+			// an empty or unknown code is no verdict the driver can book
+			v.end = runEndUncertain
 			return v
 		}
+		v.end = runEndFinal
 		v.Verdict = "authorized"
 		if st.Result.FeeAmount != "" {
 			if fee, ok := st.Result.FeeAmount.cents(); !ok || fee != 0 {
