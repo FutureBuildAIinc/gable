@@ -23,16 +23,14 @@ import (
 	"time"
 )
 
-const (
-	proofEndpoint = "http://127.0.0.1:8580"
-	proofPassword = "s9proof-not-a-real-password"
-)
+const proofEndpoint = "http://127.0.0.1:8580"
 
 type proofSeed struct {
 	Endpoint  string `json:"endpoint"`
 	ProjectID string `json:"projectId"`
 	TeamID    string `json:"teamId"`
 	APIKey    string `json:"apiKey"`
+	Password  string `json:"password"`
 	Users     map[string]struct {
 		ID    string `json:"id"`
 		Email string `json:"email"`
@@ -117,7 +115,7 @@ func TestProof(t *testing.T) {
 	if err := json.Unmarshal(raw, &seed); err != nil {
 		t.Fatal(err)
 	}
-	if seed.APIKey == "" || seed.ProjectID == "" || seed.TeamID == "" {
+	if seed.APIKey == "" || seed.Password == "" || seed.ProjectID == "" || seed.TeamID == "" {
 		t.Fatalf("setup output incomplete: %s", raw)
 	}
 
@@ -139,7 +137,7 @@ func TestProof(t *testing.T) {
 
 	// (a) Server side email+password sign in with the key returns a session.
 	sales := seed.Users["sales"]
-	session, err := client.CreateEmailPasswordSession(ctx, sales.Email, proofPassword)
+	session, err := client.CreateEmailPasswordSession(ctx, sales.Email, seed.Password)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -259,12 +257,12 @@ func TestProof(t *testing.T) {
 	// refused, while the key call still succeeds.
 	code, body = rawRequest(ctx, http.MethodPost, seed.Endpoint+"/v1/account/sessions/email", map[string]any{
 		"email":    sales.Email,
-		"password": proofPassword,
+		"password": seed.Password,
 	}, map[string]string{"X-Appwrite-Project": seed.ProjectID})
 	if code != http.StatusNotImplemented {
 		t.Fatalf("client email session with switch off = %d, want 501: %s", code, body)
 	}
-	if _, err := client.CreateEmailPasswordSession(ctx, sales.Email, proofPassword); err != nil {
+	if _, err := client.CreateEmailPasswordSession(ctx, sales.Email, seed.Password); err != nil {
 		t.Fatalf("key email session with switch off: %v", err)
 	}
 	t.Log("key-vs-client proof: client refused (501), key session created")
@@ -274,7 +272,7 @@ func TestProof(t *testing.T) {
 	code, body = rawRequest(ctx, http.MethodPost, seed.Endpoint+"/v1/account", map[string]any{
 		"userId":   "unique()",
 		"email":    "stranger@s9proof.example",
-		"password": proofPassword,
+		"password": seed.Password,
 	}, map[string]string{"X-Appwrite-Project": seed.ProjectID})
 	if code < 400 {
 		t.Fatalf("client sign up with the switch off = %d, want a refusal: %s", code, body)
