@@ -8,10 +8,14 @@ package pos_test
 // is refused once the session is no longer open.
 
 import (
+	"context"
 	"net/http"
 	"sync"
 	"testing"
+	"time"
 
+	"github.com/gablelbm/gable/internal/gl"
+	"github.com/gablelbm/gable/internal/pos"
 	"github.com/gablelbm/gable/internal/testutil"
 )
 
@@ -421,38 +425,33 @@ func TestAMovementIntoAClosedPeriodIsTheBlocker(t *testing.T) {
 	}
 }
 
-// closeFiscalPeriod closes the fiscal period that holds today (adding a closed
-// one when none does) and reopens it when the test ends: an entry dated today
-// is then refused by the period trigger.
+// closedDay is a fixed past day no seed period covers. closeFiscalPeriod dates
+// this fixture's own ledger entries into it.
+var closedDay = time.Date(2036, 8, 19, 0, 0, 0, 0, time.UTC)
+
+// datedLedger posts this fixture's entries on one fixed day, whatever the
+// business day is.
+type datedLedger struct {
+	pos.LedgerPoster
+	day time.Time
+}
+
+func (l datedLedger) PostEntry(ctx context.Context, in gl.PostingInput) (*gl.JournalEntry, error) {
+	in.EntryDate = l.day
+	return l.LedgerPoster.PostEntry(ctx, in)
+}
+
+// closeFiscalPeriod closes a fixed past period and dates only this fixture's
+// ledger entries into it: an entry the counter posts is then refused by the
+// period trigger. Today's period, shared by every package's tests on the
+// database, is never touched; the closed period is removed when the test ends.
 func (f *fixture) closeFiscalPeriod() {
 	f.t.Helper()
-	ctx := contextB()
-	rows, err := f.db.Pool.Query(ctx, `UPDATE gl_fiscal_periods SET status = 'CLOSED'
-		WHERE CURRENT_DATE BETWEEN start_date AND end_date AND status = 'OPEN' RETURNING id::text`)
-	if err != nil {
-		f.t.Fatal(err)
-	}
-	var reopened []string
-	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
-			f.t.Fatal(err)
-		}
-		reopened = append(reopened, id)
-	}
-	rows.Close()
-	var added string
-	if len(reopened) == 0 && countOf(f.t, f.db, `SELECT count(*) FROM gl_fiscal_periods WHERE CURRENT_DATE BETWEEN start_date AND end_date`) == 0 {
-		added = mustUUID(f.t)
-		mustExec(f.t, f.db, `INSERT INTO gl_fiscal_periods (id, name, start_date, end_date, status)
-			VALUES ($1, 'closed for a test', CURRENT_DATE - 1, CURRENT_DATE + 1, 'CLOSED')`, added)
-	}
+	id := mustUUID(f.t)
+	mustExec(f.t, f.db, `INSERT INTO gl_fiscal_periods (id, name, start_date, end_date, status)
+		VALUES ($1, 'closed for a test', $2::date, $2::date, 'CLOSED')`, id, closedDay.Format("2006-01-02"))
 	f.t.Cleanup(func() {
-		for _, id := range reopened {
-			_, _ = f.db.Pool.Exec(ctx, `UPDATE gl_fiscal_periods SET status = 'OPEN' WHERE id = $1::uuid`, id)
-		}
-		if added != "" {
-			_, _ = f.db.Pool.Exec(ctx, `DELETE FROM gl_fiscal_periods WHERE id = $1::uuid`, added)
-		}
+		_, _ = f.db.Pool.Exec(context.Background(), `DELETE FROM gl_fiscal_periods WHERE id = $1::uuid`, id)
 	})
+	f.service.WithLedger(datedLedger{LedgerPoster: f.ledger, day: closedDay})
 }

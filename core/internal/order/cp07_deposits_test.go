@@ -785,10 +785,7 @@ func TestCP07_CounterDepositRidesTheOpenTillSession(t *testing.T) {
 	f.serveOrdersAndPayments()
 	f.cleanMoney()
 	regID := "REG-CP07-" + uuid.NewString()[:8]
-	var branchID string
-	if err := db.Pool.QueryRow(context.Background(), `SELECT value FROM system_settings WHERE key = 'default_branch_id'`).Scan(&branchID); err != nil {
-		t.Fatal(err)
-	}
+	branchID := f.branchID.String()
 	if _, err := db.Pool.Exec(context.Background(), `INSERT INTO pos_registers (id, name, location_id, branch_id) VALUES ($1, $2, $3::uuid, $3::uuid)`, regID, "Counter "+regID, branchID); err != nil {
 		t.Fatal(err)
 	}
@@ -953,10 +950,7 @@ func TestCP07_VoidOfAnotherBranchesTillRidingPaymentIsRefusedAtTheWall(t *testin
 	f.serveOrdersAndPayments()
 	f.cleanMoney()
 	regID := "REG-CP07-" + uuid.NewString()[:8]
-	var branchID string
-	if err := db.Pool.QueryRow(context.Background(), `SELECT value FROM system_settings WHERE key = 'default_branch_id'`).Scan(&branchID); err != nil {
-		t.Fatal(err)
-	}
+	branchID := f.branchID.String()
 	if _, err := db.Pool.Exec(context.Background(), `INSERT INTO pos_registers (id, name, location_id, branch_id) VALUES ($1, $2, $3::uuid, $3::uuid)`, regID, "Counter "+regID, branchID); err != nil {
 		t.Fatal(err)
 	}
@@ -1089,10 +1083,7 @@ func TestCP07_CounterDepositRacingTheTillCloseIsCountedOrRefused(t *testing.T) {
 	f.serveOrdersAndPayments()
 	f.cleanMoney()
 	regID := "REG-CP07-" + uuid.NewString()[:8]
-	var branchID string
-	if err := db.Pool.QueryRow(context.Background(), `SELECT value FROM system_settings WHERE key = 'default_branch_id'`).Scan(&branchID); err != nil {
-		t.Fatal(err)
-	}
+	branchID := f.branchID.String()
 	if _, err := db.Pool.Exec(context.Background(), `INSERT INTO pos_registers (id, name, location_id, branch_id) VALUES ($1, $2, $3::uuid, $3::uuid)`, regID, "Counter "+regID, branchID); err != nil {
 		t.Fatal(err)
 	}
@@ -1297,10 +1288,7 @@ func TestCP07_Migration147UpgradeFromV1AndDown(t *testing.T) {
 	f.serveOrdersAndPayments()
 	f.cleanMoney()
 	regID := "REG-UPG-" + uuid.NewString()[:8]
-	var branchID string
-	if err := upgradedDB.Pool.QueryRow(ctx, `SELECT value FROM system_settings WHERE key = 'default_branch_id'`).Scan(&branchID); err != nil {
-		t.Fatal(err)
-	}
+	branchID := f.branchID.String()
 	if _, err := upgradedDB.Pool.Exec(ctx, `INSERT INTO pos_registers (id, name, location_id, branch_id) VALUES ($1, $2, $3::uuid, $3::uuid)`, regID, "Upgrade "+regID, branchID); err != nil {
 		t.Fatal(err)
 	}

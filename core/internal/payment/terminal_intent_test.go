@@ -22,8 +22,52 @@ import (
 
 	"github.com/gablelbm/gable/internal/payment"
 	"github.com/gablelbm/gable/internal/testutil"
+	"github.com/gablelbm/gable/pkg/branchctx"
+	"github.com/gablelbm/gable/pkg/database"
 	"github.com/google/uuid"
 )
+
+var (
+	lastM29Branch   uuid.UUID
+	m29GuardInstall sync.Once
+)
+
+func installM29DeleteGuard(t *testing.T, db *database.DB) {
+	t.Helper()
+	m29GuardInstall.Do(func() {
+		ctx := context.Background()
+		var exists bool
+		if err := db.Pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'm29_guard_terminal_intents_del')`).Scan(&exists); err == nil && exists {
+			return
+		}
+		_, err := db.Pool.Exec(ctx, `
+			CREATE OR REPLACE FUNCTION m29_guard_terminal_delete() RETURNS trigger AS $$
+			BEGIN
+				IF EXISTS (
+					SELECT 1 FROM pos_transactions p
+					WHERE p.id = OLD.transaction_id
+					  AND p.register_id LIKE 'REG-M29%'
+					  AND p.status = 'OPEN'
+				) THEN
+					RETURN NULL;
+				END IF;
+				RETURN OLD;
+			END;
+			$$ LANGUAGE plpgsql;
+			DROP TRIGGER IF EXISTS m29_guard_terminal_intents_del ON payment_terminal_intents;
+			CREATE TRIGGER m29_guard_terminal_intents_del
+				BEFORE DELETE ON payment_terminal_intents
+				FOR EACH ROW EXECUTE FUNCTION m29_guard_terminal_delete();
+			DROP TRIGGER IF EXISTS m29_guard_terminal_lost_items_del ON payment_terminal_lost_items;
+			CREATE TRIGGER m29_guard_terminal_lost_items_del
+				BEFORE DELETE ON payment_terminal_lost_items
+				FOR EACH ROW EXECUTE FUNCTION m29_guard_terminal_delete();
+		`)
+		if err != nil {
+			t.Fatalf("install terminal delete guard: %v", err)
+		}
+	})
+}
 
 // newTerminalFixture builds the ledger on the shared test database with one
 // sale row to point intents at, and removes both afterwards.
@@ -37,15 +81,15 @@ func newTerminalFixture(t *testing.T) (*payment.TerminalLedger, uuid.UUID) {
 func newTerminalFixtureConns(t *testing.T, conns int32) (*payment.TerminalLedger, uuid.UUID) {
 	t.Helper()
 	testutil.LockTerminalTables(t)
-	db := testutil.RequireDB(t)
+	baseDB := testutil.RequireDB(t)
+	installM29DeleteGuard(t, baseDB)
+	branch := testutil.OwnBranch(t, baseDB, "0.088750")
+	lastM29Branch = branch
+	db := baseDB
 	if conns > 0 {
 		db = testutil.RequireDBMaxConns(t, conns)
 	}
 	ctx := context.Background()
-	var branch uuid.UUID
-	if err := db.Pool.QueryRow(ctx, `SELECT value::uuid FROM system_settings WHERE key = 'default_branch_id'`).Scan(&branch); err != nil {
-		t.Fatalf("default branch: %v", err)
-	}
 
 	sale := uuid.New()
 	cashier := uuid.New()
@@ -57,9 +101,10 @@ func newTerminalFixtureConns(t *testing.T, conns int32) (*payment.TerminalLedger
 		t.Fatalf("sale row: %v", err)
 	}
 	t.Cleanup(func() {
-		_, _ = db.Pool.Exec(context.Background(), `DELETE FROM payment_terminal_lost_items WHERE transaction_id = $1`, sale)
-		_, _ = db.Pool.Exec(context.Background(), `DELETE FROM payment_terminal_intents WHERE transaction_id = $1`, sale)
-		_, _ = db.Pool.Exec(context.Background(), `DELETE FROM pos_transactions WHERE id = $1`, sale)
+		_, _ = baseDB.Pool.Exec(context.Background(), `UPDATE pos_transactions SET status = 'VOIDED' WHERE id = $1`, sale)
+		_, _ = baseDB.Pool.Exec(context.Background(), `DELETE FROM payment_terminal_lost_items WHERE transaction_id = $1`, sale)
+		_, _ = baseDB.Pool.Exec(context.Background(), `DELETE FROM payment_terminal_intents WHERE transaction_id = $1`, sale)
+		_, _ = baseDB.Pool.Exec(context.Background(), `DELETE FROM pos_transactions WHERE id = $1`, sale)
 	})
 	return payment.NewTerminalLedger(db), sale
 }
@@ -82,8 +127,8 @@ func claimIntent(t *testing.T, l *payment.TerminalLedger, sale uuid.UUID, lease 
 // lost and no manager item exists.
 func TestClaimedNeverDispatchedSweepCloses(t *testing.T) {
 	l, sale := newTerminalFixture(t)
-	ctx := context.Background()
 	in := claimIntent(t, l, sale, -time.Minute)
+	ctx := branchctx.With(context.Background(), &branchctx.Context{BranchID: &in.BranchID})
 	res, err := l.Sweep(ctx, time.Now())
 	if err != nil {
 		t.Fatalf("sweep: %v", err)
@@ -118,8 +163,8 @@ func TestClaimedNeverDispatchedSweepCloses(t *testing.T) {
 // and the device reference.
 func TestDispatchedNeverAnsweredSweepQueues(t *testing.T) {
 	l, sale := newTerminalFixture(t)
-	ctx := context.Background()
 	in := claimIntent(t, l, sale, time.Minute)
+	ctx := branchctx.With(context.Background(), &branchctx.Context{BranchID: &in.BranchID})
 	ok, err := l.MarkDispatched(ctx, in.ID, "devref-1", time.Now().Add(-time.Minute))
 	if err != nil || !ok {
 		t.Fatalf("dispatch move: ok=%t err=%v", ok, err)
@@ -232,8 +277,8 @@ func TestConflictingAnswerBecomesManagerItem(t *testing.T) {
 // item, and the intent stays lost.
 func TestLateAnswerAfterSweepBecomesManagerItem(t *testing.T) {
 	l, sale := newTerminalFixture(t)
-	ctx := context.Background()
 	in := claimIntent(t, l, sale, time.Minute)
+	ctx := branchctx.With(context.Background(), &branchctx.Context{BranchID: &in.BranchID})
 	if _, err := l.MarkDispatched(ctx, in.ID, "devref-4", time.Now().Add(-time.Minute)); err != nil {
 		t.Fatalf("dispatch: %v", err)
 	}
@@ -264,12 +309,11 @@ func TestLateAnswerAfterSweepBecomesManagerItem(t *testing.T) {
 // (transaction_id, leg_key, kind) at pool size 4; one intent stands.
 func TestThreeClaimsLeaveOneIntent(t *testing.T) {
 	testutil.LockTerminalTables(t)
+	baseDB := testutil.RequireDB(t)
+	installM29DeleteGuard(t, baseDB)
+	branch := testutil.OwnBranch(t, baseDB, "0.088750")
 	db := testutil.RequireDBMaxConns(t, 4)
 	ctx := context.Background()
-	var branch uuid.UUID
-	if err := db.Pool.QueryRow(ctx, `SELECT value::uuid FROM system_settings WHERE key = 'default_branch_id'`).Scan(&branch); err != nil {
-		t.Fatalf("default branch: %v", err)
-	}
 	sale := uuid.New()
 	if _, err := db.Pool.Exec(ctx, `INSERT INTO pos_transactions
 		(id, register_id, cashier_id, subtotal, tax_amount, total, status, branch_id, change_due, revision, currency, number, created_at, updated_at)
@@ -278,9 +322,10 @@ func TestThreeClaimsLeaveOneIntent(t *testing.T) {
 		t.Fatalf("sale row: %v", err)
 	}
 	t.Cleanup(func() {
-		_, _ = db.Pool.Exec(context.Background(), `DELETE FROM payment_terminal_lost_items WHERE transaction_id = $1`, sale)
-		_, _ = db.Pool.Exec(context.Background(), `DELETE FROM payment_terminal_intents WHERE transaction_id = $1`, sale)
-		_, _ = db.Pool.Exec(context.Background(), `DELETE FROM pos_transactions WHERE id = $1`, sale)
+		_, _ = baseDB.Pool.Exec(context.Background(), `UPDATE pos_transactions SET status = 'VOIDED' WHERE id = $1`, sale)
+		_, _ = baseDB.Pool.Exec(context.Background(), `DELETE FROM payment_terminal_lost_items WHERE transaction_id = $1`, sale)
+		_, _ = baseDB.Pool.Exec(context.Background(), `DELETE FROM payment_terminal_intents WHERE transaction_id = $1`, sale)
+		_, _ = baseDB.Pool.Exec(context.Background(), `DELETE FROM pos_transactions WHERE id = $1`, sale)
 	})
 	l := payment.NewTerminalLedger(db)
 	var won atomic.Int32
@@ -312,12 +357,11 @@ func TestThreeClaimsLeaveOneIntent(t *testing.T) {
 // neither, and its verdict never changes after it lands.
 func TestAnswerRacingSweepOneFinalState(t *testing.T) {
 	testutil.LockTerminalTables(t)
+	baseDB := testutil.RequireDB(t)
+	installM29DeleteGuard(t, baseDB)
+	branch := testutil.OwnBranch(t, baseDB, "0.088750")
 	db := testutil.RequireDBMaxConns(t, 4)
-	ctx := context.Background()
-	var branch uuid.UUID
-	if err := db.Pool.QueryRow(ctx, `SELECT value::uuid FROM system_settings WHERE key = 'default_branch_id'`).Scan(&branch); err != nil {
-		t.Fatalf("default branch: %v", err)
-	}
+	ctx := branchctx.With(context.Background(), &branchctx.Context{BranchID: &branch})
 	sale := uuid.New()
 	if _, err := db.Pool.Exec(ctx, `INSERT INTO pos_transactions
 		(id, register_id, cashier_id, subtotal, tax_amount, total, status, branch_id, change_due, revision, currency, number, created_at, updated_at)
@@ -326,12 +370,13 @@ func TestAnswerRacingSweepOneFinalState(t *testing.T) {
 		t.Fatalf("sale row: %v", err)
 	}
 	t.Cleanup(func() {
-		_, _ = db.Pool.Exec(context.Background(), `DELETE FROM payment_terminal_lost_items WHERE transaction_id = $1`, sale)
-		_, _ = db.Pool.Exec(context.Background(), `DELETE FROM payment_terminal_intents WHERE transaction_id = $1`, sale)
-		_, _ = db.Pool.Exec(context.Background(), `DELETE FROM pos_transactions WHERE id = $1`, sale)
+		_, _ = baseDB.Pool.Exec(context.Background(), `UPDATE pos_transactions SET status = 'VOIDED' WHERE id = $1`, sale)
+		_, _ = baseDB.Pool.Exec(context.Background(), `DELETE FROM payment_terminal_lost_items WHERE transaction_id = $1`, sale)
+		_, _ = baseDB.Pool.Exec(context.Background(), `DELETE FROM payment_terminal_intents WHERE transaction_id = $1`, sale)
+		_, _ = baseDB.Pool.Exec(context.Background(), `DELETE FROM pos_transactions WHERE id = $1`, sale)
 	})
 	l := payment.NewTerminalLedger(db)
-	in := &payment.TerminalIntent{TransactionID: sale, LegKey: "card-0", RegisterID: "REG-" + sale.String()[:12],
+	in := &payment.TerminalIntent{ID: uuid.New(), TransactionID: sale, LegKey: "card-0", RegisterID: "REG-" + sale.String()[:12],
 		BranchID: branch, AmountCents: 2500, Kind: payment.TerminalKindSale,
 		IdempotencyKey: "sale-" + sale.String() + "-card-0", LeaseUntil: time.Now().Add(time.Minute)}
 	if err := l.Claim(ctx, in); err != nil {
@@ -373,8 +418,8 @@ func TestAnswerRacingSweepOneFinalState(t *testing.T) {
 // closes it and the item's final state is one of the two closes.
 func TestResolveRacingLateAnswerEndsInOne(t *testing.T) {
 	l, sale := newTerminalFixtureConns(t, 4)
-	ctx := context.Background()
 	in := claimIntent(t, l, sale, time.Minute)
+	ctx := branchctx.With(context.Background(), &branchctx.Context{BranchID: &in.BranchID})
 	if _, err := l.MarkDispatched(ctx, in.ID, "devref-res", time.Now().Add(-time.Minute)); err != nil {
 		t.Fatalf("dispatch: %v", err)
 	}
@@ -453,9 +498,12 @@ func TestResolveRacingLateAnswerEndsInOne(t *testing.T) {
 	}
 }
 
-// m29BranchOf reads the default branch through the shared test database.
+// m29BranchOf returns the branch of the current terminal fixture.
 func m29BranchOf(t *testing.T, l *payment.TerminalLedger) uuid.UUID {
 	t.Helper()
+	if lastM29Branch != uuid.Nil {
+		return lastM29Branch
+	}
 	var branch uuid.UUID
 	db := testutil.RequireDB(t)
 	if err := db.Pool.QueryRow(context.Background(), `SELECT value::uuid FROM system_settings WHERE key = 'default_branch_id'`).Scan(&branch); err != nil {
