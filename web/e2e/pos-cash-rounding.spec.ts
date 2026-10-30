@@ -89,7 +89,8 @@ async function setBranchRule(
       tax_jurisdiction_code: branch.tax_jurisdiction_code,
       default_tax_rate: taxRate,
       cash_rounding_mode: mode,
-      country_code: country,
+      // null keeps the stored country; the empty string clears it
+      country_code: country ?? '',
       timezone: branch.timezone,
       active: branch.active,
     },

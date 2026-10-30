@@ -44,7 +44,10 @@ function branchBody(b: Branch, over: Partial<Branch>): Record<string, unknown> {
     path: b.path, code: b.code, description: b.description, name: b.name, address: b.address,
     city: b.city, state: b.state, zip: b.zip, phone: b.phone,
     tax_jurisdiction_code: b.tax_jurisdiction_code, default_tax_rate: b.default_tax_rate,
-    timezone: b.timezone, active: b.active, country_code: b.country_code, ...over,
+    timezone: b.timezone, active: b.active,
+    // The update keeps the stored country on null and clears it on an empty
+    // string, so a branch that read none is put back with the empty string.
+    country_code: b.country_code ?? '', ...over,
   };
 }
 
