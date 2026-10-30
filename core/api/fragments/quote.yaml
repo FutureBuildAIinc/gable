@@ -354,6 +354,180 @@ paths:
           $ref: "#/components/responses/WirePreconditionRequired"
         "500":
           $ref: "#/components/responses/InternalErrorEither"
+  /api/v1/quotes/{id}/follow-up:
+    put:
+      operationId: quoteFollowUp
+      tags: [quote]
+      summary: Set or clear a quote's follow up
+      description: >-
+        One write on the client's revision: If-Match or a body revision,
+        neither is 428, a stale one is 409 stale_revision. The body names
+        when to chase the quote (follow_up_at) and who owns the chase
+        (follow_up_owner_id, a salesperson row); an owner without a date
+        is a 400 naming follow_up_owner_id. A null follow_up_at clears the
+        date and the owner together: clearing is how a follow up is
+        completed, and what happened is logged as an activity on the quote
+        rather than kept as a state on it. Writes the audit row
+        quote.follow_up_set (or quote.follow_up_cleared) in the same
+        transaction; the response is the stored quote at its new revision.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/IfMatch"
+        - $ref: "#/components/parameters/XBranchId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/QuoteFollowUpRequest"
+      responses:
+        "200":
+          description: The quote at its new revision.
+          headers:
+            ETag:
+              description: The quote's revision in quotes, for example "3". Send it back as If-Match.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Quote"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "409":
+          $ref: "#/components/responses/WireConflict"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "428":
+          $ref: "#/components/responses/WirePreconditionRequired"
+        "500":
+          $ref: "#/components/responses/InternalErrorEither"
+  /api/v1/quotes/{id}/activities:
+    get:
+      operationId: quoteActivityList
+      tags: [quote]
+      summary: List a quote's activity feed
+      description: >-
+        The cursor list envelope, newest first on (created_at, id), of the
+        activities logged on this quote. The quote is resolved behind the
+        branch wall first: a quote the caller cannot see is a 404.
+        activity_type and contact_id filter; total appears only under
+        include=total. A parameter the route does not declare, an activity
+        type outside the lowercase vocabulary, a malformed cursor or an out
+        of range limit is a 400.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: activity_type
+          in: query
+          required: false
+          description: One lowercase activity type.
+          schema:
+            type: string
+            enum: [call, meeting, email, note, follow_up]
+        - name: contact_id
+          in: query
+          required: false
+          description: Only the activities of this contact.
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/PageLimit"
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Include"
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: The page of activities.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ActivityPage"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "500":
+          $ref: "#/components/responses/InternalErrorEither"
+    post:
+      operationId: quoteActivityCreate
+      tags: [quote]
+      summary: Log an activity on a quote
+      description: >-
+        activity_type and description are required; contact_id and logged_by
+        are optional; activity_date defaults to now. The quote is named by
+        the path: a body quote_id is a 400 unknown field. The activity
+        carries the quote and the quote's customer, so it shows on the
+        customer's feed too. Writes the audit row activity.created and the
+        event activity.created in the same transaction, the event last.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/XBranchId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ActivityRequest"
+      responses:
+        "201":
+          description: The logged activity, with its ETag and a Location header.
+          headers:
+            ETag:
+              description: The record's revision in quotes, for example "3". Send it back as If-Match.
+              schema:
+                type: string
+            Location:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Activity"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "409":
+          $ref: "#/components/responses/WireConflict"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "500":
+          $ref: "#/components/responses/InternalErrorEither"
   /api/v1/quotes/exposure:
     get:
       operationId: exposureList
@@ -1142,6 +1316,27 @@ components:
           type: integer
           format: int64
           minimum: 1
+    QuoteFollowUpRequest:
+      type: object
+      description: >-
+        The body of the follow up write. follow_up_at null (or absent) clears
+        the date and the owner together; an owner without a date is a 400
+        naming follow_up_owner_id. revision is the body precondition beside
+        If-Match.
+      properties:
+        follow_up_at:
+          type: [string, "null"]
+          format: date-time
+          description: When to chase the quote; null clears the follow up.
+        follow_up_owner_id:
+          type: [string, "null"]
+          format: uuid
+          description: The salesperson who owns the chase; needs a follow_up_at.
+        revision:
+          type: integer
+          format: int64
+          minimum: 1
+          description: The body revision, beside If-Match. Neither is a 428, a stale one is a 409.
     QuotePage:
       type: object
       required: [items, next_cursor, limit]

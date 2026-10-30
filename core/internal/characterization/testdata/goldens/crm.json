@@ -21,6 +21,7 @@
         "description": "golden characterisation note",
         "id": "<id-2>",
         "logged_by": null,
+        "quote_id": null,
         "revision": 1,
         "updated_at": "<ts+0d>"
       }
@@ -46,6 +47,7 @@
             "description": "golden characterisation note",
             "id": "<id-2>",
             "logged_by": null,
+            "quote_id": null,
             "revision": 1,
             "updated_at": "<ts+0d>"
           }
@@ -75,6 +77,7 @@
             "description": "golden characterisation note",
             "id": "<id-2>",
             "logged_by": null,
+            "quote_id": null,
             "revision": 1,
             "updated_at": "<ts+0d>"
           }
@@ -103,7 +106,7 @@
           "details": [
             {
               "field": "activity_type",
-              "message": "must be one of: call, meeting, email, note"
+              "message": "must be one of: call, meeting, email, note, follow_up"
             }
           ],
           "message": "one or more fields failed validation"

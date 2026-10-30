@@ -9063,7 +9063,7 @@ export interface paths {
         };
         /**
          * List quotes
-         * @description The cursor list envelope, newest first. status filters on the lowercase lifecycle vocabulary (a comma separated list), customer_id filters on the customer. total appears only under include=total. A parameter the route does not declare, a status outside the vocabulary, a malformed cursor or an out of range limit is a 400.
+         * @description The cursor list envelope, newest first. status filters on the lowercase lifecycle vocabulary (a comma separated list), customer_id filters on the customer, follow_up narrows the page to the follow up queue: due (a follow up date today in the quote's branch's calendar or earlier, open quotes only), overdue (before today, open quotes only) or mine (the follow ups owned by the salesperson the sign in's email resolves to; a caller with no sign in, or one no salesperson row carries, owns none and the page is empty). total appears only under include=total. A parameter the route does not declare, a status or a follow_up outside the vocabularies, a malformed cursor or an out of range limit is a 400.
          */
         get: operations["quoteList"];
         put?: never;
@@ -9150,6 +9150,50 @@ export interface paths {
          * @description A transition to accepted on the client's revision and the creation of the order in ONE transaction (ADR 0005 section 5.8), answering 201 with the order: no payload crosses the client, so a retry cannot create a second order. The lines carry the conversion pair and the scale 4 price without loss; the quote's freight becomes one FREIGHT charge line; a stocked line sold in another unit than its product's stocking unit is refused with 409 unit_not_stock_unit until cycle 3; a quote that already has an order not cancelled is 409 already_converted. A quote already accepted (on the desk or by the customer) converts as it is, with no second transition and no second quote.accepted. Events: quote.accepted (unless the quote was already accepted), then order.created.
          */
         post: operations["quoteConvertToOrder"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/quotes/{id}/follow-up": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Set or clear a quote's follow up
+         * @description One write on the client's revision: If-Match or a body revision, neither is 428, a stale one is 409 stale_revision. The body names when to chase the quote (follow_up_at) and who owns the chase (follow_up_owner_id, a salesperson row); an owner without a date is a 400 naming follow_up_owner_id. A null follow_up_at clears the date and the owner together: clearing is how a follow up is completed, and what happened is logged as an activity on the quote rather than kept as a state on it. Writes the audit row quote.follow_up_set (or quote.follow_up_cleared) in the same transaction; the response is the stored quote at its new revision.
+         */
+        put: operations["quoteFollowUp"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/quotes/{id}/activities": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List a quote's activity feed
+         * @description The cursor list envelope, newest first on (created_at, id), of the activities logged on this quote. The quote is resolved behind the branch wall first: a quote the caller cannot see is a 404. activity_type and contact_id filter; total appears only under include=total. A parameter the route does not declare, an activity type outside the lowercase vocabulary, a malformed cursor or an out of range limit is a 400.
+         */
+        get: operations["quoteActivityList"];
+        put?: never;
+        /**
+         * Log an activity on a quote
+         * @description activity_type and description are required; contact_id and logged_by are optional; activity_date defaults to now. The quote is named by the path: a body quote_id is a 400 unknown field. The activity carries the quote and the quote's customer, so it shows on the customer's feed too. Writes the audit row activity.created and the event activity.created in the same transaction, the event last.
+         */
+        post: operations["quoteActivityCreate"];
         delete?: never;
         options?: never;
         head?: never;
@@ -11239,8 +11283,8 @@ export interface components {
          * @description Lowercase on the wire (ADR 0001 section 6); the storage vocabulary stays uppercase.
          * @enum {string}
          */
-        ActivityType: "call" | "meeting" | "email" | "note";
-        /** @description One logged activity. Optional fields are present as null, never omitted. The response is the stored row: every field reads back its own value. */
+        ActivityType: "call" | "meeting" | "email" | "note" | "follow_up";
+        /** @description One logged activity. Optional fields are present as null, never omitted. The response is the stored row: every field reads back its own value. quote_id names the quote the activity belongs to (the quote module's activity route sets it); it is null on an activity logged straight onto the customer. */
         Activity: {
             /** Format: uuid */
             id: string;
@@ -11248,6 +11292,11 @@ export interface components {
             customer_id: string;
             /** Format: uuid */
             contact_id: string | null;
+            /**
+             * Format: uuid
+             * @description The quote this activity belongs to, null when it was logged on the customer alone.
+             */
+            quote_id: string | null;
             activity_type: components["schemas"]["ActivityType"];
             /** @description 1 to 4000 characters. */
             description: string;
@@ -11262,7 +11311,7 @@ export interface components {
             /** Format: date-time */
             updated_at: string;
         };
-        /** @description The body of the create and the update. Every field problem is collected into one 400 with a details entry per field; an unknown field is refused. */
+        /** @description The body of the create and the update. Every field problem is collected into one 400 with a details entry per field; an unknown field is refused. quote_id is not a body field: the quote's own activity route names the quote in its path, so a body quote_id is a 400 unknown field on both routes. */
         ActivityRequest: {
             /** Format: uuid */
             contact_id?: string | null;
@@ -21290,6 +21339,18 @@ export interface components {
              * @enum {string}
              */
             source: "manual" | "ai" | "portal";
+            /**
+             * Format: date-time
+             * @description When a salesperson promised to chase the quote; null when no follow up stands.
+             */
+            follow_up_at: string | null;
+            /**
+             * Format: uuid
+             * @description The salesperson who owns the chase.
+             */
+            follow_up_owner_id: string | null;
+            /** @description The owner's name, joined for display as customer_name is. */
+            follow_up_owner_name: string | null;
             /** Format: date-time */
             expires_at: string | null;
             /** Format: date-time */
@@ -21336,6 +21397,18 @@ export interface components {
              * @enum {string}
              */
             source: "manual" | "ai" | "portal";
+            /**
+             * Format: date-time
+             * @description When a salesperson promised to chase the quote; null when no follow up stands.
+             */
+            follow_up_at: string | null;
+            /**
+             * Format: uuid
+             * @description The salesperson who owns the chase.
+             */
+            follow_up_owner_id: string | null;
+            /** @description The owner's name, joined for display as customer_name is. */
+            follow_up_owner_name: string | null;
             /** Format: date-time */
             expires_at: string | null;
             /** Format: date-time */
@@ -21475,6 +21548,24 @@ export interface components {
         QuoteTransitionRequest: {
             to: components["schemas"]["QuoteStatus"];
             /** Format: int64 */
+            revision?: number;
+        };
+        /** @description The body of the follow up write. follow_up_at null (or absent) clears the date and the owner together; an owner without a date is a 400 naming follow_up_owner_id. revision is the body precondition beside If-Match. */
+        QuoteFollowUpRequest: {
+            /**
+             * Format: date-time
+             * @description When to chase the quote; null clears the follow up.
+             */
+            follow_up_at?: string | null;
+            /**
+             * Format: uuid
+             * @description The salesperson who owns the chase; needs a follow_up_at.
+             */
+            follow_up_owner_id?: string | null;
+            /**
+             * Format: int64
+             * @description The body revision, beside If-Match. Neither is a 428, a stale one is a 409.
+             */
             revision?: number;
         };
         /** @description The list envelope of ADR 0001 section 1. items is never null; total is present only under include=total. */
@@ -23872,7 +23963,7 @@ export interface operations {
         parameters: {
             query?: {
                 /** @description One lowercase activity type. */
-                activity_type?: "call" | "meeting" | "email" | "note";
+                activity_type?: "call" | "meeting" | "email" | "note" | "follow_up";
                 /** @description Only the activities of this contact. */
                 contact_id?: string;
                 /** @description Page size of a converted list, 1 to 200, default 50. Anything else is a 400 naming limit (ADR 0001 section 2); it is never clamped. */
@@ -41669,6 +41760,8 @@ export interface operations {
                 /** @description Comma separated lowercase statuses (draft, sent, accepted, rejected, expired). */
                 status?: string;
                 customer_id?: string;
+                /** @description The follow up queue (due, overdue or mine). */
+                follow_up?: "due" | "overdue" | "mine";
                 /** @description Page size of a converted list, 1 to 200, default 50. Anything else is a 400 naming limit (ADR 0001 section 2); it is never clamped. */
                 limit?: components["parameters"]["PageLimit"];
                 /** @description The opaque cursor of the previous page's next_cursor, passed back verbatim. A malformed cursor, or one minted for another ordering, is a 400 naming cursor. */
@@ -41925,6 +42018,133 @@ export interface operations {
             413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
             428: components["responses"]["WirePreconditionRequired"];
+            500: components["responses"]["InternalErrorEither"];
+        };
+    };
+    quoteFollowUp: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description The document revision the client read, in quotes ("3"; the weak form W/"3" is accepted too). The body's revision field is the alternative; a write carrying neither is 428, a stale one 409 stale_revision, and * or a list of tags is a 400. */
+                "If-Match"?: components["parameters"]["IfMatch"];
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["QuoteFollowUpRequest"];
+            };
+        };
+        responses: {
+            /** @description The quote at its new revision. */
+            200: {
+                headers: {
+                    /** @description The quote's revision in quotes, for example "3". Send it back as If-Match. */
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Quote"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["WireConflict"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
+            428: components["responses"]["WirePreconditionRequired"];
+            500: components["responses"]["InternalErrorEither"];
+        };
+    };
+    quoteActivityList: {
+        parameters: {
+            query?: {
+                /** @description One lowercase activity type. */
+                activity_type?: "call" | "meeting" | "email" | "note" | "follow_up";
+                /** @description Only the activities of this contact. */
+                contact_id?: string;
+                /** @description Page size of a converted list, 1 to 200, default 50. Anything else is a 400 naming limit (ADR 0001 section 2); it is never clamped. */
+                limit?: components["parameters"]["PageLimit"];
+                /** @description The opaque cursor of the previous page's next_cursor, passed back verbatim. A malformed cursor, or one minted for another ordering, is a 400 naming cursor. */
+                cursor?: components["parameters"]["Cursor"];
+                /** @description A comma separated list of expansions. total adds the count of rows matching the filters, which costs a second query and is therefore opt in. */
+                include?: components["parameters"]["Include"];
+            };
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The page of activities. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ActivityPage"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["WireNotFound"];
+            500: components["responses"]["InternalErrorEither"];
+        };
+    };
+    quoteActivityCreate: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ActivityRequest"];
+            };
+        };
+        responses: {
+            /** @description The logged activity, with its ETag and a Location header. */
+            201: {
+                headers: {
+                    /** @description The record's revision in quotes, for example "3". Send it back as If-Match. */
+                    ETag?: string;
+                    Location?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Activity"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["WireConflict"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalErrorEither"];
         };
     };

@@ -932,7 +932,7 @@ paths:
           description: One lowercase activity type.
           schema:
             type: string
-            enum: [call, meeting, email, note]
+            enum: [call, meeting, email, note, follow_up]
         - name: contact_id
           in: query
           required: false
@@ -20293,7 +20293,7 @@ paths:
       tags: [quote]
       summary: List quotes
       description: >-
-        The cursor list envelope, newest first. status filters on the lowercase lifecycle vocabulary (a comma separated list), customer_id filters on the customer. total appears only under include=total. A parameter the route does not declare, a status outside the vocabulary, a malformed cursor or an out of range limit is a 400.
+        The cursor list envelope, newest first. status filters on the lowercase lifecycle vocabulary (a comma separated list), customer_id filters on the customer, follow_up narrows the page to the follow up queue: due (a follow up date today in the quote's branch's calendar or earlier, open quotes only), overdue (before today, open quotes only) or mine (the follow ups owned by the salesperson the sign in's email resolves to; a caller with no sign in, or one no salesperson row carries, owns none and the page is empty). total appears only under include=total. A parameter the route does not declare, a status or a follow_up outside the vocabularies, a malformed cursor or an out of range limit is a 400.
       parameters:
         - name: status
           in: query
@@ -20307,6 +20307,13 @@ paths:
           schema:
             type: string
             format: uuid
+        - name: follow_up
+          in: query
+          required: false
+          description: The follow up queue (due, overdue or mine).
+          schema:
+            type: string
+            enum: [due, overdue, mine]
         - $ref: "#/components/parameters/PageLimit"
         - $ref: "#/components/parameters/Cursor"
         - $ref: "#/components/parameters/Include"
@@ -20581,6 +20588,160 @@ paths:
           $ref: "#/components/responses/UnprocessableEntity"
         "428":
           $ref: "#/components/responses/WirePreconditionRequired"
+        "500":
+          $ref: "#/components/responses/InternalErrorEither"
+  /api/v1/quotes/{id}/follow-up:
+    put:
+      operationId: quoteFollowUp
+      tags: [quote]
+      summary: Set or clear a quote's follow up
+      description: >-
+        One write on the client's revision: If-Match or a body revision, neither is 428, a stale one is 409 stale_revision. The body names when to chase the quote (follow_up_at) and who owns the chase (follow_up_owner_id, a salesperson row); an owner without a date is a 400 naming follow_up_owner_id. A null follow_up_at clears the date and the owner together: clearing is how a follow up is completed, and what happened is logged as an activity on the quote rather than kept as a state on it. Writes the audit row quote.follow_up_set (or quote.follow_up_cleared) in the same transaction; the response is the stored quote at its new revision.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/IfMatch"
+        - $ref: "#/components/parameters/XBranchId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/QuoteFollowUpRequest"
+      responses:
+        "200":
+          description: The quote at its new revision.
+          headers:
+            ETag:
+              description: The quote's revision in quotes, for example "3". Send it back as If-Match.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Quote"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "409":
+          $ref: "#/components/responses/WireConflict"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "428":
+          $ref: "#/components/responses/WirePreconditionRequired"
+        "500":
+          $ref: "#/components/responses/InternalErrorEither"
+  /api/v1/quotes/{id}/activities:
+    get:
+      operationId: quoteActivityList
+      tags: [quote]
+      summary: List a quote's activity feed
+      description: >-
+        The cursor list envelope, newest first on (created_at, id), of the activities logged on this quote. The quote is resolved behind the branch wall first: a quote the caller cannot see is a 404. activity_type and contact_id filter; total appears only under include=total. A parameter the route does not declare, an activity type outside the lowercase vocabulary, a malformed cursor or an out of range limit is a 400.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: activity_type
+          in: query
+          required: false
+          description: One lowercase activity type.
+          schema:
+            type: string
+            enum: [call, meeting, email, note, follow_up]
+        - name: contact_id
+          in: query
+          required: false
+          description: Only the activities of this contact.
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/PageLimit"
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Include"
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: The page of activities.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ActivityPage"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "500":
+          $ref: "#/components/responses/InternalErrorEither"
+    post:
+      operationId: quoteActivityCreate
+      tags: [quote]
+      summary: Log an activity on a quote
+      description: >-
+        activity_type and description are required; contact_id and logged_by are optional; activity_date defaults to now. The quote is named by the path: a body quote_id is a 400 unknown field. The activity carries the quote and the quote's customer, so it shows on the customer's feed too. Writes the audit row activity.created and the event activity.created in the same transaction, the event last.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/XBranchId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ActivityRequest"
+      responses:
+        "201":
+          description: The logged activity, with its ETag and a Location header.
+          headers:
+            ETag:
+              description: The record's revision in quotes, for example "3". Send it back as If-Match.
+              schema:
+                type: string
+            Location:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Activity"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "409":
+          $ref: "#/components/responses/WireConflict"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
         "500":
           $ref: "#/components/responses/InternalErrorEither"
   /api/v1/quotes/exposure:
@@ -24371,15 +24532,16 @@ components:
     ActivityType:
       type: string
       description: Lowercase on the wire (ADR 0001 section 6); the storage vocabulary stays uppercase.
-      enum: [call, meeting, email, note]
+      enum: [call, meeting, email, note, follow_up]
     Activity:
       type: object
       description: >-
-        One logged activity. Optional fields are present as null, never omitted. The response is the stored row: every field reads back its own value.
+        One logged activity. Optional fields are present as null, never omitted. The response is the stored row: every field reads back its own value. quote_id names the quote the activity belongs to (the quote module's activity route sets it); it is null on an activity logged straight onto the customer.
       required:
         - id
         - customer_id
         - contact_id
+        - quote_id
         - activity_type
         - description
         - logged_by
@@ -24397,6 +24559,10 @@ components:
         contact_id:
           type: [string, "null"]
           format: uuid
+        quote_id:
+          type: [string, "null"]
+          format: uuid
+          description: The quote this activity belongs to, null when it was logged on the customer alone.
         activity_type:
           $ref: "#/components/schemas/ActivityType"
         description:
@@ -24420,7 +24586,7 @@ components:
     ActivityRequest:
       type: object
       description: >-
-        The body of the create and the update. Every field problem is collected into one 400 with a details entry per field; an unknown field is refused.
+        The body of the create and the update. Every field problem is collected into one 400 with a details entry per field; an unknown field is refused. quote_id is not a body field: the quote's own activity route names the quote in its path, so a body quote_id is a 400 unknown field on both routes.
       required: [activity_type, description]
       properties:
         contact_id:
@@ -38936,7 +39102,7 @@ components:
     QuoteSummary:
       type: object
       description: A quote header, used as a list item and as the head of the full document.
-      required: [id, number, branch_id, customer_id, customer_name, job_id, status, revision, total_cents, freight_cents, margin_total_cents, delivery_type, vehicle_id, vehicle_name, source, expires_at, sent_at, accepted_at, rejected_at, created_at, updated_at]
+      required: [id, number, branch_id, customer_id, customer_name, job_id, status, revision, total_cents, freight_cents, margin_total_cents, delivery_type, vehicle_id, vehicle_name, source, follow_up_at, follow_up_owner_id, follow_up_owner_name, expires_at, sent_at, accepted_at, rejected_at, created_at, updated_at]
       properties:
         id:
           type: string
@@ -38983,6 +39149,17 @@ components:
           type: string
           description: How the quote came to be; portal is a quote the dealer portal customer requested.
           enum: [manual, ai, portal]
+        follow_up_at:
+          type: [string, "null"]
+          format: date-time
+          description: When a salesperson promised to chase the quote; null when no follow up stands.
+        follow_up_owner_id:
+          type: [string, "null"]
+          format: uuid
+          description: The salesperson who owns the chase.
+        follow_up_owner_name:
+          type: [string, "null"]
+          description: The owner's name, joined for display as customer_name is.
         expires_at:
           type: [string, "null"]
           format: date-time
@@ -39003,7 +39180,7 @@ components:
           format: date-time
     Quote:
       type: object
-      required: [id, number, branch_id, customer_id, customer_name, job_id, status, revision, total_cents, freight_cents, margin_total_cents, delivery_type, vehicle_id, vehicle_name, source, expires_at, sent_at, accepted_at, rejected_at, created_at, updated_at, original_filename, original_content_type, parse_map, exposure_state, exposure_cents, exposure_last_checked_at, lines]
+      required: [id, number, branch_id, customer_id, customer_name, job_id, status, revision, total_cents, freight_cents, margin_total_cents, delivery_type, vehicle_id, vehicle_name, source, follow_up_at, follow_up_owner_id, follow_up_owner_name, expires_at, sent_at, accepted_at, rejected_at, created_at, updated_at, original_filename, original_content_type, parse_map, exposure_state, exposure_cents, exposure_last_checked_at, lines]
       properties:
         id:
           type: string
@@ -39050,6 +39227,17 @@ components:
           type: string
           description: How the quote came to be; portal is a quote the dealer portal customer requested.
           enum: [manual, ai, portal]
+        follow_up_at:
+          type: [string, "null"]
+          format: date-time
+          description: When a salesperson promised to chase the quote; null when no follow up stands.
+        follow_up_owner_id:
+          type: [string, "null"]
+          format: uuid
+          description: The salesperson who owns the chase.
+        follow_up_owner_name:
+          type: [string, "null"]
+          description: The owner's name, joined for display as customer_name is.
         expires_at:
           type: [string, "null"]
           format: date-time
@@ -39307,6 +39495,24 @@ components:
           type: integer
           format: int64
           minimum: 1
+    QuoteFollowUpRequest:
+      type: object
+      description: >-
+        The body of the follow up write. follow_up_at null (or absent) clears the date and the owner together; an owner without a date is a 400 naming follow_up_owner_id. revision is the body precondition beside If-Match.
+      properties:
+        follow_up_at:
+          type: [string, "null"]
+          format: date-time
+          description: When to chase the quote; null clears the follow up.
+        follow_up_owner_id:
+          type: [string, "null"]
+          format: uuid
+          description: The salesperson who owns the chase; needs a follow_up_at.
+        revision:
+          type: integer
+          format: int64
+          minimum: 1
+          description: The body revision, beside If-Match. Neither is a 428, a stale one is a 409.
     QuotePage:
       type: object
       required: [items, next_cursor, limit]
