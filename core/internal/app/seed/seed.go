@@ -738,7 +738,7 @@ func Run() {
 		log.Printf("Payment terms NET45: %v", err)
 	}
 
-	for _, c := range customers {
+	for i, c := range customers {
 		profileID, ok := profileIDs[c.Profile]
 		if !ok {
 			log.Printf("Customer %s: no profile for level %q; the default profile answers", c.Name, c.Profile)
@@ -750,6 +750,9 @@ func Run() {
 		}
 		customerIDs[c.Name] = custID
 		custToBranch[custID] = branchID
+		if err := seedDemoCounterAlerts(db, custID, i); err != nil {
+			log.Printf("Counter alerts for %s: %v", c.Name, err)
+		}
 		custToProjects[custID] = []uuid.UUID{}
 
 		// The customer's main ship-to address, the default for its orders and deliveries.
@@ -1631,6 +1634,33 @@ func seedCustomer(db *sql.DB, c demoCustomer, profile uuid.UUID) (uuid.UUID, uui
 		return uuid.Nil, uuid.Nil, fmt.Errorf("mirror the primary branch: %w", err)
 	}
 	return uuid.MustParse(cid), uuid.MustParse(branch), nil
+}
+
+// demoCounterAlerts are what the demo leaves on its first two accounts so a
+// prospect sees both kinds at the counter (CP-11): the first account carries
+// a warning the clerk must read before the sale, the second a plain note.
+var demoCounterAlerts = []struct {
+	Kind, Text      string
+	AcknowledgeNeed bool
+}{
+	{"warning", "Account is past due: confirm a payment arrangement with the office before the sale.", true},
+	{"note", "Prefers an early morning pickup. Ask for the foreman at the yard gate.", false},
+}
+
+// seedDemoCounterAlerts writes the alert for the customer at index i of the
+// demo list, when there is one. The seed owns only its own rows (created_by
+// 'demo-seed'): they are replaced each run, an alert an operator added is left.
+func seedDemoCounterAlerts(db *sql.DB, customerID uuid.UUID, i int) error {
+	if i < 0 || i >= len(demoCounterAlerts) {
+		return nil
+	}
+	a := demoCounterAlerts[i]
+	if _, err := db.Exec(`DELETE FROM customer_alerts WHERE customer_id = $1 AND created_by = 'demo-seed'`, customerID); err != nil {
+		return err
+	}
+	_, err := db.Exec(`INSERT INTO customer_alerts (customer_id, kind, text, show_at_counter, show_at_orders, acknowledge_required, created_by)
+		VALUES ($1, $2, $3, TRUE, TRUE, $4, 'demo-seed')`, customerID, a.Kind, a.Text, a.AcknowledgeNeed)
+	return err
 }
 
 // posRegisterUpsertSQL moves the demo register REG-01 onto the location given
