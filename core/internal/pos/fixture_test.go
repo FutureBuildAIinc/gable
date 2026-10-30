@@ -227,6 +227,7 @@ func newCounterFixture(t *testing.T, db *database.DB, own bool, opts ...func(*fi
 	// every sale; the wall itself is proved in serve (the large cash preview
 	// wall test)
 	largecash.NewHandler(f.largeCash).WithBranchGuard(admitEverySale{}).RegisterRoutes(mux, nil,
+		func(next http.Handler) http.Handler { return next },
 		func(next http.Handler) http.Handler { return next })
 	invoice.NewHandler(invoices).RegisterRoutes(mux)
 	// the payment route, as serve mounts it: the contention tests race real

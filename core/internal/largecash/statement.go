@@ -6,7 +6,6 @@ package largecash
 import (
 	"context"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/gablelbm/gable/internal/platform/httpx"
@@ -74,9 +73,9 @@ type Statement struct {
 
 // Statements is the year's statements, one per payer.
 type Statements struct {
-	Year  int        `json:"year"`
+	Year  int         `json:"year"`
 	Items []Statement `json:"items"`
-	Count int        `json:"count"`
+	Count int         `json:"count"`
 }
 
 // StatementDueDate is the statement's own deadline as a rule: the statement
@@ -159,7 +158,7 @@ func (s *Service) IssueStatement(ctx context.Context, in IssueStatementIn) (*Sta
 	if facts.StatementState == StatementRowIssued {
 		return nil, ErrStatementAlreadyIssued
 	}
-	actor := strings.TrimSpace(in.Actor)
+	actor := actorOrSystem(in.Actor)
 	issuedDate := s.now()
 	var statement *Statement
 	err = s.db.RunInTx(ctx, func(ctx context.Context) error {

@@ -105,7 +105,7 @@ func (s *Service) RecordFiling(ctx context.Context, eventID uuid.UUID, in Record
 	if filedDate.IsZero() {
 		filedDate = s.now()
 	}
-	actor := strings.TrimSpace(in.Actor)
+	actor := actorOrSystem(in.Actor)
 	var filing *Filing
 	err = s.db.RunInTx(ctx, func(ctx context.Context) error {
 		// The standing row is the worklist's record of the filing obligation.

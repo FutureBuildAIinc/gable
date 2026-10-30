@@ -139,7 +139,7 @@ describe("the manager's large cash worklist", () => {
         await new Promise((r) => setTimeout(r, 0));
         await el.updateComplete;
         expect(svc.recordFiling).toHaveBeenCalledWith('ev1', '31000000000001');
-        expect(q(el, 'large-cash-note').textContent).toContain('the Form 8300 for Riverbend Builders is filed');
+        expect(q(el, 'large-cash-status').textContent).toContain('the Form 8300 for Riverbend Builders is filed');
         el.remove();
     });
 
@@ -161,7 +161,7 @@ describe("the manager's large cash worklist", () => {
         await new Promise((r) => setTimeout(r, 0));
         await el.updateComplete;
         expect(svc.issueStatement).toHaveBeenCalledWith('ev1');
-        expect(q(el, 'large-cash-note').textContent).toContain('the customer statement for Riverbend Builders is out');
+        expect(q(el, 'large-cash-status').textContent).toContain('the customer statement for Riverbend Builders is out');
         el.remove();
     });
 

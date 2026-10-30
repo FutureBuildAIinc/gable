@@ -211,7 +211,7 @@ test('a United States cash sale over the threshold lands on the worklist with it
   // the manager records the filing they made in BSA E-Filing
   await row.locator(`#lc-ack-${crossing!.event_id}`).fill('31000000000001');
   await row.getByTestId('large-cash-file').click();
-  await expect(page.getByTestId('large-cash-note')).toContainText('is filed');
+  await expect(page.getByTestId('large-cash-status')).toContainText('is filed');
   await expect(row.getByTestId('large-cash-action')).toContainText('The filing is done');
 
   // and the worklist says so

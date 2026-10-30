@@ -119,7 +119,7 @@ export class LargeCashWorklist extends LitElement {
           <div class="mt-4 rounded-lg p-3 text-sm" role="alert" data-testid="large-cash-error"
             style="border:1px solid rgb(var(--gb-safety-red));color:rgb(var(--gb-safety-red))">${this._error}</div>` : nothing}
         ${this._note ? html`
-          <div class="mt-4 rounded-lg p-3 text-sm font-semibold" role="status" data-testid="large-cash-note"
+          <div class="mt-4 rounded-lg p-3 text-sm font-semibold" role="status" data-testid="large-cash-status"
             style="border:1px solid rgb(var(--gb-till-ok));color:rgb(var(--gb-till-ok))">${this._note}</div>` : nothing}
         ${rows === null ? html`
           <p class="mt-6 text-sm" style=${MUTED} data-testid="large-cash-loading">Reading the queue...</p>` : rows.length === 0 ? html`

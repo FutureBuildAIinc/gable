@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"strings"
+	"sync"
 
 	"testing"
 	"time"
@@ -202,6 +203,60 @@ func TestFilingIsRefusedForACanadianRecordAndAnIdentityDeclinedCrossing(t *testi
 	}
 	if row.FilingState != largecash.FilingStateNotReportable {
 		t.Fatalf("the identity declined row's filing state = %q, want %q", row.FilingState, largecash.FilingStateNotReportable)
+	}
+}
+
+// TestThreeManagersFilingTheSameCrossingHaveOneWinner: the house's
+// concurrency rule: three contenders at pool size four. Exactly one of them
+// lands the filing and the other two are told the crossing is already filed,
+// and the crossing carries one filing row.
+func TestThreeManagersFilingTheSameCrossingHaveOneWinner(t *testing.T) {
+	db := testutil.RequireDBMaxConns(t, 4)
+	ctx := context.Background()
+	svc := largecash.NewService(db, nil, "")
+	eventID := seedCrossing(t, db, svc, crossingOptions{country: "US",
+		cashCents: largecash.ThresholdCents + 200_000, payer: usPayer()})
+	t.Cleanup(func() {
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM audit_log WHERE action = 'large_cash.filing.recorded' AND entity_id = $1`, eventID)
+	})
+	var start sync.WaitGroup
+	var wg sync.WaitGroup
+	start.Add(1)
+	errs := make([]error, 3)
+	for i := range errs {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			start.Wait()
+			errs[i] = db.RunInTx(ctx, func(ctx context.Context) error {
+				_, err := svc.RecordFiling(ctx, eventID, largecash.RecordFilingIn{
+					AcknowledgementNo: "ACK-THREE", Actor: "manager-three"})
+				return err
+			})
+		}(i)
+	}
+	start.Done()
+	wg.Wait()
+	winners, conflicts := 0, 0
+	for _, err := range errs {
+		switch {
+		case err == nil:
+			winners++
+		case strings.Contains(err.Error(), "already filed"):
+			conflicts++
+		default:
+			t.Fatalf("the three contenders answered %v, want one winner and two conflicts", err)
+		}
+	}
+	if winners != 1 || conflicts != 2 {
+		t.Fatalf("the three contenders gave %d winners and %d conflicts, want one and two", winners, conflicts)
+	}
+	var rows int
+	if err := db.Pool.QueryRow(ctx, `SELECT count(*) FROM large_cash_filings WHERE event_id = $1 AND state = 'filed'`, eventID).Scan(&rows); err != nil {
+		t.Fatal(err)
+	}
+	if rows != 1 {
+		t.Fatalf("the crossing carries %d filing rows, want one", rows)
 	}
 }
 

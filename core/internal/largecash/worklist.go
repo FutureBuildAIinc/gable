@@ -6,6 +6,7 @@ package largecash
 import (
 	"context"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/gablelbm/gable/pkg/branchctx"
@@ -74,6 +75,17 @@ const (
 // the receipt that crossed the threshold. The count is in days, not months,
 // and it resets per receipt: every crossing carries its own anchor.
 const FilingDeadlineDays = 15
+
+// actorOrSystem names the manager who recorded a filing or issued a
+// statement: the person, or the system when the call carries no identity (a
+// dev mode caller). It is the till's own rule.
+func actorOrSystem(actor string) string {
+	actor = strings.TrimSpace(actor)
+	if actor == "" {
+		return "system"
+	}
+	return actor
+}
 
 // FilingDeadline is the deadline rule as a pure function: the receipt anchor
 // plus the 15 days. A zero anchor has no deadline, which is what a crossing
@@ -185,36 +197,36 @@ func RecommendedAction(row WorklistRow) string {
 // taxpayer identification number: that number belongs to the Form 8300
 // export alone.
 type WorklistRow struct {
-	EventID              uuid.UUID  `json:"event_id"`
-	PayerKey             string     `json:"payer_key"`
-	PayerName            string     `json:"payer_name"`
-	CustomerID           *uuid.UUID `json:"customer_id,omitempty"`
-	CustomerAccount      string     `json:"customer_account,omitempty"`
-	BranchID             uuid.UUID  `json:"branch_id"`
-	BranchName           string     `json:"branch_name"`
-	BranchAddress        string     `json:"branch_address"`
+	EventID              uuid.UUID   `json:"event_id"`
+	PayerKey             string      `json:"payer_key"`
+	PayerName            string      `json:"payer_name"`
+	CustomerID           *uuid.UUID  `json:"customer_id,omitempty"`
+	CustomerAccount      string      `json:"customer_account,omitempty"`
+	BranchID             uuid.UUID   `json:"branch_id"`
+	BranchName           string      `json:"branch_name"`
+	BranchAddress        string      `json:"branch_address"`
 	ContributedBranchIDs []uuid.UUID `json:"contributed_branch_ids"`
-	Currency             string     `json:"currency"`
-	TotalCents           int64      `json:"total_cents"`
-	RuleFamily           string     `json:"rule_family"`
-	ThresholdCents       int64      `json:"threshold_cents"`
-	TransactionCount     int        `json:"transaction_count"`
-	TenderCount          int        `json:"tender_count"`
-	FirstDate            *time.Time `json:"first_date,omitempty"`
-	LastDate             *time.Time `json:"last_date,omitempty"`
-	EventState           string     `json:"event_state"`
-	FilingState          string     `json:"filing_state"`
-	FilingDeadline       *time.Time `json:"filing_deadline,omitempty"`
-	PastDeadline         bool       `json:"past_deadline"`
-	FiledDate            *time.Time `json:"filed_date,omitempty"`
-	AcknowledgementNo    string     `json:"acknowledgement_no,omitempty"`
-	StatementState       string     `json:"statement_state"`
-	StatementIssuedDate  *time.Time `json:"statement_issued_date,omitempty"`
-	PayerDetailsCaptured bool       `json:"payer_details_captured"`
-	Severity             int64      `json:"severity_score"`
-	Action               string     `json:"recommended_action"`
-	Note                 string     `json:"note,omitempty"`
-	AdviserNote          string     `json:"adviser_note"`
+	Currency             string      `json:"currency"`
+	TotalCents           int64       `json:"total_cents"`
+	RuleFamily           string      `json:"rule_family"`
+	ThresholdCents       int64       `json:"threshold_cents"`
+	TransactionCount     int         `json:"transaction_count"`
+	TenderCount          int         `json:"tender_count"`
+	FirstDate            *time.Time  `json:"first_date,omitempty"`
+	LastDate             *time.Time  `json:"last_date,omitempty"`
+	EventState           string      `json:"event_state"`
+	FilingState          string      `json:"filing_state"`
+	FilingDeadline       *time.Time  `json:"filing_deadline,omitempty"`
+	PastDeadline         bool        `json:"past_deadline"`
+	FiledDate            *time.Time  `json:"filed_date,omitempty"`
+	AcknowledgementNo    string      `json:"acknowledgement_no,omitempty"`
+	StatementState       string      `json:"statement_state"`
+	StatementIssuedDate  *time.Time  `json:"statement_issued_date,omitempty"`
+	PayerDetailsCaptured bool        `json:"payer_details_captured"`
+	Severity             int64       `json:"severity_score"`
+	Action               string      `json:"recommended_action"`
+	Note                 string      `json:"note,omitempty"`
+	AdviserNote          string      `json:"adviser_note"`
 }
 
 // Worklist is the manager's queue of large cash crossings.
