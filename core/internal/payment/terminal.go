@@ -170,6 +170,9 @@ type TerminalAnswer struct {
 	Brand       string
 	Last4       string
 	AuthCode    string
+	// FeeCents is the card surcharge the processor added on top of the leg's
+	// amount (CP-15); zero when none. Stub: the ledger does not store it yet.
+	FeeCents int64
 }
 
 // TerminalBatchLine is one leg of a device's settlement batch.
