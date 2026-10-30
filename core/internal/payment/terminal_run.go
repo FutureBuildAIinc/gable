@@ -135,7 +135,7 @@ type RunTerminal struct {
 	logger          *slog.Logger
 
 	// guards holds the driver's own no double charge guard, one per order
-	// id: the check and the charge-card POST that may charge it happen
+	// id (a reversal's under its own prefixed name, see reverse): the check and the charge-card POST that may charge it happen
 	// under one lock, so four concurrent dispatches of one leg make one
 	// charge.
 	guardMu sync.Mutex
@@ -701,9 +701,9 @@ func lastFourOf(masked string) string {
 // synchronous Payments API call with no device. The answer is delivered off
 // the caller's goroutine, as a device's own answer would be.
 //
-// The reversal takes the same no double charge guard a sale takes: a retried
-// reversal is the same leg, so the customer is refunded once and the second
-// dispatch is refused.
+// The reversal takes its own no double refund guard, keyed apart from the
+// sale's (see reverse): a retried reversal is the same leg, so the customer
+// is refunded once and the second dispatch is refused.
 func (t *RunTerminal) dispatchReversal(ctx context.Context, d TerminalDispatch) (TerminalReceipt, error) {
 	res, err := t.reverse(ctx, d.Kind, d.Reference, d.AmountCents, d.IdempotencyKey)
 	if err != nil {
@@ -721,11 +721,20 @@ func (t *RunTerminal) dispatchReversal(ctx context.Context, d TerminalDispatch) 
 	return TerminalReceipt{ProviderRef: ref, DeviceID: d.DeviceID}, nil
 }
 
+// reversalGuardPrefix names a reversal's guard apart from the charge's.
+const reversalGuardPrefix = "reverse:"
+
 // reverse is the one Run void-or-refund call, shared by the ledger's
 // reversal legs (dispatchReversal) and the counter's way back
 // (RunTerminalGateway). kind is TerminalKindRefund or TerminalKindVoid; a
-// void sends no amount. The key goes as user_identifier and is the
-// no double refund guard's name: a key is sent at most once per process.
+// void sends no amount. The key goes as user_identifier and names the
+// no double refund guard: a key is reversed at most once per process.
+//
+// The reversal guard is keyed apart from the charge guard (CP-05 round 3
+// P2-B): a lost sale leg is reversed under that leg's own key, the key the
+// charge already marked attempted, and sharing the guard refused that
+// reversal before any POST. The prefix is the guard's name only; the wire
+// user_identifier is the key unchanged.
 func (t *RunTerminal) reverse(ctx context.Context, kind string, transID string, amountCents int64, key string) (*runChargeCardRes, error) {
 	cfg, err := t.resolve()
 	if err != nil {
@@ -734,7 +743,7 @@ func (t *RunTerminal) reverse(ctx context.Context, kind string, transID string, 
 	if transID == "" {
 		return nil, fmt.Errorf("the run %s leg names no trans_id to reverse", kind)
 	}
-	guard := t.guardFor(key)
+	guard := t.guardFor(reversalGuardPrefix + key)
 	guard.mu.Lock()
 	defer guard.mu.Unlock()
 	if guard.attempted {

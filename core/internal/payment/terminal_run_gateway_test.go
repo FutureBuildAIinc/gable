@@ -123,3 +123,48 @@ func TestRunWayBackARetryAnswerIsNotADecline(t *testing.T) {
 		t.Fatalf("a Run B was filed as %s: the outcome is unknown", res.Status)
 	}
 }
+
+// CP-05 round 3 P2-B: the reversal guard is keyed apart from the charge
+// guard. A charge, then its reversal under the same intent key (the manager's
+// resolution of a lost sale leg reverses it under the leg's own key), sends
+// exactly one reversal POST; the charge's guard does not swallow it, and the
+// reversal is still never sent twice.
+func TestRunAReversalUnderTheChargeKeyIsSentOnce(t *testing.T) {
+	ledger, branch := newRunLedger(t)
+	runUntilItSticks(t, func(t *testing.T) bool {
+		sale := runSaleRow(t, branch)
+		fs := newRunFake(t)
+		term := newRunDriver(t, fs, ledger)
+		in, ok := claimRunLegAt(t, ledger, sale, branch, 2500)
+		if !ok {
+			return false
+		}
+		d := payment.TerminalDispatch{IntentID: in.ID, Kind: in.Kind, AmountCents: in.AmountCents,
+			RegisterID: in.RegisterID, DeviceID: in.DeviceID, IdempotencyKey: in.IdempotencyKey}
+		if _, err := term.Dispatch(context.Background(), d); err != nil {
+			t.Fatalf("the charge: %v", err)
+		}
+		if fs.fake.chargePostCount() != 1 {
+			t.Fatalf("the charge posted %d times, want 1", fs.fake.chargePostCount())
+		}
+		gw := payment.NewRunTerminalGateway(term)
+		res, err := payment.VoidUnderKey(context.Background(), gw, "TRX-LOST1", in.IdempotencyKey)
+		if err != nil {
+			t.Fatalf("the reversal under the charge's key was refused before any POST: %v", err)
+		}
+		if res.Status != payment.GatewayStatusVoided {
+			t.Fatalf("status %s, want VOIDED", res.Status)
+		}
+		if _, err := payment.VoidUnderKey(context.Background(), gw, "TRX-LOST1", in.IdempotencyKey); err == nil {
+			t.Fatal("the retried reversal was answered: the customer would be refunded twice")
+		}
+		posts := fs.fake.voidPosts_()
+		if len(posts) != 1 {
+			t.Fatalf("%d reversal posts, want exactly 1", len(posts))
+		}
+		if posts[0]["user_identifier"] != in.IdempotencyKey {
+			t.Errorf("user_identifier = %v, want the intent key unchanged on the wire", posts[0]["user_identifier"])
+		}
+		return true
+	})
+}

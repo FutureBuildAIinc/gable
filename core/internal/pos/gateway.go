@@ -240,6 +240,17 @@ const (
 	chargeUnknown  chargeOutcome = "unknown"
 )
 
+// fallbackRefundKey is the key of the refund sent when the void of the same
+// reversal was refused: a key of its own, so a gateway that answers a
+// retried key from its record (or a driver that sends a key once) never
+// answers the refund with the void's no (CP-05 round 3 P2-B).
+func fallbackRefundKey(key string) string {
+	if key == "" {
+		return ""
+	}
+	return key + "-refund"
+}
+
 // refundUnder sends one refund and reads its verdict, not only its error
 // (CP-05 round 3 P1-A): only an accepted answer is the money going back.
 func refundUnder(ctx context.Context, gw payment.PaymentGateway, gatewayTxID string, amountCents int64, key string) (chargeOutcome, error) {
@@ -258,7 +269,7 @@ func refundUnder(ctx context.Context, gw payment.PaymentGateway, gatewayTxID str
 }
 
 // voidThenRefund puts a whole charge back: the void first, then the refund
-// when the void is refused (an error, as a settled capture
+// under its own key when the void is refused (an error, as a settled capture
 // answers) or definitely declined. The void's verdict is read, not only its
 // error (CP-05 round 3 P1-A): a gateway may answer a decline with no error,
 // as the Run terminal answers a C. An answer that is neither the reversal
@@ -276,7 +287,7 @@ func voidThenRefund(ctx context.Context, gw payment.PaymentGateway, gatewayTxID 
 			return chargeUnknown, fmt.Errorf("void: %v", noVerdictOf(res))
 		}
 	}
-	outcome, refundErr := refundUnder(ctx, gw, gatewayTxID, amountCents, key)
+	outcome, refundErr := refundUnder(ctx, gw, gatewayTxID, amountCents, fallbackRefundKey(key))
 	if refundErr != nil {
 		return outcome, fmt.Errorf("void: %v; refund: %v", voidErr, refundErr)
 	}

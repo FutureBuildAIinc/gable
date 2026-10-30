@@ -11,6 +11,7 @@ package pos_test
 // refund; any other answer is unknown and books no reversal.
 
 import (
+	"context"
 	"net/http"
 	"testing"
 
@@ -171,5 +172,51 @@ func TestCP05R3_ADeclinedRestRefundBooksNothing(t *testing.T) {
 	}
 	if got := itemStateOf(t, f, itemID); got != "open" {
 		t.Fatalf("the item is %s, wanted open again", got)
+	}
+}
+
+// keyedGateway is the fake gateway with the idempotency key extension, and
+// records the key of every call in order.
+type keyedGateway struct {
+	*fakeGateway
+	keys []string
+}
+
+func (g *keyedGateway) VoidWithKey(ctx context.Context, id, key string) (*payment.GatewayResult, error) {
+	g.mu.Lock()
+	g.keys = append(g.keys, "void "+key)
+	g.mu.Unlock()
+	return g.Void(ctx, id)
+}
+
+func (g *keyedGateway) RefundWithKey(ctx context.Context, id string, cents int64, key string) (*payment.GatewayResult, error) {
+	g.mu.Lock()
+	g.keys = append(g.keys, "refund "+key)
+	g.mu.Unlock()
+	return g.Refund(ctx, id, cents)
+}
+
+// RULE (CP-05 round 3 P2-B): the refund sent after a declined void goes
+// under a key of its own, so a gateway that answers a retried key from its
+// record (or a driver that sends a key once, as Run does) never answers the
+// refund with the void's no.
+func TestCP05R3_TheFallbackRefundHasItsOwnKey(t *testing.T) {
+	gw := &keyedGateway{fakeGateway: &fakeGateway{voidStatuses: []payment.GatewayStatus{payment.GatewayStatusDeclined}}}
+	f := terminalFixture(t, payment.SimNoAnswer, nil)
+	f.service.WithGateway(gw)
+	saleID := f.openSale(t, nil)
+	intentID, itemID := f.lostLegOf(t, saleID)
+	if r := f.completeSale(saleID, f.cashAll(t, saleID)); r.status != http.StatusOK {
+		t.Fatalf("the cash completion = %d: %s", r.status, r.raw)
+	}
+	if r := f.resolveItem(itemID, "authorized", f.recordedRefOf(t, intentID, itemID)); r.status != http.StatusOK {
+		t.Fatalf("the resolve = %d: %s", r.status, r.raw)
+	}
+	if len(gw.keys) != 2 {
+		t.Fatalf("calls %v, wanted the declined void then the refund", gw.keys)
+	}
+	voidKey, refundKey := gw.keys[0][len("void "):], gw.keys[1][len("refund "):]
+	if voidKey == "" || refundKey == "" || voidKey == refundKey {
+		t.Fatalf("the void went under %q and the refund under %q, wanted two distinct keys", voidKey, refundKey)
 	}
 }
