@@ -71,7 +71,7 @@ var (
 	// ErrUnavailable is an Appwrite fault that decided nothing.
 	ErrUnavailable = errors.New("staffauth: identity provider unavailable")
 	// ErrNoSession is a session id that is unknown, revoked or expired.
-	ErrNoSession = errors.New("staffauth: no valid session")
+	ErrNoSession = middleware.ErrSessionInvalid
 )
 
 // Service signs people in and resolves their sessions.
