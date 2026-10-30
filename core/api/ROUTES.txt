@@ -151,6 +151,8 @@ DELETE	/api/v1/admin/settings/ai	internal/techadmin	h.DeleteAISettings
 GET	/api/v1/admin/settings/ai	internal/techadmin	h.GetAISettings
 PUT	/api/v1/admin/settings/ai	internal/techadmin	h.SaveAISettings
 POST	/api/v1/admin/settings/ai/test	internal/techadmin	h.TestAIConnection
+GET	/api/v1/admin/settings/market-index-source	internal/techadmin	h.GetMarketIndexSourceSettings
+PUT	/api/v1/admin/settings/market-index-source	internal/techadmin	h.SaveMarketIndexSourceSettings
 DELETE	/api/v1/admin/settings/routing	internal/techadmin	h.DeleteRoutingSettings
 GET	/api/v1/admin/settings/routing	internal/techadmin	h.GetRoutingSettings
 PUT	/api/v1/admin/settings/routing	internal/techadmin	h.SaveRoutingSettings

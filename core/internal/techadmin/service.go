@@ -709,7 +709,8 @@ func (s *Service) TestAIConnection(ctx context.Context) TestResult {
 // SealLegacySettings seals any AI key row still stored in plain text, the
 // read time upgrade run at startup. A row that is already sealed, or any row
 // when no vault key exists, is left alone. It returns how many it sealed and
-// never loses a key: a value is replaced only by its own sealed form.
+// never loses a key: a value is replaced only by its own sealed form. The
+// market index source's feed key gets the same pass.
 func (s *Service) SealLegacySettings(ctx context.Context) (int, error) {
 	if s.vault == nil || !s.vault.Present() {
 		return 0, nil
@@ -728,6 +729,21 @@ func (s *Service) SealLegacySettings(ctx context.Context) (int, error) {
 			return n, err
 		}
 		if err := s.repo.WriteSetting(ctx, key, sealed); err != nil {
+			return n, err
+		}
+		n++
+	}
+	row, err := s.repo.ReadMarketIndexSource(ctx)
+	if err != nil {
+		return n, err
+	}
+	if row.FeedKey != "" && !ai.IsSealedValue(row.FeedKey) {
+		sealed, err := ai.SealValue(s.vault, row.FeedKey)
+		if err != nil {
+			return n, err
+		}
+		row.FeedKey = sealed
+		if err := s.repo.UpdateMarketIndexSource(ctx, row, row.Revision); err != nil {
 			return n, err
 		}
 		n++
@@ -919,6 +935,122 @@ func (s *Service) DeleteRoutingSettings(ctx context.Context, pre Precondition) e
 		}
 		return s.record(ctx, "admin_settings.deleted", "admin_settings", settingsEntityID(ResourceRoutingSettings), changes, next)
 	})
+}
+
+// --- the market index source settings ---
+
+// marketIndexSourceDocument reads the settings row into the wire document.
+// The feed key is opened only to build its masked hint; a sealed key the
+// vault cannot open (the vault key changed) reads as not stored.
+func (s *Service) marketIndexSourceDocument(row *MarketIndexSourceRow) *MarketIndexSourceSettings {
+	out := &MarketIndexSourceSettings{
+		Source:        row.Source,
+		FeedURL:       row.FeedURL,
+		StalenessDays: row.StalenessDays,
+		LastPullAt:    httpx.PtrTimestamp(row.LastPullAt),
+		LastPullOK:    row.LastPullOK,
+		LastError:     row.LastError,
+		Revision:      row.Revision,
+	}
+	if row.FeedKey != "" {
+		if opened, err := ai.OpenValue(s.vault, row.FeedKey); err == nil && opened != "" {
+			out.FeedKeySet = true
+			out.FeedKeyHint = keyHint(opened)
+		}
+	}
+	return out
+}
+
+// GetMarketIndexSourceSettings reads the market index source document. No
+// key is ever returned, only its masked hint.
+func (s *Service) GetMarketIndexSourceSettings(ctx context.Context) (*MarketIndexSourceSettings, error) {
+	row, err := s.repo.ReadMarketIndexSource(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return s.marketIndexSourceDocument(row), nil
+}
+
+// SaveMarketIndexSourceSettings writes the market index source in one
+// transaction on the client's revision: the settings row is locked, the
+// revision checked, the row written (the feed key sealed with the vault when
+// one is present), the revision moved, the audit row written and the event
+// written last. The audit row and the event never carry the key; they record
+// only that it changed.
+func (s *Service) SaveMarketIndexSourceSettings(ctx context.Context, in MarketIndexSourceSave, pre Precondition) (*MarketIndexSourceSettings, error) {
+	var out *MarketIndexSourceSettings
+	err := s.inTx(ctx, func(ctx context.Context) error {
+		row, err := s.repo.LockMarketIndexSource(ctx)
+		if err != nil {
+			return err
+		}
+		if err := pre.check(row.Revision); err != nil {
+			return err
+		}
+		next := row
+		if in.Source != nil {
+			next.Source = *in.Source
+		}
+		if in.FeedURL != nil {
+			next.FeedURL = *in.FeedURL
+		}
+		if in.FeedKey != nil {
+			// The way the AI settings store their key: sealed when a vault is
+			// present, so the value at rest is never the key itself.
+			next.FeedKey = *in.FeedKey
+			if *in.FeedKey != "" && s.vault != nil && s.vault.Present() {
+				if sealed, serr := ai.SealValue(s.vault, *in.FeedKey); serr == nil {
+					next.FeedKey = sealed
+				} else {
+					return serr
+				}
+			}
+		}
+		if in.StalenessDays != nil {
+			next.StalenessDays = *in.StalenessDays
+		}
+		rev := row.Revision + 1
+		if err := s.repo.UpdateMarketIndexSource(ctx, next, rev); err != nil {
+			return err
+		}
+		fresh, err := s.repo.ReadMarketIndexSource(ctx)
+		if err != nil {
+			return err
+		}
+		out = s.marketIndexSourceDocument(fresh)
+		changes := map[string]any{
+			"resource": ResourceMarketIndexSourceSettings,
+			"revision": rev,
+		}
+		if in.Source != nil {
+			changes["source"] = *in.Source
+		}
+		if in.StalenessDays != nil {
+			changes["staleness_days"] = *in.StalenessDays
+		}
+		if in.FeedURL != nil {
+			changes["feed_url_cleared"] = *in.FeedURL == ""
+		}
+		if in.FeedKey != nil {
+			// Only that it changed, never the key.
+			changes["feed_key_changed"] = true
+		}
+		if s.audit != nil {
+			if err := s.audit.Log(ctx, audit.Entry{
+				Action:     "settings.saved",
+				EntityType: "admin_settings",
+				EntityID:   settingsEntityID(ResourceMarketIndexSourceSettings),
+				Changes:    changes,
+			}); err != nil {
+				return err
+			}
+		}
+		return s.record(ctx, "admin_settings.saved", "admin_settings", settingsEntityID(ResourceMarketIndexSourceSettings), changes, rev)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 // record writes one event into the outbox through the transaction's

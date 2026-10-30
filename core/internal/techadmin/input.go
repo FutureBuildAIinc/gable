@@ -141,6 +141,73 @@ type SaveRoutingSettingsRequest struct {
 	Revision json.RawMessage `json:"revision"`
 }
 
+// SaveMarketIndexSourceRequest is the body of PUT
+// /api/v1/admin/settings/market-index-source. FeedKey is a pointer so
+// omitted (leave the key as it is), present but empty (clear it) and a value
+// (replace it) stay distinct; it is never echoed back.
+type SaveMarketIndexSourceRequest struct {
+	Source        *string         `json:"source"`
+	FeedURL       *string         `json:"feed_url"`
+	FeedKey       *string         `json:"feed_key"`
+	StalenessDays json.RawMessage `json:"staleness_days"`
+	Revision      json.RawMessage `json:"revision"`
+}
+
+// Parse validates the market index source save, collecting every problem
+// into one 400 before anything is written. A save must name something.
+func (r *SaveMarketIndexSourceRequest) Parse() (save MarketIndexSourceSave, revision *int64, err error) {
+	v := &httpx.Validator{}
+	if r.Source == nil && r.FeedURL == nil && r.FeedKey == nil && r.StalenessDays == nil {
+		v.Check(false, "source", "a save must name something to change")
+	}
+	var source string
+	if r.Source != nil {
+		source = strings.TrimSpace(*r.Source)
+		if source != IndexSourceManual && source != IndexSourceFBConnect {
+			v.Check(false, "source", "must be manual or fb_connect_feed")
+		}
+	}
+	var feedURL *string
+	if r.FeedURL != nil {
+		u := strings.TrimSpace(*r.FeedURL)
+		if u != "" {
+			if verr := ai.ValidateBaseURL(u); verr != nil {
+				v.Check(false, "feed_url", verr.Error())
+			}
+		}
+		feedURL = &u
+	}
+	var feedKey *string
+	if r.FeedKey != nil {
+		k := strings.TrimSpace(*r.FeedKey)
+		feedKey = &k
+	}
+	var staleness *int
+	if n, ok := v.Int("staleness_days", r.StalenessDays, false); ok {
+		v.Check(n >= 1 && n <= 365, "staleness_days", "must be between 1 and 365 days")
+		if n >= 1 && n <= 365 {
+			d := int(n)
+			staleness = &d
+		}
+	}
+	var rev *int64
+	if n, ok := v.Int("revision", r.Revision, false); ok {
+		v.Check(n >= 1, "revision", "must be a revision number, 1 or more")
+		rev = &n
+	}
+	if err := v.Err(); err != nil {
+		return MarketIndexSourceSave{}, nil, err
+	}
+	out := MarketIndexSourceSave{FeedURL: feedURL, FeedKey: feedKey}
+	if r.Source != nil {
+		out.Source = &source
+	}
+	if staleness != nil {
+		out.StalenessDays = staleness
+	}
+	return out, rev, nil
+}
+
 // Parse validates the routing key save.
 func (r *SaveRoutingSettingsRequest) Parse() (apiKey string, revision *int64, err error) {
 	v := &httpx.Validator{}
