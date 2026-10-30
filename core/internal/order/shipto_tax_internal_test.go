@@ -60,10 +60,11 @@ func TestTaxInputsReadTheZoneOnTheBranchBusinessDay(t *testing.T) {
 	svc.now = func() time.Time { return time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC) }
 
 	o := &Order{OrderSummary: OrderSummary{BranchID: branchID, DeliveryType: DeliveryDelivery, ShipToID: &shipTo}}
-	inputs, _, err := svc.taxInputs(ctx, o, false)
+	plan, err := svc.taxInputs(ctx, o, false)
 	if err != nil {
 		t.Fatalf("taxInputs: %v", err)
 	}
+	inputs := plan.inputs
 	if inputs.ZoneRate == nil || *inputs.ZoneRate != "0.070000" {
 		got := "<nil>"
 		if inputs.ZoneRate != nil {

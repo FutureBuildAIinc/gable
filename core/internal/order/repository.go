@@ -101,6 +101,9 @@ type Repository interface {
 	// nil when no zone does: the resolver then falls through to the typed
 	// rate and the branch rate.
 	TaxZone(ctx context.Context, country, postal, region string, on time.Time) (*taxzone.Snapshot, error)
+	// Canada runs the CP-14 rule for a document of the branch: whether it is
+	// Canadian, and the zone whose parts it charges (taxzone.Canada).
+	Canada(ctx context.Context, in taxzone.CanadaInput) (taxzone.CanadaResult, error)
 
 	// The credit check reads documents, never customers.balance_due
 	// (ADR 0005 5.3).
@@ -1337,6 +1340,11 @@ func (r *PostgresRepository) TaxZone(ctx context.Context, country, postal, regio
 		return nil, err
 	}
 	return zone, nil
+}
+
+// Canada runs the CP-14 rule through the context's executor (taxzone.Canada).
+func (r *PostgresRepository) Canada(ctx context.Context, in taxzone.CanadaInput) (taxzone.CanadaResult, error) {
+	return taxzone.Canada(ctx, r.db, in)
 }
 
 func (r *PostgresRepository) CustomerExemption(ctx context.Context, customerID uuid.UUID, day time.Time) (*tax.ExemptionStanding, error) {

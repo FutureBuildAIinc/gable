@@ -53,6 +53,9 @@ type Repository interface {
 	// TaxZone resolves a place of receipt through the zone tables (CP-10),
 	// nil when no zone covers it.
 	TaxZone(ctx context.Context, country, postal, region string, on time.Time) (*taxzone.Snapshot, error)
+	// Canada runs the CP-14 rule for a sale of the branch: whether it is
+	// Canadian, and the zone whose parts it charges (taxzone.Canada).
+	Canada(ctx context.Context, in taxzone.CanadaInput) (taxzone.CanadaResult, error)
 	// SaveSaleShipTo freezes the ship to onto the sale row at completion.
 	SaveSaleShipTo(ctx context.Context, saleID uuid.UUID, snapshot []byte) error
 	// SetSaleDelivery names a delivered sale's ship to and delivery type
@@ -699,6 +702,11 @@ func (r *PostgresRepository) ShipTo(ctx context.Context, shipToID uuid.UUID) (*s
 		return nil, nil, fmt.Errorf("failed to read ship-to: %w", err)
 	}
 	return &snap, rate, nil
+}
+
+// Canada runs the CP-14 rule through the context's executor (taxzone.Canada).
+func (r *PostgresRepository) Canada(ctx context.Context, in taxzone.CanadaInput) (taxzone.CanadaResult, error) {
+	return taxzone.Canada(ctx, r.db, in)
 }
 
 // TaxZone resolves a place of receipt through the zone tables (CP-10); no

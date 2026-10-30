@@ -18,6 +18,7 @@ import (
 	"github.com/gablelbm/gable/internal/invoice"
 	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/gablelbm/gable/internal/salesdoc"
+	"github.com/gablelbm/gable/internal/taxzone"
 	"github.com/gablelbm/gable/internal/units"
 	"github.com/gablelbm/gable/pkg/audit"
 	"github.com/gablelbm/gable/pkg/outbox"
@@ -627,11 +628,11 @@ func (s *Service) fulfil(ctx context.Context, id uuid.UUID, pre *Precondition, r
 			if err != nil {
 				return err
 			}
-			inputs, zone, err := s.taxInputs(ctx, cur, exempt)
+			plan, err := s.taxInputs(ctx, cur, exempt)
 			if err != nil {
 				return err
 			}
-			resolved, err := salesdoc.ResolveTax(inputs)
+			resolved, err := salesdoc.ResolveTax(plan.inputs)
 			if err != nil {
 				if errors.Is(err, salesdoc.ErrTaxRateNotConfigured) {
 					return conflictBlocker("tax_rate_not_configured",
@@ -639,24 +640,25 @@ func (s *Service) fulfil(ctx context.Context, id uuid.UUID, pre *Precondition, r
 				}
 				return err
 			}
-			scaled, _, err := salesdoc.ParseTaxRate(*resolved.Rate)
+			taxCents, frozen, err := taxzone.Charge(plan.canadian, plan.zone, resolved, totals.TaxableCents)
 			if err != nil {
 				return err
 			}
-			inv.TaxCents = int64(salesdoc.TaxAt(totals.TaxableCents, scaled))
+			inv.TaxCents = int64(taxCents)
 			inv.TaxRate = resolved.Rate
 			inv.TaxExempt = resolved.Source == salesdoc.TaxSourceExempt
 			inv.TaxSource = string(resolved.Source)
-			// The invoice records the zone that answered and the parts it
-			// was made of, frozen at the sale (CP-10): the zone row can
-			// change later, the invoice's rate may not.
-			if resolved.Source == salesdoc.TaxSourceZoneRate && zone != nil {
-				id := zone.ZoneID
+			// The invoice records the zone it was charged on and the parts
+			// it was made of, frozen at the sale (CP-10; on a Canadian
+			// invoice each part's cents, CP-14 A1): the zone row can change
+			// later, the invoice's rate may not.
+			if frozen != nil {
+				id := frozen.ZoneID
 				inv.TaxZoneID = &id
-				if raw, merr := json.Marshal(zone); merr == nil {
+				if raw, merr := json.Marshal(frozen); merr == nil {
 					inv.TaxRateParts = raw
 				}
-				src := zone.DataSource
+				src := frozen.DataSource
 				inv.TaxZoneSource = &src
 			}
 		}

@@ -10084,6 +10084,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/tax/setup": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read the tax setup warnings
+         * @description Roles admin, owner, finance. The Tech Admin tax setup panel's standing warnings (CP-14): whether a branch is Canadian, whether the dealer charges GST with no GST/HST number on file (never a refusal: documents print a notice), and the provinces of active Canadian ship-tos that no live zone covers, where a delivery is refused tax_parts_not_configured until its zone is added. A dealer with no Canadian branch has none.
+         */
+        get: operations["taxSetupGet"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/tax/zones": {
         parameters: {
             query?: never;
@@ -22155,6 +22175,23 @@ export interface components {
             lines: components["schemas"]["TaxLine"][];
             /** @description True when the flat rate fallback was used. */
             is_estimate: boolean;
+        };
+        TaxSetup: {
+            /** @description A branch's country (its own, else the dealer default) is CA. */
+            canadian: boolean;
+            /** @description Canadian, not marked not registered for GST/HST, and no GST/HST number on file. */
+            gst_hst_number_missing: boolean;
+            unzoned_provinces: {
+                /** @description The ship-tos' region as typed, upper cased (BC, AB). */
+                province: string;
+                /** @description The province's name, or the code when it is not a Canadian province code. */
+                name: string;
+                /**
+                 * Format: int64
+                 * @description How many active ship-tos sit there.
+                 */
+                ship_tos: number;
+            }[];
         };
         TaxZoneRatePart: {
             /** @enum {string} */
@@ -43583,6 +43620,30 @@ export interface operations {
             409: components["responses"]["IdempotencyConflict"];
             413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    taxSetupGet: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The warnings. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TaxSetup"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             500: components["responses"]["InternalError"];
         };
     };

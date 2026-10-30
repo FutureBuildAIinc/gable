@@ -303,15 +303,15 @@ func (s *Service) estimateTax(ctx context.Context, sale *Sale, taxableCents http
 	if customerID == nil {
 		return 0
 	}
-	resolved, err := s.ResolveSaleTax(ctx, sale, *customerID)
+	resolved, plan, err := s.resolveSaleTax(ctx, sale, *customerID)
 	if err != nil || resolved.Rate == nil {
 		return 0
 	}
-	scaled, _, err := salesdoc.ParseTaxRate(*resolved.Rate)
+	taxCents, _, err := taxzone.Charge(plan.canadian, plan.zone, resolved, taxableCents)
 	if err != nil {
 		return 0
 	}
-	return int64(salesdoc.TaxAt(taxableCents, scaled))
+	return int64(taxCents)
 }
 
 // zoneFor resolves a delivered sale's ship to to the zone that covers it
@@ -345,20 +345,45 @@ func (s *Service) zoneFor(ctx context.Context, sale *Sale) (*taxzone.Snapshot, e
 // business day the running totals, the completion, the returns and the
 // exchanges all read, and it still outranks the ship to's zone.
 func (s *Service) ResolveSaleTax(ctx context.Context, sale *Sale, customerID uuid.UUID) (salesdoc.ResolvedTax, error) {
+	resolved, _, err := s.resolveSaleTax(ctx, sale, customerID)
+	return resolved, err
+}
+
+// saleTaxPlan is the zone a counter sale's tax may be charged on and whether
+// the branch is Canadian (CP-14 A1): a Canadian sale is priced part by part
+// on it through taxzone.Charge.
+type saleTaxPlan struct {
+	zone     *taxzone.Snapshot
+	canadian bool
+}
+
+// resolveSaleTax is ResolveSaleTax with the plan the charge needs. A
+// Canadian branch's sale always has parts: a delivery takes its
+// destination's zone and never the ship-to's typed rate, a pickup the
+// branch's own zone, and none answering is the tax_parts_not_configured
+// refusal, in the words the clerk reads (item 365).
+func (s *Service) resolveSaleTax(ctx context.Context, sale *Sale, customerID uuid.UUID) (salesdoc.ResolvedTax, saleTaxPlan, error) {
 	exempt, err := s.exemptOn(ctx, sale.BranchID, customerID)
 	if err != nil {
-		return salesdoc.ResolvedTax{}, err
+		return salesdoc.ResolvedTax{}, saleTaxPlan{}, err
 	}
 	inputs := salesdoc.TaxInputs{Exempt: exempt, Delivery: sale.DeliveryType == "delivery" || sale.DeliveryType == "DELIVERY"}
+	var zone *taxzone.Snapshot
+	var shipTo *taxzone.Place
 	if inputs.Delivery && sale.ShipToID != nil {
-		_, typedRate, err := s.repo.ShipTo(ctx, *sale.ShipToID)
+		snap, typedRate, err := s.repo.ShipTo(ctx, *sale.ShipToID)
 		if err != nil {
-			return salesdoc.ResolvedTax{}, err
+			return salesdoc.ResolvedTax{}, saleTaxPlan{}, err
 		}
 		inputs.ShipToRate = typedRate
-		zone, err := s.zoneFor(ctx, sale)
+		country := ""
+		if snap.Country != nil {
+			country = *snap.Country
+		}
+		shipTo = &taxzone.Place{Country: country, Postal: snap.PostalCode, Region: snap.Region}
+		zone, err = s.zoneFor(ctx, sale)
 		if err != nil {
-			return salesdoc.ResolvedTax{}, err
+			return salesdoc.ResolvedTax{}, saleTaxPlan{}, err
 		}
 		if zone != nil {
 			inputs.ZoneRate = &zone.CombinedRate
@@ -366,12 +391,37 @@ func (s *Service) ResolveSaleTax(ctx context.Context, sale *Sale, customerID uui
 	}
 	rate, ok, err := s.repo.BranchTaxRate(ctx, &sale.BranchID)
 	if err != nil {
-		return salesdoc.ResolvedTax{}, err
+		return salesdoc.ResolvedTax{}, saleTaxPlan{}, err
 	}
 	if ok {
 		inputs.BranchRate = &rate
 	}
-	return salesdoc.ResolveTax(inputs)
+	plan := saleTaxPlan{zone: zone}
+	if !exempt {
+		day, err := s.repo.BranchLocalDate(ctx, sale.BranchID, s.now())
+		if err != nil {
+			return salesdoc.ResolvedTax{}, saleTaxPlan{}, err
+		}
+		ca, err := s.repo.Canada(ctx, taxzone.CanadaInput{BranchID: sale.BranchID, On: day, ShipTo: shipTo, Destination: zone})
+		if err != nil {
+			if h, ok := taxzone.AsPartsNotConfigured(err); ok {
+				return salesdoc.ResolvedTax{}, saleTaxPlan{}, h
+			}
+			return salesdoc.ResolvedTax{}, saleTaxPlan{}, err
+		}
+		if ca.Canadian {
+			inputs.ShipToRate = nil
+			if ca.Destination {
+				inputs.ZoneRate = &ca.Zone.CombinedRate
+			} else {
+				inputs.ZoneRate = nil
+				inputs.BranchRate = &ca.Zone.CombinedRate
+			}
+			plan = saleTaxPlan{zone: ca.Zone, canadian: true}
+		}
+	}
+	resolved, err := salesdoc.ResolveTax(inputs)
+	return resolved, plan, err
 }
 
 // exemptOn reads whether the customer's certificate exempts a sale on the

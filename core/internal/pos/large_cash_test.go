@@ -49,12 +49,18 @@ func lcCAPayer() map[string]any {
 	}
 }
 
-// lcSetCountry sets the fixture branch's country and clears it after.
+// lcSetCountry sets the fixture branch's country and clears it after. A
+// Canadian branch sits in BC with the BC tax zone, since a Canadian branch
+// no zone covers refuses every sale (CP-14 A1).
 func lcSetCountry(t *testing.T, f *fixture, country string) {
 	t.Helper()
 	mustExec(t, f.db, `UPDATE locations SET country_code = $1 WHERE id = $2`, country, f.branchID)
+	if country == "CA" {
+		f.seedBCZone()
+		mustExec(t, f.db, `UPDATE locations SET state = 'BC' WHERE id = $1`, f.branchID)
+	}
 	t.Cleanup(func() {
-		mustExec(f.t, f.db, `UPDATE locations SET country_code = NULL WHERE id = $1`, f.branchID)
+		mustExec(f.t, f.db, `UPDATE locations SET country_code = NULL, state = NULL WHERE id = $1`, f.branchID)
 	})
 }
 
@@ -561,8 +567,11 @@ func lcBranchWithRegister(t *testing.T, f *fixture, code, country string) (uuid.
 	branch := uuid.New()
 	yard := uuid.New()
 	register := "REG-" + uuid.NewString()[:8]
-	mustExec(t, f.db, `INSERT INTO locations (id, type, code, name, country_code, default_tax_rate) VALUES ($1, 'BRANCH', $2, $3, $4, 0.088750)`,
-		branch, code+"-BR", code+" branch", country)
+	mustExec(t, f.db, `INSERT INTO locations (id, type, code, name, country_code, state, default_tax_rate) VALUES ($1, 'BRANCH', $2, $3, $4, $5, 0.088750)`,
+		branch, code+"-BR", code+" branch", country, map[bool]string{true: "BC", false: ""}[country == "CA"])
+	if country == "CA" {
+		f.seedBCZone()
+	}
 	mustExec(t, f.db, `INSERT INTO locations (id, type, code, parent_id, branch_id) VALUES ($1, 'YARD', $2, $3, $3)`,
 		yard, "PY-"+code, branch)
 	mustExec(t, f.db, `INSERT INTO inventory (product_id, location_id, location, quantity, allocated) VALUES ($1, $2, 'Y', 100000, 0)`,

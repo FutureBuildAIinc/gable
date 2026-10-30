@@ -14,12 +14,14 @@ const PROFILE = {
 }
 
 let profile: Record<string, unknown>
+let setup: Record<string, unknown>
 let puts: { body: Record<string, unknown>; ifMatch: string | null }[]
 let refuse: Response | null
 
 beforeEach(() => {
   localStorage.setItem('token', 'test-token')
   profile = { ...PROFILE }
+  setup = { canadian: true, gst_hst_number_missing: true, unzoned_provinces: [] }
   puts = []
   refuse = null
   vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -29,9 +31,11 @@ beforeEach(() => {
       puts.push({ body, ifMatch: new Headers(init!.headers).get('If-Match') })
       if (refuse) return refuse
       profile = { ...profile, ...body, gst_hst_number: String(body.gst_hst_number).replace(/[\s-]/g, '').toUpperCase(), revision: Number(profile.revision) + 1 }
+      setup = { ...setup, gst_hst_number_missing: profile.gst_hst_number === '' && !profile.gst_hst_not_registered }
       return jsonResponse(profile)
     }
     if (url.includes('/api/v1/dealer-profile')) return jsonResponse(profile)
+    if (url.includes('/api/v1/tax/setup')) return jsonResponse(setup)
     return jsonResponse({}, 404)
   }))
 })
@@ -63,6 +67,7 @@ describe('Tax setup panel', () => {
 
   it('shows no warning once a number is on file, printed the way CRA writes it', async () => {
     profile = { ...PROFILE, gst_hst_number: '123456789RT0001' }
+    setup = { ...setup, gst_hst_number_missing: false }
     const el = await open()
     expect(el.querySelector('[data-testid="setup-warning-gst-hst"]')).toBeNull()
     expect(text(q(el, '[data-testid="gst-hst-on-file"]'))).toContain('123456789 RT0001')
@@ -70,8 +75,24 @@ describe('Tax setup panel', () => {
 
   it('shows no warning when the dealer is marked not registered', async () => {
     profile = { ...PROFILE, gst_hst_not_registered: true }
+    setup = { ...setup, gst_hst_number_missing: false }
     const el = await open()
     expect(el.querySelector('[data-testid="setup-warning-gst-hst"]')).toBeNull()
+  })
+
+  it('names each province of Canadian ship-tos with no tax zone, beside the number warning (item 365)', async () => {
+    setup = { ...setup, unzoned_provinces: [{ province: 'AB', name: 'Alberta', ship_tos: 3 }] }
+    const el = await open()
+    const words = text(q(el, '[data-testid="setup-warning-zone-AB"]'))
+    expect(words).toContain('No tax zone covers Alberta (3 ship-tos)')
+    expect(words).toContain('a delivery there is refused')
+    expect(el.querySelector('[data-testid="setup-warning-gst-hst"]')).not.toBeNull()
+  })
+
+  it('shows no warnings for a dealer with no Canadian branch', async () => {
+    setup = { canadian: false, gst_hst_number_missing: false, unzoned_provinces: [] }
+    const el = await open()
+    expect(el.querySelector('[data-testid="setup-warnings"]')).toBeNull()
   })
 
   it('saves the typed number with the profile revision and the rest of the profile unchanged', async () => {

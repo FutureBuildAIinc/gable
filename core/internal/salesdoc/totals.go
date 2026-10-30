@@ -90,6 +90,19 @@ func TaxAt(taxableCents httpx.Cents, rateScaled int64) httpx.Cents {
 	return httpx.Cents(cents)
 }
 
+// TaxParts computes a Canadian document's tax part by part (CP-14 A1): each
+// part's rate on the same taxable base, each rounded once on its own by
+// TaxAt, because GST and PST are levied under different statutes and print
+// as their own lines. The document's tax is the sum of the parts. A US
+// document never comes here: it keeps the one rounding of TaxAt.
+func TaxParts(taxableCents httpx.Cents, ratesScaled []int64) []httpx.Cents {
+	out := make([]httpx.Cents, len(ratesScaled))
+	for i, r := range ratesScaled {
+		out[i] = TaxAt(taxableCents, r)
+	}
+	return out
+}
+
 // TaxInputs are the ingredients of a document's rate resolution (ADR 0005
 // section 3): the customer's exemption, the delivery ship-to's zone rate and
 // typed rate, and the branch's rate, each read by the document's own

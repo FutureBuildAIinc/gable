@@ -15,6 +15,7 @@ import (
 	"github.com/gablelbm/gable/internal/largecash"
 	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/gablelbm/gable/internal/salesdoc"
+	"github.com/gablelbm/gable/internal/taxzone"
 	"github.com/gablelbm/gable/pkg/audit"
 	"github.com/gablelbm/gable/pkg/outbox"
 	"github.com/google/uuid"
@@ -324,25 +325,23 @@ func (s *Service) previewExchange(ctx context.Context, st *returnState, preLines
 	if pricedTax != nil {
 		taxCents = int64(pricedTax.taxCents)
 	} else {
-		exempt, err := s.exemptOn(ctx, *st.branchID, *st.customerID)
+		// The replacement is priced as its completion prices it: the one
+		// resolver, and on a Canadian branch part by part (CP-14 A1), so
+		// the difference the clerk tenders is the difference completed.
+		sale := &Sale{BranchID: *st.branchID, DeliveryType: "pickup"}
+		resolved, plan, err := s.resolveSaleTax(ctx, sale, *st.customerID)
 		if err != nil {
-			return nil, err
-		}
-		if !exempt {
-			rate, ok, err := s.repo.BranchTaxRate(ctx, st.branchID)
-			if err != nil {
-				return nil, err
-			}
-			if !ok {
+			if errors.Is(err, salesdoc.ErrTaxRateNotConfigured) {
 				return nil, conflict("tax_rate_not_configured",
 					"set the branch's default tax rate before completing a sale")
 			}
-			scaled, _, err := salesdoc.ParseTaxRate(rate)
-			if err != nil {
-				return nil, err
-			}
-			taxCents = int64(salesdoc.TaxAt(totals.TaxableCents, scaled))
+			return nil, err
 		}
+		charged, _, err := taxzone.Charge(plan.canadian, plan.zone, resolved, totals.TaxableCents)
+		if err != nil {
+			return nil, err
+		}
+		taxCents = int64(charged)
 	}
 	returned := -st.total
 	replacementTotal := int64(totals.SubtotalCents) + taxCents

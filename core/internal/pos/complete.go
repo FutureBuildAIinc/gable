@@ -508,11 +508,7 @@ func (s *Service) completeSaleTx(ctx context.Context, saleID uuid.UUID, ifMatch 
 					}
 				}
 			}
-			zone, err = s.zoneFor(ctx, sale)
-			if err != nil {
-				return err
-			}
-			resolved, err := s.ResolveSaleTax(ctx, sale, customerID)
+			resolved, plan, err := s.resolveSaleTax(ctx, sale, customerID)
 			if err != nil {
 				if errors.Is(err, salesdoc.ErrTaxRateNotConfigured) {
 					return conflict("tax_rate_not_configured",
@@ -521,12 +517,13 @@ func (s *Service) completeSaleTx(ctx context.Context, saleID uuid.UUID, ifMatch 
 				return err
 			}
 			if resolved.Rate != nil {
-				scaled, _, err := salesdoc.ParseTaxRate(*resolved.Rate)
+				charged, frozen, err := taxzone.Charge(plan.canadian, plan.zone, resolved, totals.TaxableCents)
 				if err != nil {
 					return err
 				}
-				taxCents = int64(salesdoc.TaxAt(totals.TaxableCents, scaled))
+				taxCents = int64(charged)
 				taxRate = resolved.Rate
+				zone = frozen
 			}
 			taxSource = string(resolved.Source)
 			taxExempt = resolved.Source == salesdoc.TaxSourceExempt
@@ -744,9 +741,10 @@ func (s *Service) completeSaleTx(ctx context.Context, saleID uuid.UUID, ifMatch 
 			TaxRate: taxRate, TaxExempt: taxExempt, TaxSource: taxSource,
 			CustomerPO: sale.CustomerPO, JobID: sale.JobID,
 		}
-		// the zone that answered a delivered sale is frozen onto the invoice
-		// (CP-10), beside the rate it explains
-		if zone != nil && taxSource == string(salesdoc.TaxSourceZoneRate) {
+		// the zone the sale was charged on is frozen onto the invoice (CP-10,
+		// and on a Canadian sale its parts with their cents, CP-14 A1),
+		// beside the rate it explains
+		if zone != nil {
 			id := zone.ZoneID
 			inv.TaxZoneID = &id
 			if raw, merr := json.Marshal(zone); merr == nil {

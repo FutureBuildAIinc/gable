@@ -7,6 +7,29 @@
 # the combined rate is the sum of the live parts and is never stored. Roles
 # admin, owner and finance guard every route.
 paths:
+  /api/v1/tax/setup:
+    get:
+      operationId: taxSetupGet
+      tags: [tax]
+      summary: Read the tax setup warnings
+      description: >-
+        Roles admin, owner, finance. The Tech Admin tax setup panel's standing
+        warnings (CP-14): whether a branch is Canadian, whether the dealer
+        charges GST with no GST/HST number on file (never a refusal: documents
+        print a notice), and the provinces of active Canadian ship-tos that no
+        live zone covers, where a delivery is refused tax_parts_not_configured
+        until its zone is added. A dealer with no Canadian branch has none.
+      responses:
+        "200":
+          description: The warnings.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TaxSetup"
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "500": { $ref: "#/components/responses/InternalError" }
   /api/v1/tax/zones:
     get:
       operationId: taxZoneList
@@ -152,6 +175,32 @@ paths:
         "500": { $ref: "#/components/responses/InternalError" }
 components:
   schemas:
+    TaxSetup:
+      type: object
+      required: [canadian, gst_hst_number_missing, unzoned_provinces]
+      properties:
+        canadian:
+          type: boolean
+          description: A branch's country (its own, else the dealer default) is CA.
+        gst_hst_number_missing:
+          type: boolean
+          description: Canadian, not marked not registered for GST/HST, and no GST/HST number on file.
+        unzoned_provinces:
+          type: array
+          items:
+            type: object
+            required: [province, name, ship_tos]
+            properties:
+              province:
+                type: string
+                description: The ship-tos' region as typed, upper cased (BC, AB).
+              name:
+                type: string
+                description: The province's name, or the code when it is not a Canadian province code.
+              ship_tos:
+                type: integer
+                format: int64
+                description: How many active ship-tos sit there.
     TaxZoneRatePart:
       type: object
       required: [name, rate, effective_from]

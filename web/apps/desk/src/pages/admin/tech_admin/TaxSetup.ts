@@ -7,7 +7,7 @@ import { icon } from '../../../lib/icons.ts';
 import { Receipt, TriangleAlert } from 'lucide';
 import { apiErrorMessage, fieldErrorMap } from '../../../services/apiError';
 import { dealerProfileService, formatGSTHSTNumber } from '../../../services/DealerProfileService';
-import type { DealerProfile } from '../../../services/DealerProfileService';
+import type { DealerProfile, TaxSetupWarnings } from '../../../services/DealerProfileService';
 
 const FIELD_CLASS =
     'w-full bg-deep-space border border-white/10 rounded px-3 py-2 text-white text-sm placeholder-slate-500 focus:outline-none focus:border-gable-green font-mono';
@@ -23,6 +23,7 @@ export class GableTaxSetup extends LitElement {
     createRenderRoot() { return this; }
 
     @state() private _profile: DealerProfile | null = null;
+    @state() private _setup: TaxSetupWarnings | null = null;
     @state() private _number = '';
     @state() private _notRegistered = false;
     @state() private _loading = true;
@@ -45,7 +46,9 @@ export class GableTaxSetup extends LitElement {
     private async _load() {
         this._loading = true;
         try {
-            this._adopt(await dealerProfileService.get());
+            const [profile, setup] = await Promise.all([dealerProfileService.get(), dealerProfileService.taxSetup()]);
+            this._adopt(profile);
+            this._setup = setup;
         } catch (err) {
             this._error = apiErrorMessage(err, 'Could not read the dealer profile');
         } finally {
@@ -63,6 +66,7 @@ export class GableTaxSetup extends LitElement {
             const number = this._notRegistered ? '' : this._number.trim();
             this._adopt(await dealerProfileService.saveGSTHST(this._profile, number, this._notRegistered));
             this._success = 'GST/HST registration saved';
+            this._setup = await dealerProfileService.taxSetup();
         } catch (err) {
             this._fieldErrors = fieldErrorMap(err);
             this._error = apiErrorMessage(err, 'Could not save the GST/HST registration');
@@ -71,12 +75,18 @@ export class GableTaxSetup extends LitElement {
         }
     }
 
-    /** The standing warnings, from what is saved (not the draft): each names what is missing. */
+    /** The standing warnings the server reads (a dealer with no Canadian branch has none): each names what is missing. */
     private _warnings() {
-        const p = this._profile!;
+        const w = this._setup;
         const out: { id: string; words: string }[] = [];
-        if (!p.gst_hst_not_registered && p.gst_hst_number === '') {
+        if (!w || !w.canadian) return out;
+        if (w.gst_hst_number_missing) {
             out.push({ id: 'gst-hst', words: 'No GST/HST number is on file. Canadian invoices and receipts print a notice in its place until it is set, or mark the dealer not registered for GST/HST.' });
+        }
+        for (const p of w.unzoned_provinces) {
+            const count = p.ship_tos === 1 ? '1 ship-to' : `${p.ship_tos} ship-tos`;
+            out.push({ id: `zone-${p.province || 'blank'}`,
+                words: `No tax zone covers ${p.name} (${count}): a delivery there is refused until the province's tax zone is added on the Tax Zones screen.` });
         }
         return out;
     }

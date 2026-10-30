@@ -33,6 +33,23 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux, roleGuard func(http.Handler
 	mux.HandleFunc("GET /api/v1/tax/zones/{id}", wrap(h.get))
 	mux.HandleFunc("POST /api/v1/tax/zones/{id}/close", wrap(h.close))
 	mux.HandleFunc("DELETE /api/v1/tax/zones/{id}", wrap(h.delete))
+	mux.HandleFunc("GET /api/v1/tax/setup", wrap(h.setup))
+}
+
+// setup answers the Tech Admin tax setup panel's standing warnings (CP-14
+// A1): a missing GST/HST number, and the provinces of Canadian ship-tos no
+// zone covers, read on the server's day.
+func (h *Handler) setup(w http.ResponseWriter, r *http.Request) {
+	if _, err := httpx.StrictQuery(r); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	out, err := h.repo.ReadSetup(r.Context(), time.Now())
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 func writeJSON(w http.ResponseWriter, status int, body any) {

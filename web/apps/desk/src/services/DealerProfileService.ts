@@ -29,7 +29,27 @@ export function formatGSTHSTNumber(n: string): string {
     return n.length === 15 ? `${n.slice(0, 9)} ${n.slice(9)}` : n;
 }
 
+/** A province of active Canadian ship-tos that no tax zone covers: a delivery there is refused until its zone exists. */
+export interface UnzonedProvince {
+    province: string;
+    name: string;
+    ship_tos: number;
+}
+
+/** The Tech Admin tax setup panel's standing warnings (GET /api/v1/tax/setup). */
+export interface TaxSetupWarnings {
+    canadian: boolean;
+    gst_hst_number_missing: boolean;
+    unzoned_provinces: UnzonedProvince[];
+}
+
 export const dealerProfileService = {
+    async taxSetup(): Promise<TaxSetupWarnings> {
+        const response = await fetchWithAuth(`${API_URL}/api/v1/tax/setup`);
+        if (!response.ok) throw await parseApiError(response, 'Could not read the tax setup');
+        return response.json();
+    },
+
     async get(): Promise<DealerProfile> {
         const response = await fetchWithAuth(`${API_URL}/api/v1/dealer-profile`);
         if (!response.ok) throw await parseApiError(response, 'Could not read the dealer profile');

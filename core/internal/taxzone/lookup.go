@@ -120,7 +120,7 @@ func Lookup(ctx context.Context, db *database.DB, in LookupInput) (*Snapshot, er
 	// boundary carries them: a plus four never disqualifies a five digit
 	// boundary, because the five digit fallback is the published rule.
 	rows, err := exec.Query(ctx, `
-		SELECT z.id, z.data_source, z.data_version,
+		SELECT z.id, z.data_source, z.data_version, z.country, COALESCE(z.province_code, ''),
 		       COALESCE((SELECT SUM(r.rate) FROM tax_zone_rates r
 		                 WHERE r.zone_id = z.id AND r.effective_from <= $3::date
 		                   AND (r.effective_to IS NULL OR r.effective_to >= $3::date)), 0)::text AS combined
@@ -152,9 +152,11 @@ func Lookup(ctx context.Context, db *database.DB, in LookupInput) (*Snapshot, er
 	// and closed before the parts are read: inside a transaction the two
 	// queries share one connection.
 	var (
-		id  uuid.UUID
-		src string
-		ver string
+		id       uuid.UUID
+		src      string
+		ver      string
+		zCountry string
+		province string
 	)
 	if !rows.Next() {
 		if err := rows.Err(); err != nil {
@@ -164,7 +166,7 @@ func Lookup(ctx context.Context, db *database.DB, in LookupInput) (*Snapshot, er
 		rows.Close()
 		return nil, ErrZoneNotFound
 	}
-	if err := rows.Scan(&id, &src, &ver, new(string)); err != nil {
+	if err := rows.Scan(&id, &src, &ver, &zCountry, &province, new(string)); err != nil {
 		rows.Close()
 		return nil, fmt.Errorf("failed to read the tax zone: %w", err)
 	}
@@ -198,12 +200,20 @@ func Lookup(ctx context.Context, db *database.DB, in LookupInput) (*Snapshot, er
 	if ver != "" {
 		provenance = strings.TrimSpace(provenance + " " + ver)
 	}
-	return &Snapshot{
+	snap := &Snapshot{
 		ZoneID:       id,
 		Parts:        parts,
 		CombinedRate: combinedOf(parts),
 		DataSource:   provenance,
-	}, nil
+	}
+	if strings.EqualFold(zCountry, CountryCanada) {
+		snap.Country = CountryCanada
+		snap.Province = strings.ToUpper(strings.TrimSpace(province))
+		if snap.Province == "" {
+			snap.Province = strings.ToUpper(strings.TrimSpace(in.Region))
+		}
+	}
+	return snap, nil
 }
 
 // combinedOf sums the parts as scaled integers and renders the decimal

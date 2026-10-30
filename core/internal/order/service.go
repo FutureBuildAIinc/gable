@@ -749,11 +749,11 @@ func (s *Service) applyRateTax(ctx context.Context, o *Order) error {
 	if err != nil {
 		return err
 	}
-	inputs, zone, err := s.taxInputs(ctx, o, exempt)
+	plan, err := s.taxInputs(ctx, o, exempt)
 	if err != nil {
 		return err
 	}
-	resolved, err := salesdoc.ResolveTax(inputs)
+	resolved, err := salesdoc.ResolveTax(plan.inputs)
 	if err != nil {
 		if errors.Is(err, salesdoc.ErrTaxRateNotConfigured) {
 			return &httpx.Error{Status: http.StatusConflict, Code: httpx.CodeConflict,
@@ -763,7 +763,18 @@ func (s *Service) applyRateTax(ctx context.Context, o *Order) error {
 		}
 		return err
 	}
-	applyZone(o, resolved, zone)
+	return s.chargeRateTax(o, totals, resolved, plan)
+}
+
+// chargeRateTax writes a resolved rate tax onto the order: the rate, the
+// source, the tax (part by part on a Canadian document, CP-14 A1) and the
+// zone it freezes.
+func (s *Service) chargeRateTax(o *Order, totals salesdoc.Totals, resolved salesdoc.ResolvedTax, plan taxPlan) error {
+	taxCents, frozen, err := taxzone.Charge(plan.canadian, plan.zone, resolved, totals.TaxableCents)
+	if err != nil {
+		return err
+	}
+	applyZone(o, frozen)
 	o.SubtotalCents = totals.SubtotalCents
 	pct, err := RateToPercent(*resolved.Rate)
 	if err != nil {
@@ -772,11 +783,7 @@ func (s *Service) applyRateTax(ctx context.Context, o *Order) error {
 	o.TaxRatePercent = &pct
 	o.TaxSource = resolved.Source
 	o.TaxExempt = resolved.Source == salesdoc.TaxSourceExempt
-	scaled, _, err := salesdoc.ParseTaxRate(*resolved.Rate)
-	if err != nil {
-		return err
-	}
-	o.TaxCents = salesdoc.TaxAt(totals.TaxableCents, scaled)
+	o.TaxCents = taxCents
 	o.TotalCents = o.SubtotalCents + o.TaxCents
 	return nil
 }
@@ -797,13 +804,29 @@ func (s *Service) exemptOn(ctx context.Context, branchID, customerID uuid.UUID) 
 	return standing != nil, nil
 }
 
-func (s *Service) taxInputs(ctx context.Context, o *Order, exempt bool) (salesdoc.TaxInputs, *taxzone.Snapshot, error) {
+// taxPlan is a document's rate resolution inputs, the zone that may answer
+// it, and whether the branch is Canadian (CP-14 A1): a Canadian document is
+// priced part by part on that zone.
+type taxPlan struct {
+	inputs   salesdoc.TaxInputs
+	zone     *taxzone.Snapshot
+	canadian bool
+}
+
+func (s *Service) taxInputs(ctx context.Context, o *Order, exempt bool) (taxPlan, error) {
 	in := salesdoc.TaxInputs{Exempt: exempt, Delivery: o.DeliveryType == DeliveryDelivery}
 	var zone *taxzone.Snapshot
+	var shipTo *taxzone.Place
+	// The zone's effective window is read on the branch's own business
+	// day, never the server's clock (the exemption reads the same day).
+	day, err := s.repo.BranchLocalDate(ctx, o.BranchID, s.now())
+	if err != nil {
+		return taxPlan{inputs: in}, err
+	}
 	if in.Delivery && o.ShipToID != nil {
 		snap, rate, err := s.repo.ShipTo(ctx, *o.ShipToID)
 		if err != nil {
-			return in, nil, err
+			return taxPlan{inputs: in}, err
 		}
 		in.ShipToRate = rate
 		// The ship-to's place of receipt resolves through the zone tables
@@ -813,15 +836,10 @@ func (s *Service) taxInputs(ctx context.Context, o *Order, exempt bool) (salesdo
 		if snap.Country != nil {
 			country = *snap.Country
 		}
-		// The zone's effective window is read on the branch's own business
-		// day, never the server's clock (the exemption reads the same day).
-		day, err := s.repo.BranchLocalDate(ctx, o.BranchID, s.now())
-		if err != nil {
-			return in, nil, err
-		}
+		shipTo = &taxzone.Place{Country: country, Postal: snap.PostalCode, Region: snap.Region}
 		zone, err = s.repo.TaxZone(ctx, country, snap.PostalCode, snap.Region, day)
 		if err != nil {
-			return in, nil, err
+			return taxPlan{inputs: in}, err
 		}
 		if zone != nil {
 			in.ZoneRate = &zone.CombinedRate
@@ -829,17 +847,40 @@ func (s *Service) taxInputs(ctx context.Context, o *Order, exempt bool) (salesdo
 	}
 	branchRate, err := s.repo.BranchTaxRate(ctx, o.BranchID)
 	if err != nil {
-		return in, nil, err
+		return taxPlan{inputs: in}, err
 	}
 	in.BranchRate = branchRate
-	return in, zone, nil
+	if exempt {
+		return taxPlan{inputs: in, zone: zone}, nil
+	}
+	// A Canadian branch's document always has parts (CP-14 A1): a delivery
+	// takes its destination's zone and never the ship-to's typed rate, a
+	// pickup the branch's own zone; none answering is refused.
+	ca, err := s.repo.Canada(ctx, taxzone.CanadaInput{BranchID: o.BranchID, On: day, ShipTo: shipTo, Destination: zone})
+	if err != nil {
+		if h, ok := taxzone.AsPartsNotConfigured(err); ok {
+			return taxPlan{inputs: in}, h
+		}
+		return taxPlan{inputs: in}, err
+	}
+	if !ca.Canadian {
+		return taxPlan{inputs: in, zone: zone}, nil
+	}
+	in.ShipToRate = nil
+	if ca.Destination {
+		in.ZoneRate = &ca.Zone.CombinedRate
+	} else {
+		in.ZoneRate = nil
+		in.BranchRate = &ca.Zone.CombinedRate
+	}
+	return taxPlan{inputs: in, zone: ca.Zone, canadian: true}, nil
 }
 
-// applyZone freezes the zone that answered onto the order (CP-10): the zone
-// id, the rate parts and where the data came from, cleared when another arm
-// answered so a refresh never leaves a stale zone behind.
-func applyZone(o *Order, resolved salesdoc.ResolvedTax, zone *taxzone.Snapshot) {
-	if resolved.Source != salesdoc.TaxSourceZoneRate || zone == nil {
+// applyZone freezes the zone the tax was charged on onto the order (CP-10,
+// and on a Canadian document its parts with their cents, CP-14 A1), cleared
+// when none was so a refresh never leaves a stale zone behind.
+func applyZone(o *Order, zone *taxzone.Snapshot) {
+	if zone == nil {
 		o.TaxZoneID = nil
 		o.TaxRateParts = nil
 		o.TaxZoneSource = nil
@@ -1667,11 +1708,11 @@ func (s *Service) refreshTax(ctx context.Context, o *Order, priced *providerTax)
 	if err != nil {
 		return err
 	}
-	inputs, zone, err := s.taxInputs(ctx, o, exempt)
+	plan, err := s.taxInputs(ctx, o, exempt)
 	if err != nil {
 		return err
 	}
-	resolved, err := salesdoc.ResolveTax(inputs)
+	resolved, err := salesdoc.ResolveTax(plan.inputs)
 	if err != nil {
 		if errors.Is(err, salesdoc.ErrTaxRateNotConfigured) {
 			return &httpx.Error{Status: http.StatusConflict, Code: httpx.CodeConflict,
@@ -1681,22 +1722,7 @@ func (s *Service) refreshTax(ctx context.Context, o *Order, priced *providerTax)
 		}
 		return err
 	}
-	applyZone(o, resolved, zone)
-	o.SubtotalCents = totals.SubtotalCents
-	pct, err := RateToPercent(*resolved.Rate)
-	if err != nil {
-		return err
-	}
-	o.TaxRatePercent = &pct
-	o.TaxSource = resolved.Source
-	o.TaxExempt = resolved.Source == salesdoc.TaxSourceExempt
-	scaled, _, err := salesdoc.ParseTaxRate(*resolved.Rate)
-	if err != nil {
-		return err
-	}
-	o.TaxCents = salesdoc.TaxAt(totals.TaxableCents, scaled)
-	o.TotalCents = o.SubtotalCents + o.TaxCents
-	return nil
+	return s.chargeRateTax(o, totals, resolved, plan)
 }
 
 func conflictBlocker(code, message string) *httpx.Error {

@@ -99,19 +99,29 @@ func (z *Zone) CombinedRate() (string, bool) {
 	return renderRate(sum), true
 }
 
-// Part is one entry of the snapshot a document freezes at the sale.
+// Part is one entry of the snapshot a document freezes at the sale. Cents is
+// the part's own tax, rounded on its own, frozen on a Canadian document
+// (CP-14): GST and PST are levied under different statutes and print as
+// their own lines. A US document carries no cents.
 type Part struct {
-	Name string `json:"name"`
-	Rate string `json:"rate"`
+	Name  string `json:"name"`
+	Rate  string `json:"rate"`
+	Cents *int64 `json:"cents,omitempty"`
 }
 
 // Snapshot is what a document records when a zone answered: the zone id, the
 // parts, the combined rate and where the data came from. The snapshot matters
 // more than the id, because the zone row can change later and the sale's rate
 // may not.
+//
+// Country and Province are set on a Canadian zone only (CP-14), so a
+// document's labels (GST, HST, PST, RST) are read from what it froze and a
+// Quebec zone stores the same way; a US snapshot is unchanged.
 type Snapshot struct {
 	ZoneID       uuid.UUID `json:"zone_id"`
 	Parts        []Part    `json:"parts"`
 	CombinedRate string    `json:"combined_rate"`
 	DataSource   string    `json:"data_source"`
+	Country      string    `json:"country,omitempty"`
+	Province     string    `json:"province,omitempty"`
 }
