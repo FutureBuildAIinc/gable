@@ -70,7 +70,7 @@ func TestSweepPR178CountRequiresExpectedDrawerMethodsAndDoesNotNetAcrossMethods(
 	if r := f.addLine(saleID, f.productLine("1")); r.status != http.StatusOK {
 		t.Fatalf("add line = %d: %s", r.status, r.raw)
 	}
-	checkTender := f.cashFor("1")
+	checkTender := f.cashFor(saleID)
 	checkTender["method"] = "check"
 	if r := f.completeSale(saleID, checkTender); r.status != http.StatusOK {
 		t.Fatalf("complete = %d: %s", r.status, r.raw)
@@ -328,7 +328,7 @@ func TestSweepPR178OffsettingAndMixedMethodVariancesPostBothMethodPairsToGL(t *t
 		if r := f.addLine(saleID, f.productLine("1")); r.status != http.StatusOK {
 			t.Fatalf("%s: add line = %d: %s", name, r.status, r.raw)
 		}
-		checkTender := f.cashFor("1")
+		checkTender := f.cashFor(saleID)
 		checkTender["method"] = "check"
 		if r := f.completeSale(saleID, checkTender); r.status != http.StatusOK {
 			t.Fatalf("%s: complete = %d: %s", name, r.status, r.raw)
@@ -387,7 +387,7 @@ func TestSweepPR178OpenTillFiguresBlindForRolesOnlyCashier(t *testing.T) {
 	if r := f.addLine(saleID, f.productLine("1")); r.status != http.StatusOK {
 		t.Fatalf("add line = %d: %s", r.status, r.raw)
 	}
-	if r := f.completeSale(saleID, f.cashFor("1")); r.status != http.StatusOK {
+	if r := f.completeSale(saleID, f.cashFor(saleID)); r.status != http.StatusOK {
 		t.Fatalf("complete = %d: %s", r.status, r.raw)
 	}
 	f.mustMovement(sessionID, map[string]any{"kind": "safe_drop", "amount_cents": 700}, mustUUID(t))
