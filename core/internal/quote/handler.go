@@ -4,7 +4,6 @@
 package quote
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -39,24 +38,8 @@ type Handler struct {
 	activities ActivityService
 }
 
-// ActivityService is the crm module's seam for the quote activity routes
-// (QE-04-a): an activity logged on a quote carries the quote's customer, so
-// it shows on the customer's feed too, and the quote's own feed lists it.
-// *crm.Service satisfies it.
-type ActivityService interface {
-	Create(ctx context.Context, customerID uuid.UUID, d *crm.Draft) (*crm.Activity, error)
-	List(ctx context.Context, customerID uuid.UUID, f crm.ListFilter, wantTotal bool) ([]crm.Activity, bool, *int64, error)
-}
-
-// WithActivities wires the activity seam; without it the activity routes
-// answer 503 (serve always wires it).
-func (h *Handler) WithActivities(a ActivityService) *Handler {
-	h.activities = a
-	return h
-}
-
 func NewHandler(service *Service) *Handler {
-	return &Handler{service: service}
+	return &Handler{service: service, activities: service.activities}
 }
 
 func (h *Handler) RegisterRoutes(mux *http.ServeMux, roleGuard ...func(http.Handler) http.Handler) {

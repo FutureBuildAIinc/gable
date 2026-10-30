@@ -537,8 +537,10 @@ func newKeyPinFixtureSwitched(t *testing.T, switchState string) *keyPinFixture {
 	// The branch walled document families exactly as serve registers them:
 	// quotes, orders, invoices, payments, crm, documents, drafts, dashboard,
 	// inventory and the link resolver, each through its module's wall.
+	crmSvc := crm.NewService(crm.NewRepository(db)).
+		WithOutbox(outbox.NewWriter(db, "")).WithTxRunner(db).WithAudit(audit.NewLogger(db))
 	quoteSvc := quote.NewService(quote.NewRepository(db)).
-		WithOutbox(outbox.NewWriter(db, "")).WithTxRunner(db)
+		WithOutbox(outbox.NewWriter(db, "")).WithTxRunner(db).WithActivities(crmSvc)
 	wall.quotes(mux, quoteSvc)
 	// The order service exactly as serve builds it: the price engine, the tax
 	// provider, inventory, the invoice writer and the pre-ship exposure gate.
@@ -552,8 +554,7 @@ func newKeyPinFixtureSwitched(t *testing.T, switchState string) *keyPinFixture {
 	wall.orders(mux, orderSvc)
 	wall.invoices(mux, invoiceSvc.WithOrders(orderSvc).WithStock(inventory.NewService(inventory.NewRepository(db))))
 	wall.payments(mux, paymentSvc.WithBranchGuard(wall.guard))
-	wall.crm(mux, crm.NewService(crm.NewRepository(db)).
-		WithOutbox(outbox.NewWriter(db, "")).WithTxRunner(db).WithAudit(audit.NewLogger(db)))
+	wall.crm(mux, crmSvc)
 	docStore := document.NewStore(db)
 	profileSvc := dealerprofile.NewService(dealerprofile.NewRepository(db), db, audit.NewLogger(db))
 	deliverySvc := emaildelivery.NewService(emaildelivery.NewRepository(db))

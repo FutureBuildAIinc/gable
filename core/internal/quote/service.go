@@ -16,6 +16,7 @@ import (
 	"regexp"
 	"time"
 
+	"github.com/gablelbm/gable/internal/crm"
 	"github.com/gablelbm/gable/internal/order"
 	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/gablelbm/gable/internal/units"
@@ -89,10 +90,27 @@ type Service struct {
 	events      EventRecorder // optional; nil records nothing (unit tests)
 	tx          TxRunner      // optional; nil runs each method unwrapped (unit tests)
 	logger      *slog.Logger
-	branches    BranchGuard  // optional; nil leaves a payload branch unchecked (unit tests)
-	orders      OrderCreator // optional; nil refuses the convert (unit tests)
-	auditor     AuditSink    // optional; nil writes no audit row (unit tests)
+	branches    BranchGuard   // optional; nil leaves a payload branch unchecked (unit tests)
+	orders      OrderCreator  // optional; nil refuses the convert (unit tests)
+	auditor     AuditSink     // optional; nil writes no audit row (unit tests)
+	activities  ActivityService // optional; nil leaves the activity routes unwired (unit tests)
 	now         func() time.Time
+}
+
+// ActivityService is the crm module's seam for the quote activity routes
+// (QE-04-a): an activity logged on a quote carries the quote's customer, so
+// it shows on the customer's feed too, and the quote's own feed lists it.
+// *crm.Service satisfies it.
+type ActivityService interface {
+	Create(ctx context.Context, customerID uuid.UUID, d *crm.Draft) (*crm.Activity, error)
+	List(ctx context.Context, customerID uuid.UUID, f crm.ListFilter, wantTotal bool) ([]crm.Activity, bool, *int64, error)
+}
+
+// WithActivities wires the crm seam the quote activity routes serve through;
+// without it they answer 503 (serve always wires it).
+func (s *Service) WithActivities(a ActivityService) *Service {
+	s.activities = a
+	return s
 }
 
 // AuditSink writes the module's audit rows through the caller's executor.

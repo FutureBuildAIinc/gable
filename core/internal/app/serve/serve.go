@@ -444,11 +444,15 @@ func Run() {
 
 	// CRM Module: on the wire contract, its writes in one transaction with
 	// their audit row and activity.* event, every route behind the branch
-	// wall through the activity's customer.
-	wall.crm(mux, crm.NewService(crm.NewRepository(db)).
+	// wall through the activity's customer. The quote module's activity
+	// routes (QE-04-a) serve through the same service: an activity logged on
+	// a quote carries the quote's customer, so it shows on the customer's
+	// feed too.
+	crmSvc := crm.NewService(crm.NewRepository(db)).
 		WithOutbox(outbox.NewWriter(db, cfg.EventsOrg)).
 		WithTxRunner(db).
-		WithAudit(auditLog))
+		WithAudit(auditLog)
+	wall.crm(mux, crmSvc)
 
 	quoteRepo := quote.NewRepository(db)
 	// The quote module is the wire template (docs/refactor/MODULE-RECIPE.md):
@@ -457,7 +461,8 @@ func Run() {
 	quoteSvc := quote.NewService(quoteRepo).
 		WithOutbox(outbox.NewWriter(db, cfg.EventsOrg)).
 		WithTxRunner(db).
-		WithAudit(auditLog)
+		WithAudit(auditLog).
+		WithActivities(crmSvc)
 	wall.quotes(mux, quoteSvc)
 
 	// GL Module (Full General Ledger): the books span every branch, so a

@@ -45,9 +45,9 @@ func newQE04Fixture(t *testing.T, db *database.DB) *qe04Fixture {
 	crmSvc := crm.NewService(crm.NewRepository(db)).
 		WithOutbox(outbox.NewWriter(db, "")).WithTxRunner(db)
 	svc := quote.NewService(quote.NewRepository(db)).
-		WithOutbox(outbox.NewWriter(db, "")).WithTxRunner(db)
+		WithOutbox(outbox.NewWriter(db, "")).WithTxRunner(db).WithActivities(crmSvc)
 	mux := http.NewServeMux()
-	quote.NewHandler(svc).WithActivities(crmSvc).RegisterRoutes(mux)
+	quote.NewHandler(svc).RegisterRoutes(mux)
 	crm.NewHandler(crmSvc).RegisterRoutes(mux)
 	claims := func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
