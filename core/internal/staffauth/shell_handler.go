@@ -48,6 +48,34 @@ func (h *Handler) shellFailure(w http.ResponseWriter, r *http.Request, err error
 	}
 }
 
+// ShellSignIn is POST /api/v1/auth/shell/signin: the shell's own email and
+// password door. It answers the shell's pair in the body, never a cookie.
+// Only the shell's own native post may use it: a browser sends an Origin on
+// every POST, Gable's own pages included, so any Origin is refused and the
+// CORS allowance the outer layer may have set is taken off the answer. No
+// page can sign in here or read the pair. It shares the web door's guard,
+// limits and fixed refusals (passwordAttempt).
+func (h *Handler) ShellSignIn(w http.ResponseWriter, r *http.Request) {
+	for _, k := range []string{"Access-Control-Allow-Origin", "Access-Control-Allow-Credentials",
+		"Access-Control-Allow-Methods", "Access-Control-Allow-Headers", "Access-Control-Expose-Headers"} {
+		w.Header().Del(k)
+	}
+	if _, browser := r.Header["Origin"]; browser {
+		httpx.WriteError(w, r, httpx.Unauthorized(refusedMessage))
+		return
+	}
+	email, password, ok := h.passwordAttempt(w, r)
+	if !ok {
+		return
+	}
+	t, err := h.svc.ShellSignIn(r.Context(), email, password)
+	if err != nil {
+		h.shellFailure(w, r, err)
+		return
+	}
+	h.writeShellTokens(w, t)
+}
+
 // ShellRedeem is POST /api/v1/auth/shell/redeem: the one time code and its
 // PKCE verifier for the shell's access and refresh tokens.
 func (h *Handler) ShellRedeem(w http.ResponseWriter, r *http.Request) {
