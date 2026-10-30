@@ -262,14 +262,10 @@ type overduePhase struct {
 func TestPortalOverdueAgreesWithTheDeskOnTheBranchesDay(t *testing.T) {
 	db := testutil.RequireDB(t)
 	clock := installBranchDayClock(t, db)
-	for _, phase := range []overduePhase{
+	runOverdueLegs(t, db, clock, []overduePhase{
 		{"before the branch's midnight", "05:00:00+00", "America/Vancouver", 1},
 		{"after the branch's midnight", "08:00:00+00", "America/Vancouver", 0},
-	} {
-		t.Run(phase.name, func(t *testing.T) {
-			overdueLeg(t, db, clock, phase)
-		})
-	}
+	})
 }
 
 // TestPortalOverdueForAUSBranchIsUnchanged covers a branch in the United
@@ -285,14 +281,46 @@ func TestPortalOverdueAgreesWithTheDeskOnTheBranchesDay(t *testing.T) {
 func TestPortalOverdueForAUSBranchIsUnchanged(t *testing.T) {
 	db := testutil.RequireDB(t)
 	clock := installBranchDayClock(t, db)
-	for _, phase := range []overduePhase{
+	runOverdueLegs(t, db, clock, []overduePhase{
 		{"a business hour in the branch", "16:00:00+00", "America/New_York", 0},
 		{"the branch's own midnight", "03:00:00+00", "America/New_York", 1},
-	} {
+	})
+}
+
+// runOverdueLegs runs the legs and then checks that the fixture left nothing
+// behind. The fixture's rows are the test's own: a branch, a customer and
+// three invoices per leg. They are written to the database the test reads,
+// which other code lists every branch of, so a leg that leaves them behind
+// puts a branch that no dealer has into every list that follows.
+func runOverdueLegs(t *testing.T, db *database.DB, clock *branchDayClock, phases []overduePhase) {
+	t.Helper()
+	beforeLocations, beforeInvoices := gc539Rows(t, db)
+	for _, phase := range phases {
 		t.Run(phase.name, func(t *testing.T) {
 			overdueLeg(t, db, clock, phase)
 		})
 	}
+	afterLocations, afterInvoices := gc539Rows(t, db)
+	if afterLocations != beforeLocations || afterInvoices != beforeInvoices {
+		t.Errorf("the fixture left rows behind: locations %d to %d, invoices %d to %d",
+			beforeLocations, afterLocations, beforeInvoices, afterInvoices)
+	}
+}
+
+// gc539Rows counts the rows the fixture writes: the locations it creates and
+// the invoices it puts on them. The count is read before the legs and after
+// them, and it must not have moved.
+func gc539Rows(t *testing.T, db *database.DB) (locations, invoices int) {
+	t.Helper()
+	err := db.Pool.QueryRow(context.Background(), `
+		SELECT (SELECT COUNT(*) FROM locations WHERE code LIKE 'GC539-%'),
+		       (SELECT COUNT(*) FROM invoices i JOIN customers c ON c.id = i.customer_id
+		        WHERE c.account_number LIKE 'GC539-%')`,
+	).Scan(&locations, &invoices)
+	if err != nil {
+		t.Fatalf("count the fixture's rows: %v", err)
+	}
+	return locations, invoices
 }
 
 // overdueLeg reads both surfaces in one transaction and checks that they say
