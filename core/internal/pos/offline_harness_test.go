@@ -385,8 +385,12 @@ func (b *offlineBench) trySync(items ...json.RawMessage) (*pos.OfflineSyncResult
 		RegisterID: b.register, DeviceEpoch: b.epoch, ReportedSeq: b.seq, Items: items}, "sync-user")
 	if err == nil && res.DeviceEpoch == b.epoch && res.ConfirmedSeq > b.confirmed {
 		b.confirmed = res.ConfirmedSeq
-		// the answered items leave the device's queue
-		b.queueCount, b.queueTotal = 0, 0
+		// the sales up to the confirmed mark leave the device's queue; the
+		// ones after it still wait
+		b.queueCount = b.seq - b.confirmed
+		if b.queueCount == 0 {
+			b.queueTotal = 0
+		}
 	}
 	return res, err
 }
