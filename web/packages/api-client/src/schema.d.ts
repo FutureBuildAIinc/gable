@@ -6528,7 +6528,7 @@ export interface paths {
         put?: never;
         /**
          * What the large cash rule asks of this payment
-         * @description The counter's look before Pay (CP-17a): the server classifies the named tenders against the sale it holds under the branch's country rule (the United States Form 8300 family, or the Canadian dealer threshold when the dealer has it on) and answers whether the payer's details will be required and which fields the rule needs. The branch's walk-in identity floor rides the same answer: over the floor the counter asks a walk-in who paid cash to identify themselves, so their cash sales are counted together, and the identity the counter already holds may be carried here so the preview and the completion key the same person. Writes nothing; the completion's own capture is the authority.
+         * @description The counter's look before Pay (CP-17a): the server classifies the named tenders against the sale it holds under the branch's country rule (the United States Form 8300 family, or the Canadian dealer threshold when the dealer has it on) and answers whether the payer's details will be required and which fields the rule needs. The branch's walk-in identity floor rides the same answer: over the floor the counter asks a walk-in who paid cash to identify themselves, so their cash sales are counted together, and the identity the counter already holds may be carried here so the preview and the completion key the same person. A payer carried on a server with no valid vault key is refused 503 with the blocker large_cash_vault_unavailable, as the completion refuses it. Writes nothing; the completion's own capture is the authority.
          */
         post: operations["posLargeCashPreview"];
         delete?: never;
@@ -17354,7 +17354,7 @@ export interface components {
              * @description The sale's revision; or send If-Match.
              */
             revision?: number;
-            /** @description The payer's details the counter captured for a large cash crossing (CP-17a); required when this payment takes the payer over the branch's threshold, refused 409 payer_details_required without them. */
+            /** @description The payer's details the counter captured for a large cash crossing (CP-17a); required when this payment takes the payer over the branch's threshold, refused 409 payer_details_required without them, and refused 503 large_cash_vault_unavailable on a server with no valid vault key, never stored in clear. */
             payer?: components["schemas"]["PosPayerCapture"];
             /** @description The counter's record that the walk-in declined to identify over the branch's walk-in identity floor (CP-17a); the sale goes ahead and the fact is recorded for the manager's worklist as an identity declined. */
             payer_declined?: boolean;
@@ -17780,7 +17780,7 @@ export interface components {
             picked_up_by?: string | null;
             /** @description The customer's counter alerts the clerk read and acknowledged before taking the exchange's replacement sale. A warning that asks to be acknowledged must be named here, or the exchange is refused with 409 alert_unacknowledged and nothing is written. */
             acknowledged_alert_ids?: string[];
-            /** @description The payer's details the counter captured for a large cash crossing (CP-17a); required when this exchange's cash difference takes the payer over the branch's threshold, refused 409 payer_details_required without them. */
+            /** @description The payer's details the counter captured for a large cash crossing (CP-17a); required when this exchange's cash difference takes the payer over the branch's threshold, refused 409 payer_details_required without them, and refused 503 large_cash_vault_unavailable on a server with no valid vault key, never stored in clear. */
             payer?: components["schemas"]["PosPayerCapture"];
             /** @description The counter's record that the walk-in declined to identify over the branch's walk-in identity floor (CP-17a); the exchange goes ahead and the fact is recorded for the manager's worklist as an identity declined. */
             payer_declined?: boolean;
@@ -35681,6 +35681,7 @@ export interface operations {
             403: components["responses"]["ForbiddenEither"];
             404: components["responses"]["WireNotFound"];
             500: components["responses"]["InternalError"];
+            503: components["responses"]["ServiceUnavailable"];
         };
     };
     posTransactionVoid: {

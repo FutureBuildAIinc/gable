@@ -14822,7 +14822,7 @@ paths:
       tags: [pos]
       summary: What the large cash rule asks of this payment
       description: >-
-        The counter's look before Pay (CP-17a): the server classifies the named tenders against the sale it holds under the branch's country rule (the United States Form 8300 family, or the Canadian dealer threshold when the dealer has it on) and answers whether the payer's details will be required and which fields the rule needs. The branch's walk-in identity floor rides the same answer: over the floor the counter asks a walk-in who paid cash to identify themselves, so their cash sales are counted together, and the identity the counter already holds may be carried here so the preview and the completion key the same person. Writes nothing; the completion's own capture is the authority.
+        The counter's look before Pay (CP-17a): the server classifies the named tenders against the sale it holds under the branch's country rule (the United States Form 8300 family, or the Canadian dealer threshold when the dealer has it on) and answers whether the payer's details will be required and which fields the rule needs. The branch's walk-in identity floor rides the same answer: over the floor the counter asks a walk-in who paid cash to identify themselves, so their cash sales are counted together, and the identity the counter already holds may be carried here so the preview and the completion key the same person. A payer carried on a server with no valid vault key is refused 503 with the blocker large_cash_vault_unavailable, as the completion refuses it. Writes nothing; the completion's own capture is the authority.
       requestBody:
         required: true
         content:
@@ -14846,6 +14846,8 @@ paths:
           $ref: "#/components/responses/WireNotFound"
         "500":
           $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
   /api/v1/pos/transactions/{id}/void:
     post:
       operationId: posTransactionVoid
@@ -34588,7 +34590,7 @@ components:
             $ref: "#/components/schemas/PosTenderRequest"
         picked_up_by: {type: [string, "null"], description: "Who collected the basket, at most 200 characters."}
         revision: {type: integer, format: int64, minimum: 1, description: "The sale's revision; or send If-Match."}
-        payer: {$ref: "#/components/schemas/PosPayerCapture", description: "The payer's details the counter captured for a large cash crossing (CP-17a); required when this payment takes the payer over the branch's threshold, refused 409 payer_details_required without them."}
+        payer: {$ref: "#/components/schemas/PosPayerCapture", description: "The payer's details the counter captured for a large cash crossing (CP-17a); required when this payment takes the payer over the branch's threshold, refused 409 payer_details_required without them, and refused 503 large_cash_vault_unavailable on a server with no valid vault key, never stored in clear."}
         payer_declined: {type: boolean, description: "The counter's record that the walk-in declined to identify over the branch's walk-in identity floor (CP-17a); the sale goes ahead and the fact is recorded for the manager's worklist as an identity declined."}
         suspected_avoidance: {type: boolean, description: "The manager's mark that an instrument may be being used to avoid reporting (CP-17a); it makes a qualifying instrument count as cash whatever was sold."}
     PosPayerCapture:
@@ -34905,7 +34907,7 @@ components:
           description: >-
             The customer's counter alerts the clerk read and acknowledged before taking the exchange's replacement sale. A warning that asks to be acknowledged must be named here, or the exchange is refused with 409 alert_unacknowledged and nothing is written.
           items: {type: string, format: uuid}
-        payer: {$ref: "#/components/schemas/PosPayerCapture", description: "The payer's details the counter captured for a large cash crossing (CP-17a); required when this exchange's cash difference takes the payer over the branch's threshold, refused 409 payer_details_required without them."}
+        payer: {$ref: "#/components/schemas/PosPayerCapture", description: "The payer's details the counter captured for a large cash crossing (CP-17a); required when this exchange's cash difference takes the payer over the branch's threshold, refused 409 payer_details_required without them, and refused 503 large_cash_vault_unavailable on a server with no valid vault key, never stored in clear."}
         payer_declined: {type: boolean, description: "The counter's record that the walk-in declined to identify over the branch's walk-in identity floor (CP-17a); the exchange goes ahead and the fact is recorded for the manager's worklist as an identity declined."}
         suspected_avoidance: {type: boolean, description: "The manager's suspected avoidance mark (CP-17a); it makes a qualifying instrument count as cash whatever was sold."}
         tender_method: {type: string, enum: [cash, check, card], description: "The preview only: the method the counter will tender for the difference, so the server can say what the branch's large cash rule needs of this exchange before it is rung. The exchange takes the tender itself in tenders."}
