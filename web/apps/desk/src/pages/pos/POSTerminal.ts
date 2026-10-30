@@ -1945,6 +1945,7 @@ export class POSTerminal extends LitElement {
   }
 
   private _chooseMethod(method: TenderMethod) {
+    if (this._changing.size > 0) return;
     if (this._till === null) return;
     if (method === 'account') {
       const refusal = this._accountRefusal;
@@ -1970,6 +1971,7 @@ export class POSTerminal extends LitElement {
 
   /** Add the entered tender to the added list; a split names several. */
   private _addPendingTender() {
+    if (this._changing.size > 0) return;
     const entry = this._entry;
     if (!entry) {
       this._error = 'Invalid tender amount';
@@ -3446,7 +3448,7 @@ export class POSTerminal extends LitElement {
             </div>` : nothing}
           <div class="mt-3 flex gap-2">
             <button data-testid="pos-add-tender" @click=${() => this._addPendingTender()}
-              ?disabled=${!hasLines || !open || this._tenderMethod === null || entry === null || owed <= 0}
+              ?disabled=${!hasLines || !open || this._tenderMethod === null || entry === null || owed <= 0 || this._changing.size > 0}
               class="min-h-11 flex-1 rounded border border-white/20 px-3 py-2 text-xs text-slate-200 disabled:opacity-40">Add as split tender</button>
             ${this._pendingTenders.length > 0 ? html`
               <button @click=${() => { this._resetTender(); }}

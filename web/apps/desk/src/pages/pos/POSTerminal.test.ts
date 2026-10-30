@@ -2437,6 +2437,7 @@ describe('PR 150 fix round 1: quantity edits, controls and the blind count', () 
       if (button) expect(button.disabled, id).toBe(true);
     }
     expect((q(el, 'tender-cash') as HTMLButtonElement).disabled).toBe(true);
+    expect((q(el, 'pos-add-tender') as HTMLButtonElement).disabled).toBe(true);
     (document.activeElement as HTMLElement | null)?.blur();
     await key(el, 'F12');
     await key(el, 'F6');
