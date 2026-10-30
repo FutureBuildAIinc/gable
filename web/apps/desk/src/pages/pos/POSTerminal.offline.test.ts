@@ -385,6 +385,28 @@ describe('the counter when the connection drops', () => {
       el.remove();
     });
 
+    it('puts focus on the email field when the form opens', async () => {
+      const el = await openForm();
+      expect(document.activeElement).toBe(field(el, 'pos-offline-pw-email'));
+      el.remove();
+    });
+
+    it('puts focus back on the ask button when Cancel closes the form', async () => {
+      const el = await openForm();
+      (q(el, 'pos-offline-pw-cancel') as HTMLButtonElement).click();
+      await settle(el);
+      expect(document.activeElement).toBe(q(el, 'pos-offline-sign-in'));
+      el.remove();
+    });
+
+    it('puts focus on the password field after a refused answer', async () => {
+      const el = await openForm();
+      core.refuse['sign_in_with_password'] = 'sign_in_refused';
+      await submit(el);
+      expect(document.activeElement).toBe(field(el, 'pos-offline-pw-password'));
+      el.remove();
+    });
+
     it('a degraded config shows the unreachable words, no form, and the next tap reads the config again', async () => {
       core.refuse['sync_offline_queue'] = noSession;
       auth.authMethodsConfig.mockResolvedValue(cfg([{ method: 'email_password', kind: 'form' }], true));

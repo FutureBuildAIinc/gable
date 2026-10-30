@@ -410,6 +410,8 @@ export class POSTerminal extends LitElement {
       if ((await offlineCounter.signIn()) === 'form') {
         this._pwError = null;
         this._pwForm = true;
+        await this.updateComplete;
+        this._focusTestId('pos-offline-pw-email');
         return;
       }
     } catch (err) {
@@ -425,12 +427,23 @@ export class POSTerminal extends LitElement {
     return this.querySelector<HTMLInputElement>('[data-testid="pos-offline-pw-password"]');
   }
 
+  private _focusTestId(id: string) {
+    this.querySelector<HTMLElement>(`[data-testid="${id}"]`)?.focus();
+  }
+
   private _closePasswordForm() {
     const field = this._pwField();
     if (field) field.value = '';
     this._pwForm = false;
     this._pwEmail = '';
     this._pwError = null;
+  }
+
+  /** Cancel: the form goes and focus goes to the ask button that comes back. */
+  private async _cancelPasswordForm() {
+    this._closePasswordForm();
+    await this.updateComplete;
+    this._focusTestId('pos-offline-sign-in');
   }
 
   /**
@@ -450,10 +463,12 @@ export class POSTerminal extends LitElement {
       await attempt;
     } catch (err) {
       this._pwError = err instanceof Error ? err.message : 'The register could not be signed in. Ask a manager.';
-      return;
-    } finally {
       this._pwBusy = false;
+      await this.updateComplete;
+      this._focusTestId('pos-offline-pw-password');
+      return;
     }
+    this._pwBusy = false;
     this._closePasswordForm();
     this._offlineStrip = null;
     this._needsSignIn = false;
@@ -475,7 +490,7 @@ export class POSTerminal extends LitElement {
           <input type="password" data-testid="pos-offline-pw-password" aria-label="Password" autocomplete="current-password" class=${input} @keydown=${enter} />
         </label>
         <button type="button" data-testid="pos-offline-pw-submit" ?disabled=${this._pwBusy} class="min-h-11 rounded-lg bg-gable-green px-4 font-semibold text-deep-space disabled:opacity-60" @click=${() => void this._submitPassword()}>${NO_SESSION_ASK}</button>
-        <button type="button" data-testid="pos-offline-pw-cancel" class="min-h-11 rounded-lg border border-white/20 px-4 font-semibold" @click=${() => this._closePasswordForm()}>Cancel</button>
+        <button type="button" data-testid="pos-offline-pw-cancel" class="min-h-11 rounded-lg border border-white/20 px-4 font-semibold" @click=${() => void this._cancelPasswordForm()}>Cancel</button>
         ${this._pwError ? html`<p class="basis-full text-sm text-amber-400" role="alert" data-testid="pos-offline-pw-error">${this._pwError}</p>` : nothing}
       </form>`;
   }
