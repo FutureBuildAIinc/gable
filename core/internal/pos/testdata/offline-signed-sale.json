@@ -1,0 +1,67 @@
+{
+  "public_key_hex": "d9bf2148748a85c89da5aad8ee0b0fc2d105fd39d41a4c796536354f0ae2900c",
+  "sale": {
+    "business_date": "2026-04-19",
+    "buyer_contact_id": null,
+    "cashier_id": "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+    "change_cents": 9,
+    "client_id": "7a1b2c3d-0000-4000-8000-0000000000a1",
+    "confirmed_mark": 5,
+    "currency": "USD",
+    "customer_id": "22222222-2222-4222-8222-222222222222",
+    "customer_po": "PO \"7\" <yard>/é",
+    "device_epoch": 2,
+    "device_seq": 7,
+    "device_sig": "CZ7KhiWadYFE27cX7Zd69CcWH8D1HbVGpTMiI2yS03DOZAPnc538IGO0ouDFvF/KeQbJC4cOiRK3xLMDUfWuBQ==",
+    "job_id": null,
+    "lines": [
+      {
+        "description": "2x4x8 SPF ‘stud’ tab\there",
+        "id": "55555555-5555-4555-8555-555555555555",
+        "level_fallback": false,
+        "line_total_cents": 1100,
+        "position": 0,
+        "price_basis": null,
+        "price_key": "customer:22222222-2222-4222-8222-222222222222",
+        "price_source": "contract",
+        "price_uom": "EA",
+        "price_uom_qty": "1",
+        "product_id": "aaaa0001-0000-4000-8000-000000000001",
+        "quantity": "2",
+        "sku": "2X4-8-SPF",
+        "stock_quantity": "2",
+        "stock_uom": "EA",
+        "tally": null,
+        "taxable": true,
+        "unit_price_ten_thousandths": 55000,
+        "uom": "EA",
+        "uom_qty": "1"
+      }
+    ],
+    "offline_ref": "REG-01-2-000007",
+    "picked_up_by": "Self",
+    "prev_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "queue_count": 2,
+    "queue_total_cents": 2382,
+    "register_id": "REG-01",
+    "replaces_sale_id": "99999999-9999-4999-8999-999999999999",
+    "snapshot_id": "11111111-1111-4111-8111-111111111111",
+    "sold_at": "2026-04-19T14:22:11Z",
+    "subtotal_cents": 1100,
+    "tax_cents": 91,
+    "tax_exempt": false,
+    "tax_rate": "0.082500",
+    "tenders": [
+      {
+        "amount_cents": 1200,
+        "id_checked": false,
+        "id_type": null,
+        "method": "cash",
+        "reference": null
+      }
+    ],
+    "till_session_id": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+    "total_cents": 1191
+  },
+  "seed_hex": "0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f"
+}

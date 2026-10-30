@@ -4,10 +4,12 @@
 package pos
 
 import (
+	"bytes"
 	"crypto/ed25519"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"os"
 	"testing"
 )
 
@@ -80,4 +82,44 @@ func mustJSON(t *testing.T, v any) json.RawMessage {
 		t.Fatal(err)
 	}
 	return raw
+}
+
+// RULE (ADR 0011 6.1, the shared signing vector): a sale the Rust core
+// signed with a fixed seed verifies here as received, so the device's
+// canonical bytes and the server's are the same bytes, escapes included; a
+// field changed after signing does not. The Rust test of tauri/core signs the
+// same file and must reproduce its signature.
+func TestTheRustCoresSignedSaleVerifies(t *testing.T) {
+	raw, err := os.ReadFile("testdata/offline-signed-sale.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var vector struct {
+		PublicKeyHex string          `json:"public_key_hex"`
+		Sale         json.RawMessage `json:"sale"`
+	}
+	if err := json.Unmarshal(raw, &vector); err != nil {
+		t.Fatal(err)
+	}
+	it, err := parseOfflineItem(vector.Sale)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !verifySaleSignature(vector.PublicKeyHex, it) {
+		t.Fatal("the Rust core's signature does not verify against the server's canonical bytes")
+	}
+	if it.Sale.ReplacesSaleID == nil || *it.Sale.ReplacesSaleID != "99999999-9999-4999-8999-999999999999" {
+		t.Errorf("the replaced cart did not read: %v", it.Sale.ReplacesSaleID)
+	}
+	tampered := bytes.Replace(vector.Sale, []byte(`"total_cents": 1191`), []byte(`"total_cents": 1190`), 1)
+	if bytes.Equal(tampered, vector.Sale) {
+		t.Fatal("the vector holds no total to tamper with")
+	}
+	bad, err := parseOfflineItem(tampered)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if verifySaleSignature(vector.PublicKeyHex, bad) {
+		t.Error("a sale changed after signing still verifies")
+	}
 }

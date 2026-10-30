@@ -621,49 +621,37 @@ func r1bCPOSGroups() []groupDef {
 		{
 			name: "pos_sync",
 			steps: []stepDef{
+				// The signed batch of ADR 0011 (slice C2). The seed sets no
+				// offline policy, so the branch keeps the refusal: every batch
+				// that parses answers 409 money_never_queues and nothing of it
+				// is written; the shapes the route refuses keep their 400.
 				{
 					name: "pos.sync", method: "POST", path: "/api/v1/pos/sync",
 					body: map[string]any{
-						"batch_id": "r1c-batch-1", "register_id": "REG-01",
-						"items": []map[string]any{{
-							"client_id":         "c1c1c1c1-0000-4000-8000-000000000001",
-							"cashier_id":        "c1c1c1c1-0000-4000-8000-0000000000aa",
-							"items":             []map[string]any{{"product_id": "{product}", "quantity": "1"}},
-							"tenders":           []map[string]any{{"method": "cash", "amount_cents": 20000}},
-							"client_created_at": "{today}T03:04:05Z",
-						}},
+						"batch_id": "r1c-batch-1", "register_id": "REG-01", "device_epoch": 1, "reported_seq": 1,
+						"items": []map[string]any{syncSignedItem("c1c1c1c1-0000-4000-8000-000000000001", 1, "REG-01-1-000001", 20000)},
 					},
 				},
 				{
 					name: "pos.sync.replay_duplicate", method: "POST", path: "/api/v1/pos/sync",
 					body: map[string]any{
-						"batch_id": "r1c-batch-1", "register_id": "REG-01",
-						"items": []map[string]any{{
-							"client_id":         "c1c1c1c1-0000-4000-8000-000000000001",
-							"cashier_id":        "c1c1c1c1-0000-4000-8000-0000000000aa",
-							"items":             []map[string]any{{"product_id": "{product}", "quantity": "1"}},
-							"tenders":           []map[string]any{{"method": "cash", "amount_cents": 20000}},
-							"client_created_at": "{today}T03:04:05Z",
-						}},
+						"batch_id": "r1c-batch-1", "register_id": "REG-01", "device_epoch": 1, "reported_seq": 1,
+						"items": []map[string]any{syncSignedItem("c1c1c1c1-0000-4000-8000-000000000001", 1, "REG-01-1-000001", 20000)},
 					},
 				},
 				{
 					name: "pos.sync.underpaid", method: "POST", path: "/api/v1/pos/sync",
 					body: map[string]any{
-						"batch_id": "r1c-batch-2", "register_id": "REG-01",
-						"items": []map[string]any{{
-							"client_id":         "c1c1c1c1-0000-4000-8000-000000000002",
-							"cashier_id":        "c1c1c1c1-0000-4000-8000-0000000000aa",
-							"items":             []map[string]any{{"product_id": "{product}", "quantity": "1"}},
-							"tenders":           []map[string]any{{"method": "cash", "amount_cents": 1}},
-							"client_created_at": "{today}T03:04:06Z",
-						}},
+						"batch_id": "r1c-batch-2", "register_id": "REG-01", "device_epoch": 1, "reported_seq": 2,
+						"items": []map[string]any{syncSignedItem("c1c1c1c1-0000-4000-8000-000000000002", 2, "REG-01-1-000002", 1)},
 					},
 				},
 				{name: "pos.sync.no_batch_id", method: "POST", path: "/api/v1/pos/sync",
-					body: map[string]any{"register_id": "REG-01", "items": []map[string]any{{"client_id": cMissingID}}}},
+					body: map[string]any{"register_id": "REG-01", "device_epoch": 1, "reported_seq": 0, "items": []map[string]any{{"client_id": cMissingID}}}},
 				{name: "pos.sync.no_items", method: "POST", path: "/api/v1/pos/sync",
-					body: map[string]any{"batch_id": "r1c-batch-3", "items": []map[string]any{}}},
+					body: map[string]any{"batch_id": "r1c-batch-3", "register_id": "REG-01", "device_epoch": 1, "reported_seq": 0, "items": []map[string]any{}}},
+				{name: "pos.sync.no_epoch", method: "POST", path: "/api/v1/pos/sync",
+					body: map[string]any{"batch_id": "r1c-batch-4", "register_id": "REG-01", "items": []map[string]any{{"client_id": cMissingID}}}},
 				{name: "pos.sync.bad_body", method: "POST", path: "/api/v1/pos/sync", body: "not an object"},
 				{name: "pos.transaction.list.after_sync", method: "GET", path: "/api/v1/pos/transactions?register_id=REG-01", sortPrimaryArray: true, sortEnvelopeItems: true},
 			},
@@ -944,5 +932,23 @@ func r1bCDeliveredGroups() []groupDef {
 				},
 			},
 		},
+	}
+}
+
+// syncSignedItem is one signed offline sale in the shape the register's core
+// sends (ADR 0011 section 2); the branch has no offline policy, so the
+// scenario's batches are refused before any item is read.
+func syncSignedItem(clientID string, seq int64, ref string, cashCents int64) map[string]any {
+	return map[string]any{
+		"client_id": clientID, "register_id": "REG-01", "device_epoch": 1, "device_seq": seq,
+		"prev_digest": "GENESIS", "offline_ref": ref,
+		"snapshot_id": "c1c1c1c1-0000-4000-8000-0000000000bb", "till_session_id": "c1c1c1c1-0000-4000-8000-0000000000cc",
+		"cashier_id": "c1c1c1c1-0000-4000-8000-0000000000aa", "customer_id": nil,
+		"business_date": "{today}", "sold_at": "{today}T03:04:05Z", "currency": "USD",
+		"subtotal_cents": 2000, "tax_cents": 0, "total_cents": 2000, "change_cents": 0, "tax_rate": "0.000000",
+		"tax_exempt": false, "queue_count": 1, "queue_total_cents": 2000, "confirmed_mark": 0,
+		"lines":      []map[string]any{{"id": "c1c1c1c1-0000-4000-8000-0000000000dd", "product_id": "{product}", "quantity": "1"}},
+		"tenders":    []map[string]any{{"method": "cash", "amount_cents": cashCents}},
+		"device_sig": "00",
 	}
 }

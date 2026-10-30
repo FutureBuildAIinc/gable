@@ -485,6 +485,7 @@ POST	/api/v1/pos/transactions/{id}/items/{itemId}/weight	internal/pos	h.EnterLin
 POST	/api/v1/pos/transactions/{id}/overrides	internal/pos	h.ApproveOverrideHandler
 GET	/api/v1/pos/transactions/{id}/receipt	internal/document	h.HandlePrintSaleReceipt
 POST	/api/v1/pos/transactions/{id}/receipt/email	internal/document	h.HandleEmailSaleReceipt
+POST	/api/v1/pos/transactions/{id}/replaced-cart-answer	internal/pos	h.AnswerReplacedCartHandler
 POST	/api/v1/pos/transactions/{id}/signature	internal/pos	h.CaptureSignatureHandler
 POST	/api/v1/pos/transactions/{id}/void	internal/pos	h.VoidTransaction
 GET	/api/v1/pos/zreports	internal/pos	h.ListZReports

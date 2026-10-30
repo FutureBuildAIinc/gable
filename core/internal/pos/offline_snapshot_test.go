@@ -15,11 +15,14 @@ package pos_test
 // once store one snapshot.
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"flag"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -485,6 +488,102 @@ func TestOfflineSnapshot_ThreeTakesWaitForTheSyncInFlight(t *testing.T) {
 		if after != before+1 {
 			t.Fatalf("round %d stored %d snapshots, want 1", round, after-before)
 		}
+	}
+}
+
+var updateSnapshotFixture = flag.Bool("update-snapshot-fixture", false,
+	"rewrite testdata/offline-snapshot.json from the snapshot the route issues")
+
+// jsonShape is a document's shape: every key at every level with its kind,
+// array elements merged; a null fits any kind, an empty array any element.
+func jsonShape(v any, path string, out map[string]string) {
+	switch x := v.(type) {
+	case map[string]any:
+		out[path] = "object"
+		for k, e := range x {
+			jsonShape(e, path+"."+k, out)
+		}
+	case []any:
+		out[path] = "array"
+		for _, e := range x {
+			jsonShape(e, path+"[]", out)
+		}
+	case nil:
+		if _, ok := out[path]; !ok {
+			out[path] = "null"
+		}
+	case string:
+		out[path] = "string"
+	case float64:
+		out[path] = "number"
+	case bool:
+		out[path] = "bool"
+	}
+}
+
+// RULE (ADR 0011 5.4, the shared snapshot fixture, lead entry 692): the file
+// the Rust core's test parses is a snapshot this route issued, and its shape
+// is still the route's: the same keys at every level with the same kinds. A
+// field the route adds, drops or retypes fails here until the fixture is
+// issued again (go test -run TheSharedFixture -update-snapshot-fixture), and
+// then the Rust test proves the core reads it with nothing lost.
+func TestOfflineSnapshot_TheSharedFixtureIsWhatTheRouteIssues(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	db := testutil.RequireDB(t)
+	p2 := uuid.New()
+	f := newFixture(t, db, withEngine(db), lateProductCleanup(p2))
+	offlinePolicyOn(t, f)
+	b := newOfflineBench(t, f)
+	pricingSetup(t, f, p2)
+	// a job and a capped buyer, so every list of the cached account has a row
+	mustExec(t, f.db, `INSERT INTO projects (id, customer_id, name, status) VALUES ($1, $2, 'Front Deck', 'Active')`, uuid.New(), f.customerID)
+	f.addContact("Yard", "Buyer", true, ptr64(50000), true)
+	r := takeSnapshot(f, b.register, 0)
+	if r.status != http.StatusOK {
+		t.Fatalf("snapshot = %d %s", r.status, r.raw)
+	}
+	const path = "testdata/offline-snapshot.json"
+	if *updateSnapshotFixture {
+		var pretty bytes.Buffer
+		if err := json.Indent(&pretty, r.raw, "", "  "); err != nil {
+			t.Fatal(err)
+		}
+		pretty.WriteByte('\n')
+		if err := os.WriteFile(path, pretty.Bytes(), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("the shared snapshot fixture: %v (issue it with -update-snapshot-fixture)", err)
+	}
+	var fixture, issued any
+	if err := json.Unmarshal(raw, &fixture); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(r.raw, &issued); err != nil {
+		t.Fatal(err)
+	}
+	want, got := map[string]string{}, map[string]string{}
+	jsonShape(issued, "$", want)
+	jsonShape(fixture, "$", got)
+	for k, kind := range want {
+		if g, ok := got[k]; !ok {
+			t.Errorf("the fixture lacks %s (%s) the route issues", k, kind)
+		} else if g != kind && g != "null" && kind != "null" {
+			t.Errorf("%s is %s in the fixture, %s as issued", k, g, kind)
+		}
+	}
+	for k := range got {
+		if _, ok := want[k]; !ok {
+			t.Errorf("the fixture holds %s the route no longer issues", k)
+		}
+	}
+	// the sync reads the fixture as the snapshot it verifies sales against
+	var snap pos.OfflineSnapshot
+	if err := json.Unmarshal(raw, &snap); err != nil || snap.SnapshotID == "" || len(snap.PriceSheet) == 0 ||
+		len(snap.Products) == 0 || len(snap.Accounts) == 0 {
+		t.Fatalf("the fixture as the sync reads it: %+v %v", snap, err)
 	}
 }
 
