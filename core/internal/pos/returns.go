@@ -747,9 +747,16 @@ func (s *Service) ReturnSale(ctx context.Context, cashierID uuid.UUID, in *Retur
 			return nil, err
 		}
 		var target *Tender
+		unrun := false
 		for i := range cardTenders {
 			t := &cardTenders[i]
-			if t.Method != TenderCard || t.GatewayTxID == nil || *t.GatewayTxID == "" {
+			if t.Method != TenderCard {
+				continue
+			}
+			if t.GatewayTxID == nil || *t.GatewayTxID == "" {
+				// a card booked with no gateway transaction: the legacy
+				// externally captured card (CP-05 B), nothing to refund to
+				unrun = true
 				continue
 			}
 			if target != nil {
@@ -758,12 +765,17 @@ func (s *Service) ReturnSale(ctx context.Context, cashierID uuid.UUID, in *Retur
 			}
 			target = t
 		}
+		if target == nil && unrun {
+			return nil, conflict("card_tender",
+				"the card on this sale was not run through Gable: refund it on the machine that took it, or from the drawer")
+		}
 		if target == nil {
 			return nil, conflict("card_tender",
 				"the sale was not paid by card: refund it from the drawer or leave it on the account")
 		}
 		if s.gateway == nil {
-			return nil, conflict("card_terminal", "this register has no card terminal gateway to refund the card")
+			return nil, conflict(codeCardTerminalNotWired,
+				"This register has no card terminal to refund the card: refund it from the drawer or leave it on the account")
 		}
 		// The claim, in one short transaction of its own (ADR 0005 section
 		// 11 and 14.2 C2-5: "The card gateway is called before the

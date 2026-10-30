@@ -852,11 +852,13 @@ func Run() {
 		WithAuditLog(auditLog).
 		WithOutbox(outbox.NewWriter(db, cfg.EventsOrg)).
 		WithTxRunner(db)
-	// POS card tenders ride the CARD-PRESENT rail (Clover merchant terminal),
-	// NOT the Run online/keyed-web charge API: until the Clover terminal
-	// integration lands, counter CARD tenders are recorded as
-	// externally-captured (the device settles); posSvc.WithGateway is where
-	// the Clover terminal gateway wires in.
+	// POS card tenders ride the card present rail: the terminal driver wired
+	// below (the Run driver, or a demo stack's simulator), never the Run
+	// online keyed charge. With no terminal wired the counter refuses a card
+	// (CP-05 A1, card_terminal_not_wired): nothing books a card that ran
+	// nowhere. The POS gateway is wired with the terminal and only with it:
+	// it is the way back to the card for a return, a void and a reversal of a
+	// terminal leg (CP-05 B).
 	// The counter also guards the AR core's applications: while a sale's void
 	// has standing refund claims, the sale's invoice takes no application
 	// (its open cents are the void's interim, C2-5), and a payment whose
@@ -866,13 +868,8 @@ func Run() {
 	// The card terminal seam (CP-05, IX-01): the intent ledger always, and
 	// the simulated terminal only when the demo stack selects it by
 	// configuration (an unset value wires no device, so production runs no
-	// simulator). A real terminal provider wires here beside it.
+	// simulator).
 	terminalLedger := payment.NewTerminalLedger(db).WithAuditLog(auditLog)
-	if sim := payment.NewSimulatedTerminalFromEnv(cfg.POSTerminalSimulator, payment.NewSimulatedSurchargeSink(terminalLedger)); sim != nil {
-		posSvc.WithTerminal(sim, terminalLedger)
-		logger.Warn("the simulated card terminal is wired: a demo stack only, never a production configuration",
-			"script", cfg.POSTerminalSimulator)
-	}
 	// The Run card terminal driver (CP-05): selected by configuration like
 	// the simulator, never by default. Its credentials are the Run Payments
 	// set (resolved at call time, DB-first); the Reporting API set is
@@ -880,18 +877,25 @@ func Run() {
 	// charge-card POST, the lost answer lookup and the settlement batch.
 	// Without it the lookup cannot run, and the driver's own per order
 	// guard is what keeps a re dispatch from charging twice.
-	// A demo stack's simulator wins: both are never wired.
+	var runTerm payment.TerminalProvider
 	if cfg.POSTerminal == "run" && cfg.POSTerminalSimulator == "" {
-		runTerm := payment.NewRunTerminal(paymentKeys.Resolve, terminalLedger, logger).
+		runTerm = payment.NewRunTerminal(paymentKeys.Resolve, terminalLedger, logger).
 			OnKeyRotated(func(apiKey, refreshToken string) {
 				if err := paymentKeys.PersistRotatedKey(apiKey, refreshToken); err != nil {
 					logger.Error("failed to persist rotated Run Payments api_key", "error", err)
 				}
 			}).
 			WithReporting(cfg.RunReportingBaseURL, cfg.RunReportingClientID, cfg.RunReportingClientSecret)
-		posSvc.WithTerminal(runTerm, terminalLedger)
+	}
+	switch wirePOSCardPath(posSvc, terminalLedger, cfg.POSTerminalSimulator, runTerm, rpGateway) {
+	case pos.CardTerminalSimulator:
+		logger.Warn("the simulated card terminal is wired: a demo stack only, never a production configuration",
+			"script", cfg.POSTerminalSimulator)
+	case pos.CardTerminalRun:
 		logger.Info("the Run card terminal driver is wired",
 			"transaction_lookup", cfg.RunReportingBaseURL != "")
+	default:
+		logger.Warn("no card terminal is wired: the counter refuses card tenders (set POS_TERMINAL=run)")
 	}
 
 	// The large cash rules of the branch's country (CP-17a): the payer
