@@ -48,6 +48,7 @@ type fixture struct {
 	db           *database.DB
 	srv          *httptest.Server
 	service      *pos.Service
+	ledger       *gl.Service
 	customerID   uuid.UUID
 	customerName string
 	productID    uuid.UUID
@@ -170,6 +171,7 @@ func newCounterFixture(t *testing.T, db *database.DB, opts ...func(*fixture)) *f
 
 	logger := slog.Default()
 	glSvc := gl.NewService(gl.NewRepository(db), nil, logger)
+	f.ledger = glSvc
 	acct := account.NewService(db, glSvc, logger)
 	stock := inventory.NewService(inventory.NewRepository(db))
 	invoices := invoice.NewService(invoice.NewRepository(db), glSvc, acct, db).
