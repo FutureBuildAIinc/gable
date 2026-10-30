@@ -439,8 +439,7 @@ mod tests {
                 "allow-core-token",
                 "allow-clear-tokens",
                 "allow-begin-sign-in",
-                "allow-refresh-tokens",
-                "allow-sign-in-with-password"
+                "allow-refresh-tokens"
             ]
         );
         // Least privilege: no open core grant, no plugin, no device or shell
@@ -682,7 +681,7 @@ mod tests {
             .collect();
         assert_eq!(registered, declared);
         assert_eq!(registered, granted);
-        assert_eq!(registered.len(), 9);
+        assert_eq!(registered.len(), 12);
         assert!(registered.contains(&"sign_in_with_password".to_string()));
     }
 
