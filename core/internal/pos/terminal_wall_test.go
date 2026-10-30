@@ -72,16 +72,18 @@ func newWallWorld(t *testing.T) *wallWorld {
 	setPosSetting(t, db, "default_branch_required", "false")
 	branchB := uuid.New()
 	mustExec(t, db, `INSERT INTO locations (id, type, code, name) VALUES ($1, 'BRANCH', $2, 'terminal wall B')`, branchB, "TW-"+branchB.String()[:8])
+	f := newFixture(t, db, withTerminal(payment.SimNoAnswer, 0))
 	t.Cleanup(func() {
 		setPosSetting(t, db, "multi_branch_enabled", "false")
 		setPosSetting(t, db, "default_branch_required", "true")
 		mustExec(t, db, `DELETE FROM user_locations WHERE user_sub IN ('term-wall-a', 'term-wall-n')`)
-		mustExec(t, db, `DELETE FROM payment_terminal_lost_items`)
-		mustExec(t, db, `DELETE FROM payment_terminal_intents`)
+		// the terminal rows of the branches this world owns, not the whole
+		// tables: the payment package's own intents live there too
+		mustExec(t, db, `DELETE FROM payment_terminal_lost_items WHERE branch_id IN ($1, $2)`, branchB, f.branchID)
+		mustExec(t, db, `DELETE FROM payment_terminal_intents WHERE branch_id IN ($1, $2)`, branchB, f.branchID)
 		mustExec(t, db, `DELETE FROM pos_transactions WHERE branch_id = $1`, branchB)
 		mustExec(t, db, `DELETE FROM locations WHERE id = $1`, branchB)
 	})
-	f := newFixture(t, db, withTerminal(payment.SimNoAnswer, 0))
 	mustExec(t, db, `INSERT INTO user_locations (user_sub, branch_id, is_home, granted_by) VALUES ('term-wall-a', $1, TRUE, 'test')`, f.branchID)
 	mustExec(t, db, `INSERT INTO user_locations (user_sub, branch_id, is_home, granted_by) VALUES ('term-wall-n', $1, TRUE, 'test')`, f.branchID)
 	w := &wallWorld{f: f, branchB: branchB, ledger: payment.NewTerminalLedger(db)}

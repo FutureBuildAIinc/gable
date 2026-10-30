@@ -44,7 +44,7 @@ func TestRandomLengthMouldingWithoutCrossSection_TallySurvivesOrderInvoiceAndCre
 	})
 
 	createOrder := f.do("POST", "/api/v1/orders", map[string]any{
-		"customer_id":   f.customerID.String(),
+		"customer_id":   f.customerID.String(), "branch_id": f.branchID.String(),
 		"delivery_type": "pickup",
 		"lines": []any{map[string]any{
 			"product_id":                 mouldingID.String(),
@@ -178,7 +178,7 @@ func TestCrossUnitOrder_SummaryCostAndVoidInvoiceClosedShortCheck(t *testing.T) 
 	// f.productID has base_price = $5.50/PCS and average_unit_cost = $3.25/PCS.
 	// Selling 80 LF (= 10 PCS) at $8.00/PCS override gives $80.00 revenue (8000 cents).
 	createResp := f.do("POST", "/api/v1/orders", map[string]any{
-		"customer_id":   f.customerID.String(),
+		"customer_id":   f.customerID.String(), "branch_id": f.branchID.String(),
 		"delivery_type": "pickup",
 		"lines": []any{map[string]any{
 			"product_id":                 f.productID.String(),
@@ -346,7 +346,7 @@ func TestFulfilmentSubTally_PartialBillsAndExceedsUnbilledValidation(t *testing.
 
 	// Order 10x8' (80 LF) + 6x12' (72 LF) = 152 LF.
 	createOrder := f.do("POST", "/api/v1/orders", map[string]any{
-		"customer_id":   f.customerID.String(),
+		"customer_id":   f.customerID.String(), "branch_id": f.branchID.String(),
 		"delivery_type": "pickup",
 		"lines": []any{map[string]any{
 			"product_id":                 rlID.String(),

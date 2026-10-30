@@ -110,3 +110,48 @@ describe('gable-deposit-modal - the refusals', () => {
     expect(q(el, '[data-testid="deposit-balance-due"]').textContent).toBe('846.62')
   })
 })
+
+describe('gable-deposit-modal - at the counter', () => {
+  function openCounter(balanceDueCents: number) {
+    return mount<GableDepositModal>('gable-deposit-modal', {
+      isOpen: true,
+      counter: true,
+      orderId: 'ord-1',
+      customerId: 'cust-1',
+      branchId: 'branch-1',
+      balanceDueCents,
+    })
+  }
+
+  function methodValues(el: GableDepositModal): string[] {
+    const select = q<HTMLElement & { options: { value: string }[] }>(el, 'gable-select')
+    return select.options.map((o) => o.value)
+  }
+
+  it('offers cash and check only, the methods a till takes', async () => {
+    expect(methodValues(await openCounter(5988))).toEqual(['cash', 'check'])
+  })
+
+  it('offers all four methods away from the counter', async () => {
+    expect(methodValues(await open(5988))).toEqual(['cash', 'check', 'ach', 'other'])
+  })
+
+  it('asks for the ID on a check and posts id_checked when it is ticked', async () => {
+    const el = await openCounter(5988)
+    await typeAmount(el, '30')
+    expect(el.querySelector('[data-testid="deposit-id-checked"]')).toBeNull()
+    await chooseOption(q(el, 'gable-select'), 'check')
+    await update(el, {})
+    const box = q<HTMLInputElement>(el, '[data-testid="deposit-id-checked"]')
+    box.checked = true
+    box.dispatchEvent(new Event('change', { bubbles: true }))
+    await update(el, {})
+    expect(submit(el)?.id_checked).toBe(true)
+  })
+
+  it('posts no id_checked on cash or an unticked check', async () => {
+    const el = await openCounter(5988)
+    await typeAmount(el, '30')
+    expect(submit(el)).not.toHaveProperty('id_checked')
+  })
+})

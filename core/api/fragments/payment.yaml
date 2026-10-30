@@ -607,6 +607,7 @@ components:
         order_id: {type: string, format: uuid, description: "A deposit against this order."}
         job_id: {type: string, format: uuid}
         till_session_id: {type: string, format: uuid, description: "The open counter till session a cash or check counter deposit rides."}
+        id_checked: {type: boolean, description: "A check taken on a till session: the clerk looked at the payer's ID. The counter's ID rule asks for it."}
         applications:
           type: array
           items: {$ref: "#/components/schemas/PaymentApplicationRequest"}

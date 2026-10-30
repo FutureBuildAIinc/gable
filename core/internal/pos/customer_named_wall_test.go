@@ -155,7 +155,7 @@ func TestTheSyncRefusesEveryBatchByRule(t *testing.T) {
 	if n := countOf(t, f.db, `SELECT count(*) FROM invoices WHERE customer_id = $1 AND branch_id = $2`, w.hidden, f.branchID); n != 0 {
 		t.Errorf("the refused sync posted %d invoices at the selling yard, want 0", n)
 	}
-	if n := countOf(t, f.db, `SELECT count(*) FROM pos_sync_log`); n != 0 {
+	if n := countOf(t, f.db, `SELECT count(*) FROM pos_sync_log WHERE register_id = $1`, f.register); n != 0 {
 		t.Errorf("the refused sync wrote %d sync log rows, want 0", n)
 	}
 }

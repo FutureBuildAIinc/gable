@@ -120,6 +120,7 @@ var machineKeyModules = map[string]struct{}{
 	"gl":               {},
 	"governance":       {},
 	"inventory":        {},
+	"large-cash":       {},
 	"invoices":         {},
 	"locations":        {},
 	"market-indices":   {},

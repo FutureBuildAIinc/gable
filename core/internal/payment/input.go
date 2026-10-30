@@ -34,6 +34,7 @@ type CreateRequest struct {
 	OrderID       *string              `json:"order_id"`
 	JobID         *string              `json:"job_id"`
 	TillSessionID *string              `json:"till_session_id"`
+	IDChecked     *bool                `json:"id_checked"`
 	Applications  []ApplicationRequest `json:"applications"`
 }
 
@@ -63,7 +64,10 @@ type Input struct {
 	OrderID       *uuid.UUID
 	JobID         *uuid.UUID
 	TillSessionID *uuid.UUID
-	Applications  []account.ApplyLine
+	// IDChecked records that the clerk looked at the payer's ID for a check
+	// taken at the counter; the counter's ID rule asks for it.
+	IDChecked    bool
+	Applications []account.ApplyLine
 }
 
 func trim(s *string) string {
@@ -151,6 +155,10 @@ func (req *CreateRequest) Parse() (*Input, error) {
 	}
 	if in.TillSessionID != nil && in.Method != "" {
 		v.Check(in.Method == PaymentMethodCash || in.Method == PaymentMethodCheck, "method", "a till session takes cash or check")
+	}
+	if req.IDChecked != nil {
+		in.IDChecked = *req.IDChecked
+		v.Check(!in.IDChecked || (in.TillSessionID != nil && in.Method == PaymentMethodCheck), "id_checked", "applies only to a check taken on a till session")
 	}
 	in.Reference, in.Notes = trim(req.Reference), trim(req.Notes)
 	v.Check(len(in.Reference) <= 128, "reference", "must be at most 128 characters")

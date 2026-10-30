@@ -156,7 +156,7 @@ func TestADeclinedVoidTendersCreditIsPaidBackThroughTheCounterTerminal(t *testin
 	if got := f.walkInBalance(t); got != 0 {
 		t.Errorf("walk-in balance = %d, want 0 (nothing owed, nothing held on the customer)", got)
 	}
-	if got := countOf(t, f.db, `SELECT count(*) FROM payment_refunds`); got != 2 {
+	if got := f.counterRefunds(t); got != 2 {
 		t.Errorf("%d refund rows, want 2 (the void's booked refund and the credit's payback)", got)
 	}
 	// the terminal's outcome is recorded the way the resolve route records

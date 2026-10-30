@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/gablelbm/gable/internal/account"
 	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/gablelbm/gable/pkg/database"
 	"github.com/gablelbm/gable/pkg/middleware"
@@ -217,8 +218,16 @@ type DepositFacts struct {
 	Status         string
 	TotalCents     int64
 	DepositedCents int64
+	// PaidOtherCents is what the order's live invoices were paid by anything
+	// but the order's own deposits (account.OrderInvoicePaidCentsSQL).
+	PaidOtherCents int64
 	BilledCents    int64
 }
+
+// BalanceCents is the room left for a deposit: the order's total less its
+// deposits and less what its invoices were already paid otherwise. The order
+// answer's balance due after deposits is the same figure.
+func (f DepositFacts) BalanceCents() int64 { return f.TotalCents - f.DepositedCents - f.PaidOtherCents }
 
 // Cancelled reports whether the order is off the books (the wire's voided).
 func (f DepositFacts) Cancelled() bool { return f.Status == "CANCELLED" }
@@ -244,7 +253,11 @@ func (r *Repository) OrderDepositFacts(ctx context.Context, orderID uuid.UUID) (
 	var f DepositFacts
 	e := r.db.GetExecutor(ctx).QueryRow(ctx, `
 		SELECT o.branch_id, o.status, ROUND(o.total_amount * 100)::bigint
-		FROM orders o WHERE o.id = $1 FOR NO KEY UPDATE`, orderID).Scan(&f.BranchID, &f.Status, &f.TotalCents)
+		FROM orders o WHERE o.id = $1 AND `+wall("o", 2, 3)+` FOR NO KEY UPDATE`,
+		orderID, middleware.BranchIDForQuery(ctx), middleware.GrantsSubForQuery(ctx)).Scan(&f.BranchID, &f.Status, &f.TotalCents)
+	if errors.Is(e, pgx.ErrNoRows) {
+		return f, fieldError("order_id", "no such order for this customer")
+	}
 	if e != nil {
 		return f, fmt.Errorf("failed to read the order's deposit standing: %w", e)
 	}
@@ -263,6 +276,9 @@ func (r *Repository) OrderDepositFacts(ctx context.Context, orderID uuid.UUID) (
 		Scan(&f.DepositedCents, &f.BilledCents)
 	if e != nil {
 		return f, fmt.Errorf("failed to read the order's deposit standing: %w", e)
+	}
+	if e = r.db.GetExecutor(ctx).QueryRow(ctx, account.OrderInvoicePaidCentsSQL, orderID).Scan(&f.PaidOtherCents); e != nil {
+		return f, fmt.Errorf("failed to read what the order's invoices were paid: %w", e)
 	}
 	return f, nil
 }
@@ -333,10 +349,13 @@ func (r *Repository) PaymentTillSessionID(ctx context.Context, paymentID uuid.UU
 	return sessionID, nil
 }
 
-// OrderBelongsTo reports whether the order exists for the customer.
+// OrderBelongsTo reports whether the order exists for the customer behind
+// the caller's branch wall: an order outside the caller's reach reads as a
+// missing order, and its row is never locked.
 func (r *Repository) OrderBelongsTo(ctx context.Context, orderID, customerID uuid.UUID) (exists, matches bool, err error) {
 	var owner uuid.UUID
-	e := r.db.GetExecutor(ctx).QueryRow(ctx, `SELECT customer_id FROM orders WHERE id = $1`, orderID).Scan(&owner)
+	e := r.db.GetExecutor(ctx).QueryRow(ctx, `SELECT customer_id FROM orders o WHERE o.id = $3 AND `+wall("o", 1, 2),
+		middleware.BranchIDForQuery(ctx), middleware.GrantsSubForQuery(ctx), orderID).Scan(&owner)
 	if errors.Is(e, pgx.ErrNoRows) {
 		return false, false, nil
 	}

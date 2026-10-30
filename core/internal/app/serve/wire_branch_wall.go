@@ -23,6 +23,7 @@ import (
 	"github.com/gablelbm/gable/internal/matching"
 	"github.com/gablelbm/gable/internal/order"
 	"github.com/gablelbm/gable/internal/payment"
+	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/gablelbm/gable/internal/pos"
 	"github.com/gablelbm/gable/internal/product"
 	"github.com/gablelbm/gable/internal/purchase_order"
@@ -350,9 +351,16 @@ func (w *branchWall) pos(mux *http.ServeMux, h *pos.Handler, roles ...string) {
 
 // largeCash mounts the large cash routes: the preview rides the counter's
 // roles and the branch middleware and holds the sale it names to the wall;
-// the dealer settings stay admin and owner.
-func (w *branchWall) largeCash(mux *http.ServeMux, h *largecash.Handler, roles ...string) {
-	h.WithBranchGuard(w.guard).RegisterRoutes(mux, middleware.RequireRole("admin", "owner"), w.scoped(roles...))
+// the manager's worklist, the filing and the customer statement ride the
+// finance roles and the branch middleware, so a branch scoped key sees only
+// the crossings its branch received cash for or contributed cash to; the
+// dealer settings and the Form 8300 export stay admin and owner, the export
+// because it carries the payer's taxpayer identification number.
+func (w *branchWall) largeCash(mux *http.ServeMux, h *largecash.Handler, managerRoles, counterRoles []string) {
+	h.WithBranchGuard(w.guard).RegisterRoutes(mux,
+		w.scoped("admin", "owner"),
+		w.scoped(managerRoles...),
+		w.scoped(counterRoles...))
 }
 
 // posReceipts mounts the counter's receipt pair (print and email of a sale's
@@ -405,8 +413,60 @@ func (w *branchWall) documents(mux *http.ServeMux, h *document.Handler) {
 // emailDeliveries mounts the delivery record behind the branch middleware:
 // each row carries the branch of the document it sent, and the list is held
 // to the caller's branches.
+//
+// The whole list stays the finance roles' read. A read that names one
+// document (document_id) is also open to the roles that send a document (sales
+// emails an invoice, a quote or a statement, the cashier a receipt), so the
+// desk can follow the send it just made; the wall still holds every row to the
+// caller's branches, and a sales or cashier read must name a document_type its
+// role sends, so a purchase order's send is not theirs to follow.
 func (w *branchWall) emailDeliveries(mux *http.ServeMux, h *emaildelivery.Handler) {
-	h.RegisterRoutes(mux, w.scoped("admin", "owner", "finance"))
+	listAll := w.scoped("admin", "owner", "finance")
+	followSend := w.scoped("admin", "owner", "finance", "sales", "cashier")
+	h.RegisterRoutes(mux, func(next http.Handler) http.Handler {
+		all, one := listAll(next), followSend(followsItsOwnTypes(next))
+		return http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
+			if r.URL.Query().Get("document_id") != "" {
+				one.ServeHTTP(rw, r)
+				return
+			}
+			all.ServeHTTP(rw, r)
+		})
+	})
+}
+
+// followTypes are the document types each sending role may follow the send of.
+var followTypes = map[string][]string{
+	"sales":   {emaildelivery.DocInvoice, emaildelivery.DocQuote, emaildelivery.DocStatement},
+	"cashier": {emaildelivery.DocInvoice},
+}
+
+// followsItsOwnTypes holds a follow read to the document types the caller's
+// roles send. admin, owner and finance (and a request with no sign in claims,
+// which the role guard has already admitted) read every type.
+func followsItsOwnTypes(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
+		claims := middleware.ClaimsFromContext(r.Context())
+		if claims == nil {
+			next.ServeHTTP(rw, r)
+			return
+		}
+		want := r.URL.Query().Get("document_type")
+		for _, role := range append([]string{claims.Role}, claims.Roles...) {
+			switch role {
+			case "admin", "owner", "finance":
+				next.ServeHTTP(rw, r)
+				return
+			}
+			for _, t := range followTypes[role] {
+				if t == want {
+					next.ServeHTTP(rw, r)
+					return
+				}
+			}
+		}
+		httpx.WriteError(rw, r, httpx.Forbidden("this role may not follow that document type's send"))
+	})
 }
 
 // dealerProfile mounts the dealer profile: every role that prints reads it

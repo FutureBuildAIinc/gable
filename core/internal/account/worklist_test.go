@@ -118,8 +118,18 @@ func TestWorklistRanksBySeverityAndActs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("worklist: %v", err)
 	}
+	var own []account.WorklistRow
+	for _, r := range held.Rows {
+		if r.CustomerID == w.customerID {
+			own = append(own, r)
+			continue
+		}
+		if _, ok := ladder[r.CustomerID]; ok {
+			own = append(own, r)
+		}
+	}
 	first := -1
-	for i, r := range held.Rows {
+	for i, r := range own {
 		if r.CustomerID == w.customerID {
 			first = i
 			break
@@ -131,10 +141,10 @@ func TestWorklistRanksBySeverityAndActs(t *testing.T) {
 	if first != 0 {
 		t.Fatalf("the held account ranks %d, want first", first+1)
 	}
-	if held.Rows[first].SeverityScore != 4*10_000+2*10_000+10_000+39_000+1_000_000 {
-		t.Fatalf("the held account's score is %d, want the weighted sum plus the hold bump", held.Rows[first].SeverityScore)
+	if own[first].SeverityScore != 4*10_000+2*10_000+10_000+39_000+1_000_000 {
+		t.Fatalf("the held account's score is %d, want the weighted sum plus the hold bump", own[first].SeverityScore)
 	}
-	found := held.Rows[first]
+	found := own[first]
 	if found.HoldStatus != "active" || found.HoldID == "" {
 		t.Fatalf("the hold state reads %q with id %q", found.HoldStatus, found.HoldID)
 	}

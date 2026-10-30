@@ -96,7 +96,7 @@ func (s *Service) CreateCard(ctx context.Context, in *Input, who Caller) (*Payme
 		for _, a := range in.Applications {
 			applied += a.AmountCents
 		}
-		if err := s.checkDeposit(ctx, *in.OrderID, res.branch, false, in.AmountCents-applied, in.Applications); err != nil {
+		if err := s.checkDeposit(ctx, *in.OrderID, res.branch, in.AmountCents-applied, in.Applications); err != nil {
 			return nil, err
 		}
 	}
