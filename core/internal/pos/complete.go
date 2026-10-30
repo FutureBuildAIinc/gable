@@ -200,7 +200,9 @@ func (s *Service) CompleteSale(ctx context.Context, saleID uuid.UUID, ifMatch st
 	if preRoundingMode == RoundingNearest5Cents && cashTendered > 0 {
 		cashLegExact := cashTendered - change
 		if cashLegExact > 0 {
-			cashLegRounded, preDiff := RoundCash(cashLegExact)
+			// The same carrier rule as the transaction, so the pre-check and
+			// the sale agree on what the drawer keeps.
+			cashLegRounded, preDiff, _ := roundCashLeg(tenders, cashTendered, cashLegExact)
 			if preDiff != 0 {
 				change = cashTendered - cashLegRounded
 				if change < 0 {
@@ -217,6 +219,9 @@ func (s *Service) CompleteSale(ctx context.Context, saleID uuid.UUID, ifMatch st
 	if change > 0 && cashTendered < change {
 		return nil, conflict("change_from_cash",
 			"only a cash tender can give change: the over tender exceeds the cash taken")
+	}
+	if err := cardOverTender(pre.Currency, sums.card, cashTendered, change); err != nil {
+		return nil, err
 	}
 	if accountPortion > 0 {
 		if pre.CustomerID == nil {
@@ -381,7 +386,7 @@ func (s *Service) completeSaleTx(ctx context.Context, saleID uuid.UUID, ifMatch 
 	acknowledged []uuid.UUID, payer *largecash.PayerIn, suspectedAvoidance, payerDeclined bool,
 	verdict *offlineVerdict) (*Sale, error) {
 	sums := sumTenders(tenders)
-	totalTendered, cashTendered, accountPortion := sums.total, sums.cash, sums.account
+	totalTendered, cashTendered, cardTendered, accountPortion := sums.total, sums.cash, sums.card, sums.account
 	var out *Sale
 	err := s.inTx(ctx, func(ctx context.Context) error {
 		// Section 11, step 1: the counter sale row.
@@ -543,30 +548,9 @@ func (s *Service) completeSaleTx(ctx context.Context, saleID uuid.UUID, ifMatch 
 		// the change. It is the leg the rule moves; the card, the cheque, the
 		// account and the store credit settle to the exact cent.
 		cashLegExact := cashTendered - change
-		cashLegRounded, roundingDiff := cashLegExact, int64(0)
-		roundingCarrier := -1
+		cashLegRounded, roundingDiff, roundingCarrier := cashLegExact, int64(0), -1
 		if roundingMode == RoundingNearest5Cents && cashLegExact > 0 {
-			cashLegRounded, roundingDiff = RoundCash(cashLegExact)
-			if roundingDiff != 0 {
-				// The change falls out of the rounded figure, so the cash leg
-				// pays what the drawer keeps. The payment that carries the
-				// difference is the leg's largest one: it can stand the
-				// difference on its own, and the other cash payments keep
-				// their whole amount.
-				roundedChange := cashTendered - cashLegRounded
-				legPayments := cashLegPayments(tenders, roundedChange)
-				for i := range legPayments {
-					if legPayments[i] > 0 && (roundingCarrier < 0 || legPayments[i] > legPayments[roundingCarrier]) {
-						roundingCarrier = i
-					}
-				}
-				if roundingCarrier < 0 || legPayments[roundingCarrier] < roundingDiff {
-					// No leg can stand the difference: the money is taken
-					// exactly rather than half rounded.
-					cashLegRounded, roundingDiff = cashLegExact, 0
-					roundingCarrier = -1
-				}
-			}
+			cashLegRounded, roundingDiff, roundingCarrier = roundCashLeg(tenders, cashTendered, cashLegExact)
 		}
 		if roundingDiff != 0 {
 			change = cashTendered - cashLegRounded
@@ -582,6 +566,9 @@ func (s *Service) completeSaleTx(ctx context.Context, saleID uuid.UUID, ifMatch 
 		if change > cashTendered {
 			return conflict("change_from_cash",
 				"only a cash tender can give change: the over tender exceeds the cash taken")
+		}
+		if err := cardOverTender(sale.Currency, cardTendered, cashTendered, change); err != nil {
+			return err
 		}
 		// The legs the sale keeps, change taken out of the cash, sum exactly to
 		// the total; the two checks above make it so and this holds it. A
@@ -1203,8 +1190,8 @@ func (s *Service) paymentNumber(ctx context.Context, id uuid.UUID) (string, erro
 
 // tenderSums are the sale's tenders added up by kind.
 type tenderSums struct {
-	total, cash, account, storeCredit int64
-	accountLegs, storeLegs            int
+	total, cash, card, account, storeCredit int64
+	accountLegs, storeLegs                  int
 }
 
 func sumTenders(tenders []TenderIn) tenderSums {
@@ -1215,6 +1202,8 @@ func sumTenders(tenders []TenderIn) tenderSums {
 		switch t.Method {
 		case TenderCash:
 			s.cash += int64(t.AmountCents)
+		case TenderCard:
+			s.card += int64(t.AmountCents)
 		case TenderAccount:
 			s.account += int64(t.AmountCents)
 			s.accountLegs++
@@ -1224,6 +1213,20 @@ func sumTenders(tenders []TenderIn) tenderSums {
 		}
 	}
 	return s
+}
+
+// cardOverTender refuses a card asked for more than is owed on it. Change
+// comes out of cash only, so cash taken that walks out whole as change pays
+// nothing: the card then carries what the cash was meant to, and may be
+// charged at most the total less the other tenders. Cash that keeps part of
+// itself (a rounded cash leg, a larger note) is a real leg and passes. The
+// refusal comes before any device is called.
+func cardOverTender(currency string, card, cash, change int64) error {
+	if card <= 0 || cash <= 0 || change < cash {
+		return nil
+	}
+	return conflict("card_over_tender", fmt.Sprintf(
+		"The card can be charged at most %s: the rest is cash change.", moneyWords(currency, max(card-change, 0))))
 }
 
 // legsRefusal holds the shape of the legs: at most one account leg and one
@@ -1237,6 +1240,31 @@ func (s tenderSums) legsRefusal() error {
 		return conflict("one_store_credit_leg", "a sale takes at most one store credit tender: put the whole amount on one")
 	}
 	return nil
+}
+
+// roundCashLeg rounds the exact cash leg to the nearest five cents (CP-18) and
+// returns the rounded figure, the difference and the index of the tender that
+// carries it (-1 when nothing is rounded). The change falls out of the rounded
+// figure, so the cash leg pays what the drawer keeps. The payment that carries
+// the difference is the leg's largest one: it can stand the difference on its
+// own, and the other cash payments keep their whole amount. When no leg can
+// stand the difference the money is taken exactly rather than half rounded.
+func roundCashLeg(tenders []TenderIn, cashTendered, cashLegExact int64) (rounded, diff int64, carrier int) {
+	rounded, diff = RoundCash(cashLegExact)
+	if diff == 0 {
+		return cashLegExact, 0, -1
+	}
+	carrier = -1
+	legPayments := cashLegPayments(tenders, cashTendered-rounded)
+	for i := range legPayments {
+		if legPayments[i] > 0 && (carrier < 0 || legPayments[i] > legPayments[carrier]) {
+			carrier = i
+		}
+	}
+	if carrier < 0 || legPayments[carrier] < diff {
+		return cashLegExact, 0, -1
+	}
+	return rounded, diff, carrier
 }
 
 // cashLegPayments splits the cash tenders into the payments they become: the
