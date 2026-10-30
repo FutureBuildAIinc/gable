@@ -13,12 +13,17 @@ const PRODUCT = { product_id: 'p1', sku: 'PAINT-GAL', description: 'Base paint g
 let base: Record<string, unknown>
 let calls: { method: string; url: string; body: unknown }[]
 let refuse: Response | null
+let formulas: Record<string, unknown>[]
 
 beforeEach(() => {
   localStorage.setItem('token', 'test-token')
   base = { id: 'b1', tint_system_id: 's1', code: 'DEEP', name: 'Deep base', manufacturer_base_code: '', product_id: null, fill_volume_oz: 122, is_deepest: true }
   calls = []
   refuse = null
+  formulas = [
+    { id: 'f1', color_id: 'c1', base_id: 'b1', container_size_code: 'GAL', container_volume_oz: 128, components: [{}, {}] },
+    { id: 'f2', color_id: 'c1', base_id: 'other-system-base', container_size_code: 'QT', container_volume_oz: 32, components: [{}] },
+  ]
   vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input)
     const method = init?.method ?? 'GET'
@@ -29,6 +34,7 @@ beforeEach(() => {
       base = { ...base, product_id: body.product_id }
       return jsonResponse(base)
     }
+    if (method === 'GET' && url.includes('/tint/formulas')) return jsonResponse({ items: formulas })
     if (method === 'POST') return jsonResponse({ id: 'new', ...body }, 201)
     if (url.includes('/pos/products/search')) return jsonResponse([PRODUCT])
     if (url.includes('/tint/systems')) return jsonResponse({ items: [SYSTEM] })
@@ -114,6 +120,23 @@ describe('Tint catalogue screen', () => {
     await click(el, '[data-testid="tint-add-colorant"]')
     expect(el.querySelector('[data-testid="tint-error"]')).toBeNull()
     expect(q(el, '[data-testid="tint-success"]').closest('[data-testid="tint-colorants"]')).not.toBeNull()
+  })
+
+  it('lists the colorants, colours and this system\'s formulas as rows', async () => {
+    const el = await open()
+    expect(el.querySelectorAll('[data-testid="tint-colorant-list"] li')).toHaveLength(1)
+    expect(text(q(el, '[data-testid="tint-colorant-list"] li'))).toContain('Lamp Black')
+    expect(text(q(el, '[data-testid="tint-color-list"] li'))).toContain('HC-188')
+    const rows = el.querySelectorAll('[data-testid="tint-formula-list"] li')
+    expect(rows).toHaveLength(1)
+    expect(text(rows[0] as HTMLElement)).toContain('Essex Green on Deep base')
+    expect(text(rows[0] as HTMLElement)).toContain('GAL, 128 oz, 2 colorants')
+  })
+
+  it('says so when there are no formulas yet', async () => {
+    formulas = []
+    const el = await open()
+    expect(text(q(el, '[data-testid="tint-formula-list"]'))).toBe('No formulas yet.')
   })
 
   it('marks required fields and says what a disabled button is waiting for', async () => {

@@ -8,7 +8,7 @@ import { Palette } from 'lucide';
 import { apiErrorMessage } from '../../services/apiError';
 import { posService } from '../../services/POSService';
 import { tintService } from '../../services/TintService';
-import type { TintBase, TintColor, TintColorant, TintSystem } from '../../services/TintService';
+import type { TintBase, TintColor, TintColorant, TintFormula, TintSystem } from '../../services/TintService';
 import '../../components/ui/gable-select.ts';
 import type { QuickSearchResult } from '../../types/pos.ts';
 
@@ -40,6 +40,7 @@ export class GableTintCatalogue extends LitElement {
     @state() private _bases: TintBase[] = [];
     @state() private _colorants: TintColorant[] = [];
     @state() private _colors: TintColor[] = [];
+    @state() private _formulas: TintFormula[] = [];
     @state() private _loading = true;
     @state() private _busy = false;
     /** The message of the last action, by the card it belongs to: it shows beside that action. */
@@ -100,16 +101,21 @@ export class GableTintCatalogue extends LitElement {
             this._bases = [];
             this._colorants = [];
             this._colors = [];
+            this._formulas = [];
             return;
         }
-        const [bases, colorants, colors] = await Promise.all([
+        const [bases, colorants, colors, formulas] = await Promise.all([
             tintService.bases({ tint_system_id: this._systemId }),
             tintService.colorants(this._systemId),
             tintService.colors({ tint_system_id: this._systemId }),
+            tintService.formulas(),
         ]);
         this._bases = bases.items;
         this._colorants = colorants.items;
         this._colors = colors.items;
+        // The formulas list has no system filter: keep the ones on this system's bases.
+        const baseIds = new Set(bases.items.map((b) => b.id));
+        this._formulas = formulas.items.filter((f) => baseIds.has(f.base_id));
     }
 
     private async _pickSystem(id: string) {
@@ -214,6 +220,7 @@ export class GableTintCatalogue extends LitElement {
                 })),
             });
             this._formula = { ...f, components: [] };
+            await this._loadSystem();
         });
     }
 
@@ -349,8 +356,12 @@ export class GableTintCatalogue extends LitElement {
 
                 <section class="${card}" data-testid="tint-colorants">
                     <h2 class="text-lg font-semibold text-white">Colorants</h2>
-                    <p class="text-sm text-slate-300" data-testid="tint-colorant-list">
-                        ${this._colorants.length === 0 ? 'None yet.' : this._colorants.map((c) => `${c.name} (${c.code})`).join(', ')}</p>
+                    ${this._colorants.length === 0 ? html`<p class="text-sm text-slate-400" data-testid="tint-colorant-list">No colorants yet.</p>` : html`
+                        <ul class="divide-y divide-white/10 text-sm" data-testid="tint-colorant-list">
+                            ${this._colorants.map((c) => html`
+                                <li class="flex justify-between gap-2 py-2"><span class="text-white">${c.name}</span>
+                                    <span class="text-slate-400 font-mono">${c.code}</span></li>`)}
+                        </ul>`}
                     <div class="grid gap-3 sm:grid-cols-2">
                         ${this._input('Code', 'tint-new-colorant-code', this._newColorant.code, (v) => { this._newColorant = { ...this._newColorant, code: v }; }, true, true)}
                         ${this._input('Name', 'tint-new-colorant-name', this._newColorant.name, (v) => { this._newColorant = { ...this._newColorant, name: v }; }, false, true)}
@@ -364,8 +375,12 @@ export class GableTintCatalogue extends LitElement {
 
                 <section class="${card}" data-testid="tint-colors">
                     <h2 class="text-lg font-semibold text-white">Colours</h2>
-                    <p class="text-sm text-slate-300" data-testid="tint-color-list">
-                        ${this._colors.length === 0 ? 'None yet.' : this._colors.map((c) => c.manufacturer_code ? `${c.name} (${c.manufacturer_code})` : c.name).join(', ')}</p>
+                    ${this._colors.length === 0 ? html`<p class="text-sm text-slate-400" data-testid="tint-color-list">No colours yet.</p>` : html`
+                        <ul class="divide-y divide-white/10 text-sm" data-testid="tint-color-list">
+                            ${this._colors.map((c) => html`
+                                <li class="flex justify-between gap-2 py-2"><span class="text-white">${c.name}</span>
+                                    <span class="text-slate-400 font-mono">${c.manufacturer_code ?? ''}</span></li>`)}
+                        </ul>`}
                     <div class="grid gap-3 sm:grid-cols-2">
                         ${this._input('Manufacturer code', 'tint-new-color-code', this._newColor.code, (v) => { this._newColor = { ...this._newColor, code: v }; }, true)}
                         ${this._input('Name', 'tint-new-color-name', this._newColor.name, (v) => { this._newColor = { ...this._newColor, name: v }; }, false, true)}
@@ -378,7 +393,18 @@ export class GableTintCatalogue extends LitElement {
                 </section>
 
                 <section class="${card}" data-testid="tint-formulas">
-                    <h2 class="text-lg font-semibold text-white">Add a formula</h2>
+                    <h2 class="text-lg font-semibold text-white">Formulas</h2>
+                    ${this._formulas.length === 0 ? html`<p class="text-sm text-slate-400" data-testid="tint-formula-list">No formulas yet.</p>` : html`
+                        <ul class="divide-y divide-white/10 text-sm" data-testid="tint-formula-list">
+                            ${this._formulas.map((x) => html`
+                                <li class="flex flex-wrap justify-between gap-2 py-2" data-testid="tint-formula-${x.id}">
+                                    <span class="text-white">${this._colors.find((c) => c.id === x.color_id)?.name ?? 'A colour'}
+                                        on ${this._bases.find((b) => b.id === x.base_id)?.name ?? 'a base'}</span>
+                                    <span class="text-slate-400 font-mono">${x.container_size_code}, ${x.container_volume_oz} oz,
+                                        ${x.components.length} ${x.components.length === 1 ? 'colorant' : 'colorants'}</span>
+                                </li>`)}
+                        </ul>`}
+                    <h3 class="text-sm font-semibold text-white pt-2">Add a formula</h3>
                     <p class="text-xs text-slate-500">One formula is a colour on a base in one container size. Amounts are in whole
                         ounces with the guide's two increment columns, in this system's ${sys.unit_denominator} per ounce.</p>
                     <div class="grid gap-3 sm:grid-cols-4">
