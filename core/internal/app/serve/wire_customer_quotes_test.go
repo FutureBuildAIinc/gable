@@ -1378,8 +1378,8 @@ func (s *cqStack) dealerQuote(state string) uuid.UUID {
 		VALUES ($1, $2, $3::quote_state, 775.00, 25.00, 3333.33, now() + interval '10 days', $4, 'PICKUP', 'manual')`, id, s.custA, state, s.branch); err != nil {
 		s.t.Fatal(err)
 	}
-	if _, err := s.db.Pool.Exec(ctx, `INSERT INTO quote_lines (id, quote_id, product_id, sku, description, quantity, uom, unit_price, line_total, position)
-		VALUES ($1, $2, $3, 'CQW-SKU', '2x4 stud', 100, 'EA', 7.5000, 750.00, 0)`, uuid.New(), id, s.stud); err != nil {
+	if _, err := s.db.Pool.Exec(ctx, `INSERT INTO quote_lines (id, quote_id, product_id, sku, description, quantity, uom, stock_uom, stock_quantity, unit_price, line_total, position)
+		VALUES ($1, $2, $3, 'CQW-SKU', '2x4 stud', 100, 'EA', 'EA', 100, 7.5000, 750.00, 0)`, uuid.New(), id, s.stud); err != nil {
 		s.t.Fatal(err)
 	}
 	return id

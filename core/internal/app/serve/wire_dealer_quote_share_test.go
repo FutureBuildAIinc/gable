@@ -134,7 +134,7 @@ func TestQE01_ConvertAccepted(t *testing.T) {
 	}
 	rev := jsonOf(t, got.body)["revision"].(float64)
 
-	r := s.do("POST", "/api/v1/quotes/"+qid.String()+"/convert", map[string]string{"If-Match": strconv.Itoa(int(rev))}, nil)
+	r := s.do("POST", "/api/v1/quotes/"+qid.String()+"/convert", map[string]string{"X-Test-Role": "sales", "X-Test-Sub": "desk-user-1", "X-Test-Email": deskEmail, "If-Match": `"` + strconv.Itoa(int(rev)) + `"`}, nil)
 	if r.status != 201 {
 		t.Fatalf("convert an accepted quote: %d %s", r.status, r.body)
 	}

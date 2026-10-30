@@ -5,6 +5,8 @@ package customerquote
 
 import (
 	"context"
+	"errors"
+	"net/http"
 	"strings"
 	"time"
 
@@ -290,6 +292,12 @@ func (s *Service) DealerQuoteDecide(ctx context.Context, token string, c Caller,
 	}
 	err = s.db.RunInTx(ctx, func(ctx context.Context) error {
 		if err := s.dealerQuotes.Decide(ctx, doc.ID, accept); err != nil {
+			// A contender that lost the race meets the lifecycle's refusal
+			// (the quote is decided): the same answer as the check above.
+			var he *httpx.Error
+			if errors.As(err, &he) && he.Status == http.StatusConflict {
+				return ErrInvalidState
+			}
 			return err
 		}
 		if s.audit == nil {
