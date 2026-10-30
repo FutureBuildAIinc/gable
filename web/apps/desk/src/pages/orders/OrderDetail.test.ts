@@ -140,6 +140,14 @@ describe('gable-order-detail - the order contract', () => {
     expect(text(el)).toContain('Confirmed')
   })
 
+  it('stacks the side column under the lines below lg so its figures are not clipped at 390', async () => {
+    el = await mountAsync<GableOrderDetail>('gable-order-detail', { routeId: order().id })
+    const cols = el.querySelector('[data-testid="order-columns"]') as HTMLElement
+    expect(cols.className).toContain('grid-cols-1')
+    expect(cols.className).toContain('lg:grid-cols-3')
+    expect(cols.firstElementChild?.className).toContain('lg:col-span-2')
+  })
+
   it('shows the deposits the order answer carries: each deposit, the total, the unapplied, the balance after deposits', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => jsonResponse(order({
       deposit_total_cents: 40_000,

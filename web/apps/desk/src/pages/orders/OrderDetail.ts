@@ -420,10 +420,10 @@ export class GableOrderDetail extends LitElement {
                     @close=${() => { this.depositOpen = false; }}
                 ></gable-deposit-modal>
 
-                <div class="grid grid-cols-3 gap-6">
+                <div class="grid grid-cols-1 lg:grid-cols-3 gap-6" data-testid="order-columns">
                     <!-- Main Content: Lines -->
-                    <div class="col-span-2 space-y-6">
-                        <div class="bg-slate-steel rounded-lg border border-white/10 overflow-hidden">
+                    <div class="lg:col-span-2 min-w-0 space-y-6">
+                        <div class="bg-slate-steel rounded-lg border border-white/10 overflow-x-auto">
                             <div class="px-6 py-4 border-b border-white/10">
                                 <h2 class="font-semibold text-white">Line Items</h2>
                             </div>
