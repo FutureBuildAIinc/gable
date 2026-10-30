@@ -6,10 +6,12 @@ package pos_test
 // Migration 146 (CP-13 slice O1, ADR 0011): pos_offline_policy,
 // pos_register_devices, pos_offline_snapshots, pos_offline_exceptions with its
 // partial unique indexes on sale_id and (register_id, device_epoch, device_seq)
-// excluding sequence_reused, bad_signature and replay_mismatch; the offline
-// columns and unique index on pos_transactions; ABANDONED in the sale status
-// CHECK and wire enum; OFFLINE_RATE in the tax_source CHECK on orders and
-// invoices and in salesdoc.TaxSource.
+// excluding sequence_reused, bad_signature and replay_mismatch, and the
+// warning_alert_id column that holds the sold offline past an open warning
+// exception (CP-13 OW rides this table); the offline columns and unique index
+// on pos_transactions; ABANDONED in the sale status CHECK and wire enum;
+// OFFLINE_RATE in the tax_source CHECK on orders and invoices and in
+// salesdoc.TaxSource.
 
 import (
 	"context"
@@ -66,7 +68,8 @@ const mig146Present = `
 	       'uq_pos_offline_exceptions_register_epoch_seq',
 	       'uq_pos_transactions_device_seq',
 	       'idx_pos_transactions_replaces_sale',
-	       'uq_pos_register_devices_active'
+	       'uq_pos_register_devices_active',
+	       'idx_pos_offline_exceptions_warning_alert'
 	     ))`
 
 func TestMigration146_OfflineCounterSchemaAndConstraints(t *testing.T) {
@@ -92,7 +95,7 @@ func TestMigration146_OfflineCounterSchemaAndConstraints(t *testing.T) {
 		t.Fatalf("before 146, %d of its objects already exist", n)
 	}
 	mig105Apply(t, c, target)
-	const wantObjects = 4 + 12 + 5
+	const wantObjects = 4 + 12 + 6
 	if n := mig105Scalar[int](t, c, mig146Present); n != wantObjects {
 		t.Fatalf("after 146, %d objects exist, want %d", n, wantObjects)
 	}
@@ -200,14 +203,48 @@ func TestMigration146_OfflineCounterSchemaAndConstraints(t *testing.T) {
 		}
 	}
 
+	// 4b. The CP-13 OW exception rides this table: a sale sold offline past an
+	//     open warning carries the warning's id, and a manager reviews it
+	//     (status reviewed) with no second table.
+	custID := "00000000-0000-0000-0000-00000000a146"
+	if _, err := c.Exec(ctx, `
+		INSERT INTO customers (id, name, account_number, primary_branch_id)
+		VALUES ($1::uuid, 'Offline Warning Co', 'OFFWARN146', $2::uuid)`, custID, branchID); err != nil {
+		t.Fatal(err)
+	}
+	alertID := "00000000-0000-0000-0000-00000000a246"
+	if _, err := c.Exec(ctx, `
+		INSERT INTO customer_alerts (id, customer_id, kind, text, acknowledge_required, created_by)
+		VALUES ($1::uuid, $2::uuid, 'warning', 'account needs a manager''s word before charging', TRUE, 'office-1')`,
+		alertID, custID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.Exec(ctx, `
+		INSERT INTO pos_offline_exceptions (
+			sale_id, register_id, branch_id, device_epoch, device_seq, customer_id,
+			warning_alert_id, till_session_id, business_date, reason_code, status, resolved_by, resolved_at
+		) VALUES (
+			$1::uuid, 'REG-01', $2::uuid, 2, 3, $3::uuid,
+			$4::uuid, NULL, CURRENT_DATE, 'sold_past_warning', 'reviewed', 'office-2', NOW())`,
+		"00000000-0000-0000-0000-00000000e103", branchID, custID, alertID); err != nil {
+		t.Fatalf("insert sold_past_warning exception with warning_alert_id failed: %v", err)
+	}
+	if _, err := c.Exec(ctx, `
+		INSERT INTO pos_offline_exceptions (
+			sale_id, register_id, branch_id, device_epoch, device_seq, business_date, reason_code, warning_alert_id
+		) VALUES (
+			$1::uuid, 'REG-01', $2::uuid, 2, 4, CURRENT_DATE, 'sold_past_warning', $2::uuid)`,
+		"00000000-0000-0000-0000-00000000e104", branchID); err == nil {
+		t.Errorf("warning_alert_id accepted a branch id that is no customer alert")
+	}
+
 	// 5. pos_transactions: ABANDONED status, offline columns, and unique (register_id, device_epoch, device_seq).
 	cartID := "00000000-0000-0000-0000-00000000c101"
 	offlineSaleID := "00000000-0000-0000-0000-00000000c102"
 	dupSeqSaleID := "00000000-0000-0000-0000-00000000c103"
 	if _, err := c.Exec(ctx, `
-		INSERT INTO pos_transactions (id, register_id, cashier_id, branch_id, currency, status, abandoned_reason)
-		VALUES ($1::uuid, 'REG-01', '00000000-0000-0000-0000-0000000000e1', $2::uuid, 'USD', 'ABANDONED',
-		        'abandoned: replaced by offline sale OFF-REG-01-2-000010')`,
+		INSERT INTO pos_transactions (id, register_id, cashier_id, branch_id, currency, status)
+		VALUES ($1::uuid, 'REG-01', '00000000-0000-0000-0000-0000000000e1', $2::uuid, 'USD', 'ABANDONED')`,
 		cartID, branchID); err != nil {
 		t.Fatalf("insert ABANDONED sale failed: %v", err)
 	}
@@ -236,14 +273,16 @@ func TestMigration146_OfflineCounterSchemaAndConstraints(t *testing.T) {
 		t.Errorf("duplicate (register_id, device_epoch, device_seq) on pos_transactions was admitted")
 	}
 
-	// 6. OFFLINE_RATE in orders and invoices tax_source CHECK constraints.
-	custID := "00000000-0000-0000-0000-00000000a146"
+	// 6. OFFLINE_RATE in orders and invoices tax_source CHECK constraints,
+	//    and the widening keeps every value 141 allowed (ZONE_RATE).
 	orderID := "00000000-0000-0000-0000-00000000b146"
 	invID := "00000000-0000-0000-0000-00000000d146"
+	zoneOrderID := "00000000-0000-0000-0000-00000000b246"
 	if _, err := c.Exec(ctx, `
-		INSERT INTO customers (id, name, account_number, primary_branch_id)
-		VALUES ($1::uuid, 'Offline Tax Co', 'OFFTAX146', $2::uuid)`, custID, branchID); err != nil {
-		t.Fatal(err)
+		INSERT INTO orders (id, customer_id, branch_id, currency, status, delivery_type, tax_source, subtotal, tax_amount, total_amount)
+		VALUES ($1::uuid, $3::uuid, $2::uuid, 'USD', 'CONFIRMED', 'PICKUP', 'ZONE_RATE', 10.00, 0.80, 10.80)`,
+		zoneOrderID, branchID, custID); err != nil {
+		t.Fatalf("insert order with ZONE_RATE tax_source after 146 failed: %v", err)
 	}
 	if _, err := c.Exec(ctx, `
 		INSERT INTO orders (id, customer_id, branch_id, currency, status, delivery_type, tax_source, subtotal, tax_amount, total_amount)
@@ -276,7 +315,7 @@ func TestMigration146_OfflineCounterSchemaAndConstraints(t *testing.T) {
 	if _, err := c.Exec(ctx, `DELETE FROM invoices WHERE id = $1::uuid`, invID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := c.Exec(ctx, `DELETE FROM orders WHERE id = $1::uuid`, orderID); err != nil {
+	if _, err := c.Exec(ctx, `DELETE FROM orders WHERE id IN ($1::uuid, $2::uuid)`, orderID, zoneOrderID); err != nil {
 		t.Fatal(err)
 	}
 	mig105Apply(t, c, down)
