@@ -197,6 +197,9 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux, roleGuard ...func(http.Hand
 	mux.HandleFunc("GET /api/v1/pos/offline/registers/{id}/device", policyRead(h.GetRegisterDevice))
 	mux.HandleFunc("POST /api/v1/pos/offline/registers/{id}/device", policyWrite(h.EnrolRegisterDevice))
 	mux.HandleFunc("POST /api/v1/pos/offline/registers/{id}/device/revoke", policyWrite(h.RevokeRegisterDevice))
+	// The register's offline snapshot (CP-13 O2, ADR 0011 section 5.4): the
+	// shell takes it as the person signed in at the counter.
+	mux.HandleFunc("GET /api/v1/pos/offline/snapshot", guard(h.GetOfflineSnapshot))
 
 	// The manager step up (CP-04 slice 3): the roster the picker shows, and
 	// the PIN verified approval one act spends. Any person at the counter may
