@@ -108,7 +108,7 @@ func TestAnExchangeWorthLessThanTheReplacementTendersTheDifference(t *testing.T)
 	// two returns of the same sale line cannot exceed it
 	f.entriesBalance(t, memoID, str(t, newSale, "invoice_id"))
 	f.assertARInvariants(t)
-	if n := f.scalar(`SELECT count(*) FROM pos_returns WHERE exchange_sale_id IS NOT NULL`); n.(int64) != 1 {
+	if n := f.scalar(`SELECT count(*) FROM pos_returns WHERE register_id = $1 AND exchange_sale_id IS NOT NULL`, f.register); n.(int64) != 1 {
 		t.Errorf("exchange returns = %v, want 1", n)
 	}
 }
@@ -388,8 +388,9 @@ func TestAnExchangeRacingReturnsOfTheSameLineReturnsItOnce(t *testing.T) {
 	if n := f.counterReturns(t); n != 1 {
 		t.Errorf("returns = %d, want 1", n)
 	}
-	// the original sale, plus one replacement when the exchange won
-	exchanges := f.scalar(`SELECT count(*) FROM pos_returns WHERE exchange_sale_id IS NOT NULL`).(int64)
+	// the original sale, plus one replacement when the exchange won; both
+	// counts read this register's own rows only
+	exchanges := f.scalar(`SELECT count(*) FROM pos_returns WHERE register_id = $1 AND exchange_sale_id IS NOT NULL`, f.register).(int64)
 	if got := f.scalar(`SELECT count(*) FROM pos_transactions WHERE branch_id = $1 AND status = 'COMPLETED'`, f.branchID).(int64); got != 1+exchanges {
 		t.Errorf("completed sales = %d, want %d (the original and one replacement per exchange won)", got, 1+exchanges)
 	}
