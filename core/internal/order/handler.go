@@ -366,6 +366,13 @@ func (h *Handler) HandleTransition(w http.ResponseWriter, r *http.Request) {
 	pre := Precondition{IfMatch: r.Header.Get("If-Match"), Revision: revision}
 	o, err := h.service.Transition(r.Context(), id, to, pre, body)
 	if err != nil {
+		// The pre-ship exposure gate refuses with the pricing exposure
+		// error: the same 409 with its payload as blockers the exposure-gate
+		// route answers, never a 500.
+		if payload := exposureBlockers(err); payload != nil {
+			writeExposureConflict(w, r, payload)
+			return
+		}
 		httpx.WriteError(w, r, err)
 		return
 	}
@@ -567,6 +574,13 @@ func (h *Handler) HandleFulfil(w http.ResponseWriter, r *http.Request) {
 	pre := Precondition{IfMatch: r.Header.Get("If-Match"), Revision: revision}
 	res, err := h.service.Fulfil(r.Context(), id, &pre, req)
 	if err != nil {
+		// The pre-ship exposure gate refuses with the pricing exposure
+		// error: the same 409 with its payload as blockers the exposure-gate
+		// route answers, never a 500.
+		if payload := exposureBlockers(err); payload != nil {
+			writeExposureConflict(w, r, payload)
+			return
+		}
 		httpx.WriteError(w, r, err)
 		return
 	}

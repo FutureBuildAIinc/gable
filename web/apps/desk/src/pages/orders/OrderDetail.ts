@@ -15,10 +15,13 @@ import { OrderService } from '../../services/OrderService.ts';
 import { CustomerService } from '../../services/CustomerService.ts';
 import { InvoiceService } from '../../services/InvoiceService.ts';
 import { SalesTeamService } from '../../services/SalesTeamService.ts';
+import { ExposureService } from '../../services/ExposureService.ts';
+import { QuoteService } from '../../services/QuoteService.ts';
+import { ApiError } from '../../services/apiError.ts';
 import { type Order, type OrderStatus, formatOrderStatus, getStatusColor } from '../../types/order.ts';
 import type { SalesPerson } from '../../types/salesteam.ts';
 import type { Alert } from '../../types/customer.ts';
-import { Check, Printer, User, DollarSign, Mail, Phone, XCircle, LockOpen, Wallet } from 'lucide';
+import { Check, Printer, User, DollarSign, Mail, Phone, XCircle, LockOpen, Wallet, ShieldAlert } from 'lucide';
 import { formatCents, formatPrice4 } from '../../lib/utils.ts';
 
 
@@ -40,6 +43,8 @@ export class GableOrderDetail extends LitElement {
     /** The customer's alerts that speak at the order desk, read only here. */
     @state() private alerts: Alert[] = [];
     @state() private depositOpen = false;
+    /** The 409 the pre-ship gate answers with: which quote holds the order, in plain words. */
+    @state() private exposureBlock: { quoteId: string; quoteNumber: string | null; dollars: number | null; indexes: string[] } | null = null;
 
     connectedCallback() {
         super.connectedCallback();
@@ -57,6 +62,7 @@ export class GableOrderDetail extends LitElement {
         try {
             const data = await OrderService.getOrder(orderId);
             this.order = data;
+            this.exposureBlock = null;
             void this.loadAlerts(data.customer_id);
             this.loadInvoiceNumbers(data.id, data.invoice_ids);
             if (data.salesperson_id) {
@@ -101,7 +107,9 @@ export class GableOrderDetail extends LitElement {
     /**
      * The confirm is the transition (ADR 0005 5.2). An over-the-limit
      * customer lands the order on the credit hold: the answer is the held
-     * order, never an error, so the banner is the tell.
+     * order, never an error, so the banner is the tell. An unresolved price
+     * exposure on the source quote is refused: the blocker panel is the
+     * tell there (QE-07).
      */
     private async handleConfirm() {
         if (!this.order) return;
@@ -110,12 +118,17 @@ export class GableOrderDetail extends LitElement {
         try {
             const updated = await OrderService.confirmOrder(this.order.id, this.order.revision);
             this.order = updated;
+            this.exposureBlock = null;
             if (updated.status === 'on_hold') {
                 ToastService.show('The customer is over their credit limit: the order is on hold', 'error');
             } else {
                 ToastService.show('Order confirmed', 'success');
             }
         } catch (error) {
+            if (this.isExposureRefusal(error)) {
+                await this.showExposureBlock();
+                return;
+            }
             ToastService.show('Failed to confirm order: ' + (error instanceof Error ? error.message : error), 'error');
         } finally {
             this.processing = false;
@@ -128,8 +141,13 @@ export class GableOrderDetail extends LitElement {
         this.processing = true;
         try {
             this.order = await OrderService.releaseHold(this.order.id, this.order.revision);
+            this.exposureBlock = null;
             ToastService.show('Hold released', 'success');
         } catch (error) {
+            if (this.isExposureRefusal(error)) {
+                await this.showExposureBlock();
+                return;
+            }
             ToastService.show('Failed to release hold: ' + (error instanceof Error ? error.message : error), 'error');
         } finally {
             this.processing = false;
@@ -161,14 +179,54 @@ export class GableOrderDetail extends LitElement {
                 pickedUpBy: willCall ? this.pickedUpBy.trim() : undefined,
             });
             this.order = order;
+            this.exposureBlock = null;
             this.fulfilOpen = false;
             this.pickedUpBy = '';
             ToastService.show(invoiceId ? 'Order fulfilled and invoiced' : 'Order fulfilled', 'success');
         } catch (error) {
+            if (this.isExposureRefusal(error)) {
+                await this.showExposureBlock();
+                return;
+            }
             ToastService.show('Failed to fulfil order: ' + (error instanceof Error ? error.message : error), 'error');
         } finally {
             this.processing = false;
         }
+    }
+
+    /** The pre-ship gate's 409 (QE-07): the source quote's exposure blocks the write. */
+    private isExposureRefusal(err: unknown): boolean {
+        return err instanceof ApiError && err.status === 409 && err.hasBlocker('exposure_code');
+    }
+
+    /**
+     * Fills the blocker panel from the order's source quote: its number, the
+     * indexes that moved and the exposure dollars, each read best effort,
+     * because the refusal itself is already in hand and the panel must speak
+     * even when the follow up reads fail.
+     */
+    private async showExposureBlock() {
+        const quoteId = this.order?.quote_id ?? null;
+        if (!quoteId) {
+            this.exposureBlock = { quoteId: '', quoteNumber: null, dollars: null, indexes: [] };
+            return;
+        }
+        let dollars: number | null = null;
+        let indexes: string[] = [];
+        try {
+            const detail = await ExposureService.getQuoteExposure(quoteId);
+            dollars = detail.exposure_dollars;
+            indexes = detail.indexes ?? [];
+        } catch {
+            // the panel speaks without the figures
+        }
+        let quoteNumber: string | null = null;
+        try {
+            quoteNumber = (await QuoteService.get(quoteId)).number ?? null;
+        } catch {
+            // the link works by id alone
+        }
+        this.exposureBlock = { quoteId, quoteNumber, dollars, indexes };
     }
 
     private closeFulfil() {
@@ -271,6 +329,33 @@ export class GableOrderDetail extends LitElement {
         }
     }
 
+    /** The plain words for the pre-ship gate's 409: which quote, and the two ways clear (QE-07). */
+    private renderExposureBlock(order: Order) {
+        const block = this.exposureBlock;
+        if (!block) return nothing;
+        const indexes = block.indexes.length ? ` (${block.indexes.join(', ')})` : '';
+        const dollars = block.dollars != null ? `$${block.dollars.toFixed(2)} of ` : '';
+        return html`
+            <div class="rounded-lg border border-rose-500/30 bg-rose-500/10 p-4" data-testid="exposure-blocked" role="alert">
+                <div class="flex items-start gap-3">
+                    ${icon(ShieldAlert, 20, 'w-5 h-5 text-rose-400 shrink-0 mt-0.5')}
+                    <div class="text-sm">
+                        <p class="font-semibold text-white">The quoted price is no longer safe to ship on.</p>
+                        <p class="mt-1 text-zinc-300">
+                            The market index${indexes} moved after
+                            ${block.quoteId ? html`quote <a class="text-blueprint-blue underline" href="/quotes/${block.quoteId}">${block.quoteNumber ?? 'the source quote'}</a> was sent` : 'the quote was sent'},
+                            leaving ${dollars}price exposure on this order.
+                        </p>
+                        <p class="mt-1 text-zinc-300">
+                            The customer must acknowledge the price change on the quote, or an owner must override the gate,
+                            before this order can go out. Then ${order.status === 'draft' ? 'confirm' : 'fulfil'} it again.
+                        </p>
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+
     render() {
         if (this.loading) {
             return html`<div class="text-white">Loading order details...</div>`;
@@ -367,6 +452,8 @@ export class GableOrderDetail extends LitElement {
                         ` : nothing}
                     </div>
                 </div>
+
+                ${this.renderExposureBlock(order)}
 
                 ${this.fulfilOpen && order.delivery_type === 'pickup' && (order.status === 'confirmed' || order.status === 'backordered') ? html`
                     <div class="rounded-lg border border-white/10 bg-black/30 p-4 flex items-start gap-3" data-testid="fulfil-pickup">

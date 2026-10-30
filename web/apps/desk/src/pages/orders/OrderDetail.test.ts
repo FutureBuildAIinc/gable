@@ -365,6 +365,122 @@ describe('gable-order-detail - the order contract', () => {
     expect(el2.querySelector('input[aria-label="Picked up by"]')).toBeNull()
   })
 
+  it('renders the exposure blockers from a 409, in plain words, not a generic error', async () => {
+    const quoteId = '00000000-0000-4000-8000-0000000000q1'
+    const draft = order({ status: 'draft' as const, revision: 1, quote_id: quoteId })
+    const exposure409 = () => jsonResponse({
+      error: {
+        code: 'conflict',
+        message: "the order's source quote has unresolved index exposure",
+        details: [
+          { code: 'exposure_code', message: 'UNRESOLVED_EXPOSURE' },
+          { code: 'exposure_exposure', message: `map[exposure:map[exposure_dollars:120.5 quote_id:${quoteId} state:ACK_REQUIRED]]` },
+        ],
+      },
+      meta: { request_id: 'req-test' },
+    }, 409)
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (String(url).endsWith('/transitions') && init?.method === 'POST') return exposure409()
+      if (String(url).includes(`/quotes/${quoteId}/exposure`)) {
+        return jsonResponse({ quote_id: quoteId, exposure_state: 'ACK_REQUIRED', exposure_dollars: 120.5, indexes: ['RL_SPF_2X4'], required_action: 'ACKNOWLEDGE', events: [] })
+      }
+      if (String(url).endsWith(`/quotes/${quoteId}`)) {
+        return jsonResponse({ id: quoteId, number: 'Q-000123', status: 'sent', revision: 2 })
+      }
+      return jsonResponse(draft)
+    }))
+    const toasts: string[] = []
+    const onToast = (e: Event) => toasts.push((e as CustomEvent).detail.message)
+    ToastService.addEventListener('toast', onToast)
+    try {
+      el = await mountAsync<GableOrderDetail>('gable-order-detail', { routeId: draft.id })
+      const confirm = Array.from(el.querySelectorAll('button')).find((b) => b.textContent?.includes('Confirm Order')) as HTMLButtonElement
+      confirm.click()
+      await new Promise((r) => setTimeout(r, 0))
+      const dialogOk = document.body.querySelector('[data-dialog-confirm]') as HTMLButtonElement
+      dialogOk.click()
+      await new Promise((r) => setTimeout(r, 20))
+      const panel = el.querySelector('[data-testid="exposure-blocked"]')
+      expect(panel, 'the blocker panel renders').not.toBeNull()
+      const body = panel!.textContent ?? ''
+      expect(body).toContain('Q-000123')
+      expect(body).toContain('RL_SPF_2X4')
+      expect(body).toContain('$120.50')
+      expect(body).toContain('must acknowledge the price change')
+      expect(body).toContain('owner must override')
+      expect(el.querySelector(`a[href="/quotes/${quoteId}"]`)).not.toBeNull()
+      expect(toasts, 'the exposure refusal is not a generic error toast').toEqual([])
+      expect(text(el)).not.toContain('Failed to confirm order')
+    } finally {
+      ToastService.removeEventListener('toast', onToast)
+    }
+  })
+
+  it('renders the same blockers from a fulfilment 409', async () => {
+    const quoteId = '00000000-0000-4000-8000-0000000000q2'
+    const confirmed = order({ quote_id: quoteId, delivery_type: 'delivery' as const })
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (String(url).endsWith('/fulfillments') && init?.method === 'POST') {
+        return jsonResponse({
+          error: { code: 'conflict', message: "the order's source quote has unresolved index exposure", details: [{ code: 'exposure_code', message: 'UNRESOLVED_EXPOSURE' }] },
+          meta: { request_id: 'req-test' },
+        }, 409)
+      }
+      if (String(url).includes(`/quotes/${quoteId}/exposure`)) {
+        return jsonResponse({ quote_id: quoteId, exposure_state: 'ACK_REQUIRED', exposure_dollars: 88.25, indexes: ['RL_SPF_2X4'], required_action: 'ACKNOWLEDGE', events: [] })
+      }
+      if (String(url).endsWith(`/quotes/${quoteId}`)) {
+        return jsonResponse({ id: quoteId, number: 'Q-000124', status: 'sent', revision: 2 })
+      }
+      return jsonResponse(confirmed)
+    }))
+    el = await mountAsync<GableOrderDetail>('gable-order-detail', { routeId: confirmed.id })
+    fulfilButton(el).click()
+    await new Promise((r) => setTimeout(r, 20))
+    const panel = el.querySelector('[data-testid="exposure-blocked"]')
+    expect(panel, 'the blocker panel renders').not.toBeNull()
+    expect(panel!.textContent).toContain('Q-000124')
+    expect(panel!.textContent).toContain('$88.25')
+    expect(panel!.textContent).toContain('fulfil it again')
+  })
+
+  it('renders the same blockers from a hold release 409', async () => {
+    const quoteId = '00000000-0000-4000-8000-0000000000q3'
+    const held = order({ status: 'on_hold' as const, quote_id: quoteId })
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (String(url).endsWith('/transitions') && init?.method === 'POST') {
+        return jsonResponse({
+          error: { code: 'conflict', message: "the order's source quote has unresolved index exposure", details: [{ code: 'exposure_code', message: 'UNRESOLVED_EXPOSURE' }] },
+          meta: { request_id: 'req-test' },
+        }, 409)
+      }
+      if (String(url).includes(`/quotes/${quoteId}/exposure`)) {
+        return jsonResponse({ quote_id: quoteId, exposure_state: 'ACK_REQUIRED', exposure_dollars: 61.75, indexes: ['RL_SPF_2X4'], required_action: 'ACKNOWLEDGE', events: [] })
+      }
+      if (String(url).endsWith(`/quotes/${quoteId}`)) {
+        return jsonResponse({ id: quoteId, number: 'Q-000125', status: 'sent', revision: 2 })
+      }
+      return jsonResponse(held)
+    }))
+    const toasts: string[] = []
+    const onToast = (e: Event) => toasts.push((e as CustomEvent).detail.message)
+    ToastService.addEventListener('toast', onToast)
+    try {
+      el = await mountAsync<GableOrderDetail>('gable-order-detail', { routeId: held.id })
+      const release = Array.from(el.querySelectorAll('button')).find((b) => b.textContent?.includes('Release Hold')) as HTMLButtonElement
+      release.click()
+      await new Promise((r) => setTimeout(r, 20))
+      const panel = el.querySelector('[data-testid="exposure-blocked"]')
+      expect(panel, 'the blocker panel renders').not.toBeNull()
+      expect(panel!.textContent).toContain('Q-000125')
+      expect(panel!.textContent).toContain('$61.75')
+      expect(toasts, 'the exposure refusal is not a generic error toast').toEqual([])
+      expect(text(el)).not.toContain('Failed to release hold')
+    } finally {
+      ToastService.removeEventListener('toast', onToast)
+    }
+  })
+
   it('keeps every header button label on one line', async () => {
     el = await mountAsync<GableOrderDetail>('gable-order-detail', { routeId: order().id })
     const header = el.querySelector('h1')!.closest('div.border-b')!
