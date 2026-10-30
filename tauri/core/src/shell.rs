@@ -23,12 +23,15 @@ use crate::tokens::{TokenSet, TokenStore};
 
 /// The permissions granted by the work shell's runtime capability to the
 /// configured Gable URL and `/pos` on the `main` window (ADR 0011 section 5.2):
-/// the two token commands and the four offline counter commands, and nothing
-/// else. No page enrols the register, supplies the snapshot or writes the
-/// sync outcomes: the core takes each from the server itself (O2).
-pub const WORK_REMOTE_PERMISSIONS: [&str; 6] = [
+/// the two token commands, the two sign in commands that write and rotate the
+/// keychain token, and the four offline counter commands, and nothing else.
+/// No page enrols the register, supplies the snapshot or writes the sync
+/// outcomes: the core takes each from the server itself (O2).
+pub const WORK_REMOTE_PERMISSIONS: [&str; 8] = [
     "allow-core-token",
     "allow-clear-tokens",
+    "allow-begin-sign-in",
+    "allow-refresh-tokens",
     "allow-offline-enrolment-status",
     "allow-load-offline-snapshot",
     "allow-sign-and-queue-offline-sale",

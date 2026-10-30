@@ -28,6 +28,7 @@ use gable_shell_core::fence::{BadOrigin, OriginFence};
 use gable_shell_core::offline::OfflineCounter;
 use gable_shell_core::profiles;
 use gable_shell_core::shell::{self, TokenState};
+use gable_shell_core::signin::UreqTransport;
 use gable_shell_core::tokens::TokenStore;
 use tauri::{Manager, Url, WebviewUrl, WebviewWindowBuilder};
 
@@ -191,7 +192,10 @@ fn token_state(
     override_url: Option<&Url>,
 ) -> Result<TokenState, BadOrigin> {
     let state = TokenState::build(TokenStore::new(custody), profile, override_url)?;
-    Ok(state)
+    Ok(match override_url {
+        Some(url) => state.with_server(url, Arc::new(UreqTransport::new())),
+        None => state,
+    })
 }
 
 pub fn run() {
