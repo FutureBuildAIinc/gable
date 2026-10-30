@@ -40,17 +40,34 @@ func (h *Handler) WithBranchGuard(g BranchGuard) *Handler {
 // NewHandler builds the handler.
 func NewHandler(service *Service) *Handler { return &Handler{service: service} }
 
-// RegisterRoutes mounts the routes. roleGuard wraps the settings routes
-// (admin or owner); previewGuard wraps the preview with the counter's own
-// roles and the branch middleware, the same composition the pos routes take.
-func (h *Handler) RegisterRoutes(mux *http.ServeMux, roleGuard, previewGuard func(http.Handler) http.Handler) {
+// RegisterRoutes mounts the routes. roleGuard wraps the settings routes and
+// the Form 8300 export (admin or owner: the export carries the payer's
+// taxpayer identification number, so it is the dealer's own and admin's
+// only); managerGuard wraps the manager's worklist, the filing and the
+// customer statement (admin, owner or finance); previewGuard wraps the
+// preview with the counter's own roles and the branch middleware, the same
+// composition the pos routes take.
+func (h *Handler) RegisterRoutes(mux *http.ServeMux, roleGuard, managerGuard, previewGuard func(http.Handler) http.Handler) {
 	mux.Handle("POST /api/v1/pos/large-cash/preview", previewGuard(http.HandlerFunc(h.Preview)))
 	if roleGuard != nil {
 		mux.Handle("GET /api/v1/admin/large-cash/settings", roleGuard(http.HandlerFunc(h.GetSettings)))
 		mux.Handle("PUT /api/v1/admin/large-cash/settings", roleGuard(http.HandlerFunc(h.PutSettings)))
+		mux.Handle("GET /api/v1/large-cash/events/{id}/form-8300", roleGuard(http.HandlerFunc(h.Form8300)))
 	} else {
 		mux.HandleFunc("GET /api/v1/admin/large-cash/settings", h.GetSettings)
 		mux.HandleFunc("PUT /api/v1/admin/large-cash/settings", h.PutSettings)
+		mux.HandleFunc("GET /api/v1/large-cash/events/{id}/form-8300", h.Form8300)
+	}
+	if managerGuard != nil {
+		mux.Handle("GET /api/v1/large-cash/worklist", managerGuard(http.HandlerFunc(h.Worklist)))
+		mux.Handle("POST /api/v1/large-cash/events/{id}/filing", managerGuard(http.HandlerFunc(h.RecordFiling)))
+		mux.Handle("GET /api/v1/large-cash/statements", managerGuard(http.HandlerFunc(h.Statements)))
+		mux.Handle("POST /api/v1/large-cash/events/{id}/statement", managerGuard(http.HandlerFunc(h.IssueStatement)))
+	} else {
+		mux.HandleFunc("GET /api/v1/large-cash/worklist", h.Worklist)
+		mux.HandleFunc("POST /api/v1/large-cash/events/{id}/filing", h.RecordFiling)
+		mux.HandleFunc("GET /api/v1/large-cash/statements", h.Statements)
+		mux.HandleFunc("POST /api/v1/large-cash/events/{id}/statement", h.IssueStatement)
 	}
 }
 

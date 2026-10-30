@@ -27,6 +27,7 @@ import (
 	"github.com/gablelbm/gable/internal/inventory"
 	"github.com/gablelbm/gable/internal/invoice"
 	"github.com/gablelbm/gable/internal/order"
+	"github.com/gablelbm/gable/internal/testutil"
 	"github.com/gablelbm/gable/pkg/audit"
 	"github.com/gablelbm/gable/pkg/database"
 	"github.com/gablelbm/gable/pkg/middleware"
@@ -56,19 +57,19 @@ const defaultBranch = `(SELECT value::uuid FROM system_settings WHERE key = 'def
 func newFixture(t *testing.T, db *database.DB, opts ...func(*fixture)) *fixture {
 	t.Helper()
 	t.Setenv("AUTH_MODE", "dev")
-	ctx := context.Background()
 	f := &fixture{t: t, db: db, customerID: uuid.New(), productID: uuid.New(), sku: "INV-" + uuid.NewString()[:8]}
-	if err := db.Pool.QueryRow(ctx, `SELECT `+defaultBranch).Scan(&f.branchID); err != nil {
-		t.Fatalf("default branch: %v", err)
-	}
-	mustExec(t, db, `INSERT INTO customers (id, name, account_number, primary_branch_id) VALUES ($1, 'Wire Invoice Co', $2, `+defaultBranch+`)`,
-		f.customerID, "WINV-"+uuid.NewString()[:8])
+	// The branch the fixture owns: a locations row of its own carrying its
+	// own tax rate (a pickup order's tax is the branch rate, 8.875 percent).
+	// No other package's fixture writes that row, so no other fixture can
+	// move the rate an order here resolves against.
+	f.branchID = testutil.OwnBranch(t, db, "0.088750")
+	mustExec(t, db, `INSERT INTO customers (id, name, account_number, primary_branch_id) VALUES ($1, 'Wire Invoice Co', $2, $3)`,
+		f.customerID, "WINV-"+uuid.NewString()[:8], f.branchID)
 	mustExec(t, db, `INSERT INTO products (id, sku, description, uom_primary, base_price, average_unit_cost) VALUES ($1, $2, '2x4x8 SPF', 'PCS', 5.5, 3.25)`,
 		f.productID, f.sku)
-	mustExec(t, db, `UPDATE locations SET default_tax_rate = 0.088750 WHERE id = `+defaultBranch)
 	f.yardID = uuid.New()
-	mustExec(t, db, `INSERT INTO locations (id, type, code, parent_id, branch_id) VALUES ($1, 'YARD', $2, `+defaultBranch+`, `+defaultBranch+`)`,
-		f.yardID, "IV-"+f.yardID.String()[:8])
+	mustExec(t, db, `INSERT INTO locations (id, type, code, parent_id, branch_id) VALUES ($1, 'YARD', $2, $3, $3)`,
+		f.yardID, "IV-"+f.yardID.String()[:8], f.branchID)
 	mustExec(t, db, `INSERT INTO inventory (product_id, location_id, location, quantity, allocated) VALUES ($1, $2, 'Y', 100, 0)`, f.productID, f.yardID)
 
 	logger := slog.Default()
@@ -152,7 +153,7 @@ func (f *fixture) liveApplication(invoiceID string, cents int64) {
 	f.t.Helper()
 	pay := uuid.New()
 	mustExec(f.t, f.db, `INSERT INTO payments (id, customer_id, branch_id, currency, method, amount, amount_unapplied, received_on)
-		VALUES ($1, $2, `+defaultBranch+`, 'USD', 'CASH', $3::bigint::numeric / 100, 0, CURRENT_DATE)`, pay, f.customerID, cents)
+		VALUES ($1, $2, $3, 'USD', 'CASH', $4::bigint::numeric / 100, 0, CURRENT_DATE)`, pay, f.customerID, f.branchID, cents)
 	mustExec(f.t, f.db, `INSERT INTO ar_applications (customer_id, currency, kind, payment_id, invoice_id, amount, applied_on, act_id)
 		VALUES ($1, 'USD', 'PAYMENT', $2, $3, $4::bigint::numeric / 100, CURRENT_DATE, gen_random_uuid())`, f.customerID, pay, invoiceID, cents)
 }
@@ -279,7 +280,7 @@ func (f *fixture) confirmedOrder(lines ...map[string]any) (string, int64) {
 	if len(lines) == 0 {
 		lines = []map[string]any{f.pickupLine("10")}
 	}
-	r := f.do("POST", "/api/v1/orders", map[string]any{"customer_id": f.customerID.String(), "delivery_type": "pickup", "lines": lines})
+	r := f.do("POST", "/api/v1/orders", map[string]any{"customer_id": f.customerID.String(), "branch_id": f.branchID.String(), "delivery_type": "pickup", "lines": lines})
 	if r.status != http.StatusCreated {
 		f.t.Fatalf("create order = %d: %s", r.status, r.raw)
 	}

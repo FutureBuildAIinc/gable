@@ -156,7 +156,9 @@ type Order struct {
 	// unapplied both.
 	DepositTotalCents httpx.Cents `json:"deposit_total_cents"`
 	// BalanceDueAfterDepositsCents is the order's total less everything
-	// taken on it: what the customer still owes on the order.
+	// taken on it and less what its invoices were already paid otherwise
+	// (account.OrderInvoicePaidCentsSQL): what the customer still owes on the
+	// order, and the most a deposit may take.
 	BalanceDueAfterDepositsCents httpx.Cents `json:"balance_due_after_deposits_cents"`
 }
 

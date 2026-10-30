@@ -52,10 +52,31 @@ impl CustodyError {
 
 const SERVICE_PREFIX: &str = "ai.futurebuild.gable.";
 const ACCOUNT_PREFIX: &str = "core-token:";
+const OFFLINE_ACCOUNT_PREFIX: &str = "offline-counter:";
 
-/// Where one token lives. Built only by `token`, from the profile's
-/// identifier and the slot, so no caller invents an address and the webview
-/// never supplies one.
+/// Which offline counter secret of a profile an entry keeps (ADR 0011
+/// section 5.1): the SQLite store's AEAD key, the enrolled register's Ed25519
+/// signing seed and Gable URL, and the sequence/chain high-water mark.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum OfflineSlot {
+    AeadKey,
+    Enrolment,
+    Mark,
+}
+
+impl OfflineSlot {
+    pub fn name(self) -> &'static str {
+        match self {
+            OfflineSlot::AeadKey => "aead-key",
+            OfflineSlot::Enrolment => "enrolment",
+            OfflineSlot::Mark => "mark",
+        }
+    }
+}
+
+/// Where one secret lives. Built only by `token` or `offline`, from the
+/// profile's identifier and the slot, so no caller invents an address and the
+/// webview never supplies one.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Address {
     service: String,
@@ -67,11 +88,7 @@ pub struct Address {
 pub struct BadAddress;
 
 impl Address {
-    /// `profile_identifier` is the profile model's identifier
-    /// (`ai.futurebuild.gable.work`); the remainder after the service prefix
-    /// must be non empty lowercase letters and digits, so an entry can never
-    /// be filed under a name another install would miss.
-    pub fn token(profile_identifier: &str, slot: TokenSlot) -> Result<Self, BadAddress> {
+    fn check_profile(profile_identifier: &str) -> Result<(), BadAddress> {
         let profile_ok = profile_identifier
             .strip_prefix(SERVICE_PREFIX)
             .is_some_and(|p| {
@@ -82,9 +99,28 @@ impl Address {
         if !profile_ok {
             return Err(BadAddress);
         }
+        Ok(())
+    }
+
+    /// `profile_identifier` is the profile model's identifier
+    /// (`ai.futurebuild.gable.work`); the remainder after the service prefix
+    /// must be non empty lowercase letters and digits, so an entry can never
+    /// be filed under a name another install would miss.
+    pub fn token(profile_identifier: &str, slot: TokenSlot) -> Result<Self, BadAddress> {
+        Self::check_profile(profile_identifier)?;
         Ok(Self {
             service: profile_identifier.to_string(),
             account: format!("{ACCOUNT_PREFIX}{}", slot.name()),
+        })
+    }
+
+    /// Keychain address for one of the offline counter's secrets under the
+    /// profile's service (`offline-counter:<slot>`).
+    pub fn offline(profile_identifier: &str, slot: OfflineSlot) -> Result<Self, BadAddress> {
+        Self::check_profile(profile_identifier)?;
+        Ok(Self {
+            service: profile_identifier.to_string(),
+            account: format!("{OFFLINE_ACCOUNT_PREFIX}{}", slot.name()),
         })
     }
 

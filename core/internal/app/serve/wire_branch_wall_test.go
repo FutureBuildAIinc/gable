@@ -303,7 +303,9 @@ func newWallFixture(t *testing.T, db *database.DB, multiBranch bool) *wallFixtur
 	// every desk role reads it, the saved colours are customer rows and are
 	// walled to the customer they name, and the counter may save one.
 	wall.tint(mux, tint.NewService(tint.NewRepository(db)).WithTxRunner(db))
-	wall.largeCash(mux, largecash.NewHandler(largecash.NewService(db, nil, "")), "admin", "owner", "cashier")
+	wall.largeCash(mux, largecash.NewHandler(largecash.NewService(db, nil, "")),
+		[]string{"admin", "owner", "finance"},
+		[]string{"admin", "owner", "cashier"})
 	f.srv = httptest.NewServer(asRole(mux))
 	t.Cleanup(f.srv.Close)
 	return f
@@ -1806,6 +1808,19 @@ func TestBranchWall_FormsAndDeliveries(t *testing.T) {
 		{"finance emails the statement of a customer branch A shares", "POST", "/api/v1/ar/customers/" + shared.String() + "/statement/email", "finance", "u-a", A, http.StatusAccepted},
 		{"finance does not find a customer only branch B holds", "GET", "/api/v1/documents/print/statement/" + onlyB.String(), "finance", "u-a", A, http.StatusNotFound},
 		{"warehouse may not read deliveries", "GET", "/api/v1/email-deliveries", "warehouse", "u-a", A, http.StatusForbidden},
+		{"warehouse may not follow a send either", "GET", "/api/v1/email-deliveries?document_id=" + quoteA.String(), "warehouse", "u-a", A, http.StatusForbidden},
+		{"cashier follows the send of an invoice", "GET", "/api/v1/email-deliveries?document_type=invoice&document_id=" + quoteA.String(), "cashier", "u-a", A, ok},
+		{"cashier may not follow a send that names no document type", "GET", "/api/v1/email-deliveries?document_id=" + quoteA.String(), "cashier", "u-a", A, http.StatusForbidden},
+		{"cashier may not follow a quote's send", "GET", "/api/v1/email-deliveries?document_type=quote&document_id=" + quoteA.String(), "cashier", "u-a", A, http.StatusForbidden},
+		{"cashier may not follow a statement's send", "GET", "/api/v1/email-deliveries?document_type=statement&document_id=" + f.docCust.String(), "cashier", "u-a", A, http.StatusForbidden},
+		{"sales follows an invoice's send", "GET", "/api/v1/email-deliveries?document_type=invoice&document_id=" + quoteA.String(), "sales", "u-a", A, ok},
+		{"sales follows a quote's send", "GET", "/api/v1/email-deliveries?document_type=quote&document_id=" + quoteA.String(), "sales", "u-a", A, ok},
+		{"sales follows a statement's send", "GET", "/api/v1/email-deliveries?document_type=statement&document_id=" + f.docCust.String(), "sales", "u-a", A, ok},
+		{"sales may not follow a send that names no document type", "GET", "/api/v1/email-deliveries?document_id=" + quoteA.String(), "sales", "u-a", A, http.StatusForbidden},
+		{"sales may not follow a purchase order's send", "GET", "/api/v1/email-deliveries?document_type=purchase_order&document_id=" + f.poA.String(), "sales", "u-a", A, http.StatusForbidden},
+		{"finance follows a purchase order's send", "GET", "/api/v1/email-deliveries?document_type=purchase_order&document_id=" + f.poA.String(), "finance", "u-a", A, ok},
+		{"cashier may not read the whole delivery list", "GET", "/api/v1/email-deliveries", "cashier", "u-a", A, http.StatusForbidden},
+		{"sales may not read the whole delivery list", "GET", "/api/v1/email-deliveries?status=failed", "sales", "u-a", A, http.StatusForbidden},
 	} {
 		if got := f.call(t, c.method, c.path, "", c.role, c.sub, c.header); got != c.want {
 			t.Errorf("%s: %d, want %d", c.name, got, c.want)
@@ -1868,7 +1883,7 @@ func TestBranchWall_FormsAndDeliveries(t *testing.T) {
 	}
 	// The sends the routes made are recorded with the log sender's answer.
 	var n int
-	if err := db.Pool.QueryRow(ctx, `SELECT count(*) FROM email_deliveries WHERE document_id = $1 AND document_type = 'quote' AND status = 'sent' AND sender_answer LIKE '%not sent%'`, quoteA).Scan(&n); err != nil || n != 1 {
+	if err := db.Pool.QueryRow(ctx, `SELECT count(*) FROM email_deliveries WHERE document_id = $1 AND document_type = 'quote' AND status = 'logged' AND sender_answer LIKE '%not sent%'`, quoteA).Scan(&n); err != nil || n != 1 {
 		t.Errorf("the emailed quote left %d delivery rows (%v), want 1", n, err)
 	}
 	if err := db.Pool.QueryRow(ctx, `SELECT count(*) FROM email_deliveries WHERE document_id = $1 AND document_type = 'statement'`, f.docCust).Scan(&n); err != nil || n != 1 {
@@ -1947,6 +1962,37 @@ func TestReviewManagerRoutesUnderServeGuard(t *testing.T) {
 		{"admin refused lost items list", "GET", "/api/v1/pos/terminal-lost-items", "", "admin", "boss", "", http.StatusForbidden},
 		{"admin refused sweep", "POST", "/api/v1/pos/terminal-intents/sweep", `{}`, "admin", "boss", "", http.StatusForbidden},
 		{"admin refused resolve", "POST", resolvePath, resolveBody, "admin", "boss", "", http.StatusForbidden},
+	} {
+		if got := f.call(t, c.method, c.path, c.body, c.role, c.sub, c.header); got != c.want {
+			t.Errorf("%s: got %d, want %d", c.name, got, c.want)
+		}
+	}
+}
+
+// TestOfflinePolicyRoutesUnderServeGuard: the offline policy write is an admin
+// act (ADR 0011 section 4), so admin and owner write it and finance is refused;
+// admin, owner and finance read it; a cashier does neither.
+func TestOfflinePolicyRoutesUnderServeGuard(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	db := testutil.RequireDB(t)
+	f := newWallFixture(t, db, true)
+	A := f.branchA.String()
+	getPath := "/api/v1/pos/offline/policy?branch_id=" + A
+	putPath := "/api/v1/pos/offline/policy"
+	putBody := `{"branch_id":"` + A + `","clear":true}`
+
+	for _, c := range []struct {
+		name, method, path, body, role, sub, header string
+		want                                        int
+	}{
+		{"admin writes the policy", "PUT", putPath, putBody, "admin", "boss", "", http.StatusOK},
+		{"owner writes the policy", "PUT", putPath, putBody, "owner", "boss", "", http.StatusOK},
+		{"finance refused the write", "PUT", putPath, putBody, "finance", "u-a", A, http.StatusForbidden},
+		{"cashier refused the write", "PUT", putPath, putBody, "cashier", "u-a", A, http.StatusForbidden},
+		{"admin reads the policy", "GET", getPath, "", "admin", "boss", "", http.StatusOK},
+		{"owner reads the policy", "GET", getPath, "", "owner", "boss", "", http.StatusOK},
+		{"finance reads the policy", "GET", getPath, "", "finance", "u-a", A, http.StatusOK},
+		{"cashier refused the read", "GET", getPath, "", "cashier", "u-a", A, http.StatusForbidden},
 	} {
 		if got := f.call(t, c.method, c.path, c.body, c.role, c.sub, c.header); got != c.want {
 			t.Errorf("%s: got %d, want %d", c.name, got, c.want)
