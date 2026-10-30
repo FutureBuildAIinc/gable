@@ -140,7 +140,7 @@ describe('activeMenuPath', () => {
 describe('visibleMenu', () => {
   it('hides the admin only Tech Admin items from a cashier', () => {
     const paths = visibleMenu(menuForKey('techadmin'), ['cashier']).map((m) => m.path)
-    expect(paths).toEqual(['/admin/market-indices'])
+    expect(paths).toEqual([])
   })
 
   it('shows finance the offline selling page but not the admin only items', () => {

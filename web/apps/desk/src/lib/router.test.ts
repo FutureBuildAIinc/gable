@@ -200,9 +200,11 @@ describe('router: role gate', () => {
     expect(refusalWords(['admin', 'owner', 'finance'])).toBe('This page is for admin, owner and finance')
   })
 
-  it('gates the counter rules page to admin and owner', async () => {
+  it('gates the counter rules and market indices pages to admin and owner', async () => {
     const { routes } = await import('../routes')
-    expect(routes.find((r) => r.path === '/admin/counter-rules')?.roles).toEqual(ADMIN_OWNER)
+    for (const path of ['/admin/counter-rules', '/admin/market-indices']) {
+      expect(routes.find((r) => r.path === path)?.roles).toEqual(ADMIN_OWNER)
+    }
   })
 
   it('lets finance read the offline selling page and refuses a cashier', async () => {
