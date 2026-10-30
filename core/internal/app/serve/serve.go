@@ -818,6 +818,9 @@ func Run() {
 	// and the payment refund route holds the same credit to the counter's
 	// terminal rail: the online gateway is never the way back for it
 	paymentSvc.WithTenderCreditGuard(posSvc)
+	// and a check deposit riding a till session meets the counter's check
+	// limit and ID rule, as a sale's check tender does
+	paymentSvc.WithTillCheckGuard(posSvc)
 	// The scale seam (CP-19, ruling D8): the SMA driver behind its interface,
 	// and on a demo stack the simulator with a device row per branch, so the
 	// ticket names the device that produced the reading. An unset value

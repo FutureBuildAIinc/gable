@@ -115,6 +115,7 @@ export class GablePosOrderDeposit extends LitElement {
             </div>
             <gable-deposit-modal
               .isOpen=${true}
+              .counter=${true}
               .orderId=${this._picked.id}
               .customerId=${this.customerId}
               .branchId=${this._picked.branch_id}
