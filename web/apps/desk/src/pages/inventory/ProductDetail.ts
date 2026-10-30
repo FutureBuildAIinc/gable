@@ -13,7 +13,7 @@ import { PIMService } from '../../services/PIMService.ts';
 import { onBranchChanged } from '../../lib/branch-listener.ts';
 import { apiErrorMessage } from '../../services/apiError.ts';
 import { formatPrice4 } from '../../lib/utils.ts';
-import { ArrowLeft, Loader2, Package, FileText, Image, Megaphone, Search, Warehouse, Box } from 'lucide';
+import { ArrowLeft, Loader2, Package, FileText, Image, Megaphone, Search, Warehouse, Box, Boxes } from 'lucide';
 import './tabs/ProductOverviewTab.ts';
 import './tabs/ProductContentTab.ts';
 import './tabs/ProductMediaTab.ts';
@@ -21,9 +21,10 @@ import './tabs/ProductCollateralTab.ts';
 import './tabs/ProductSEOTab.ts';
 import './tabs/ProductStockTab.ts';
 import './tabs/ProductGeometryTab.ts';
+import './tabs/ProductKitTab.ts';
 import '../../components/inventory/ProductMarginModal.ts';
 
-type TabId = 'overview' | 'content' | 'media' | 'collateral' | 'seo' | 'stock' | 'geometry';
+type TabId = 'overview' | 'content' | 'media' | 'collateral' | 'seo' | 'stock' | 'geometry' | 'kit';
 
 interface TabDef {
     id: TabId;
@@ -39,6 +40,7 @@ const TABS: TabDef[] = [
     { id: 'seo', label: 'SEO', iconData: Search },
     { id: 'stock', label: 'Stock & Locations', iconData: Warehouse },
     { id: 'geometry', label: 'Geometry', iconData: Box },
+    { id: 'kit', label: 'Kit Components', iconData: Boxes },
 ];
 
 @customElement('gable-product-detail')
@@ -248,6 +250,12 @@ export class GableProductDetail extends LitElement {
                             .productId=${product.id}
                             @dimensions-update=${() => { void this.loadProduct(); }}
                         ></gable-product-geometry-tab>
+                    ` : nothing}
+                    ${this.activeTab === 'kit' ? html`
+                        <gable-product-kit-tab
+                            .productId=${product.id}
+                            @kit-update=${() => { void this.loadProduct(); }}
+                        ></gable-product-kit-tab>
                     ` : nothing}
                 </div>
 

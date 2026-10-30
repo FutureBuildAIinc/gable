@@ -280,3 +280,76 @@ describe('QuoteDetail original blob lifecycle', () => {
   })
 })
 
+
+describe('QuoteDetail a kit on the quote', () => {
+  /** A quote carrying one kit line and the part lines the server wrote under it. */
+  function kitQuote() {
+    const kit = {
+      id: '00000000-0000-4000-8000-0000000000k1',
+      quote_id: 'q1',
+      product_id: '00000000-0000-4000-8000-0000000000p1',
+      stock_uom: 'EA',
+      stock_quantity: '2',
+      tally: null,
+      sku: 'KIT-FRAME-8',
+      description: '8 ft Wall Section Framing Kit',
+      customer_note: null,
+      quantity: '2',
+      uom: 'EA',
+      price_uom: 'EA',
+      uom_qty: '1',
+      price_uom_qty: '1',
+      unit_price_ten_thousandths: 890000,
+      line_total_cents: 17800,
+      unit_cost_ten_thousandths: 0,
+      line_type: 'kit',
+      parent_line_id: null,
+      created_at: '2026-01-01T00:00:00Z',
+    }
+    const part = {
+      ...kit,
+      id: '00000000-0000-4000-8000-0000000000c1',
+      product_id: '00000000-0000-4000-8000-0000000000p2',
+      stock_uom: 'PCS',
+      stock_quantity: '24',
+      sku: 'LUM-2492-STUD',
+      description: '2x4x92-5/8 SPF Stud',
+      quantity: '24',
+      uom: 'PCS',
+      price_uom: 'PCS',
+      unit_price_ten_thousandths: 0,
+      line_total_cents: 0,
+      unit_cost_ten_thousandths: 32000,
+      line_type: 'component',
+      parent_line_id: kit.id,
+    }
+    return {
+      ...QUOTE,
+      lines: [kit, part],
+      total_cents: 17800,
+      freight_cents: 0,
+      margin_total_cents: 5320,
+    }
+  }
+
+  it('marks the kit, shows its parts indented under it, and reads the margin from the parts', async () => {
+    fetchMock.mockImplementation(async (url: string) => {
+      const path = new URL(url, 'http://localhost').pathname
+      if (path === '/api/v1/quotes/q1') return jsonResponse(kitQuote())
+      return jsonResponse({ message: 'none' }, 404)
+    })
+    const el = await mount<GableQuoteDetail>('gable-quote-detail', { routeId: 'q1' } as Partial<GableQuoteDetail>)
+    await flush(); await flush()
+    await update(el, {})
+
+    expect(el.querySelectorAll('[data-testid="quote-kit-mark"]')).toHaveLength(1)
+    const parts = el.querySelectorAll('[data-testid="quote-kit-component"]')
+    expect(parts).toHaveLength(1)
+    expect(text(parts[0])).toContain('LUM-2492-STUD')
+    // The margin on the kit line is the kit's revenue less the parts' cost:
+    // 178.00 less 24 x 3.20 = 76.80, so 101.20 on the line, 56.9% of it.
+    const margin = el.querySelector('[data-testid="quote-kit-margin"]')
+    expect(margin).not.toBeNull()
+    expect(text(margin!)).toBe('56.9%')
+  })
+})

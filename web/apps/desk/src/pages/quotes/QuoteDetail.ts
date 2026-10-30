@@ -7,11 +7,12 @@ import { icon } from '../../lib/icons.ts';
 import { router } from '../../lib/router.ts';
 import { ToastService } from '../../lib/toast-service.ts';
 import { fetchAuthedBlobUrl } from '../../lib/authedPdf.ts';
-import { FileText, Download, ArrowLeft, ShoppingCart, Send, Check, X, ListChecks, Eye, Map, Package, AlertTriangle, ShieldAlert, Truck, TrendingUp } from 'lucide';
+import { FileText, Download, ArrowLeft, ShoppingCart, Send, Check, X, ListChecks, Eye, Map, Package, AlertTriangle, ShieldAlert, Truck, TrendingUp, Boxes } from 'lucide';
 import { QuoteService, QuoteApiError, quoteErrorMessage } from '../../services/QuoteService.ts';
 import type { Quote, QuoteStatus, ParseMapItem } from '../../types/quote.ts';
 import { formatCents, formatPrice4 } from '../../lib/utils.ts';
-import { extensionCents, dollarsToCents, floatDollarsToTenThousandths } from '../../lib/money.ts';
+import { dollarsToCents, floatDollarsToTenThousandths } from '../../lib/money.ts';
+import { groupKitLines, groupCostCents, isKitLine, lineCostCents } from '../../lib/kit-lines.ts';
 import { formatDate, formatDateTime } from '../../lib/dates.ts';
 import '../../components/quotes/exposure-banner.ts';
 
@@ -260,8 +261,10 @@ export class GableQuoteDetail extends LitElement {
         // per the product's own unit (its stocking unit, which is also the
         // sale unit), so the pair that converts the PRICE unit never applies
         // to it. 187.5 PCS stocked and costed per piece, priced per MBF.
-        const lineCostCents = (l: Quote['lines'][number]) =>
-            extensionCents(l.quantity, l.unit_cost_ten_thousandths);
+        // A kit line carries no cost of its own: the dealer carries the cost
+        // of its parts, so the kit's cost is its parts' cost (ADR 0005
+        // section 2.6), the same way the server prices it.
+        const groups = groupKitLines(lines);
         const totalRevenue = lines.reduce((s, l) => s + l.line_total_cents, 0);
         const baseCost = lines.reduce((s, l) => s + lineCostCents(l), 0);
         const baseMargin = totalRevenue - baseCost;
@@ -379,13 +382,24 @@ export class GableQuoteDetail extends LitElement {
                             </tr>
                         </thead>
                         <tbody class="divide-y divide-white/5">
-                            ${lines.map(line => {
-                                const lineCost = lineCostCents(line);
+                            ${groups.map(group => {
+                                const line = group.line;
+                                // A kit line's cost is its parts' cost, so the margin
+                                // on the kit line is the margin the dealer really
+                                // makes on the kit.
+                                const lineCost = groupCostCents(group);
                                 const lineMargin = line.line_total_cents - lineCost;
                                 const lineMarginPct = line.line_total_cents > 0 ? (lineMargin / line.line_total_cents) * 100 : 0;
                                 return html`
-                                    <tr class="hover:bg-white/5 transition-colors">
-                                        <td class="p-4 font-mono text-white">${line.sku}</td>
+                                    <tr class="hover:bg-white/5 transition-colors" data-testid=${isKitLine(line) ? 'quote-kit-line' : 'quote-line'}>
+                                        <td class="p-4 font-mono text-white">
+                                            ${line.sku}
+                                            ${isKitLine(line) ? html`
+                                                <span data-testid="quote-kit-mark" class="ml-2 inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wide bg-gable-green/15 text-gable-green border border-gable-green/25">
+                                                    ${icon(Boxes, 10, 'w-2.5 h-2.5')} Kit
+                                                </span>
+                                            ` : nothing}
+                                        </td>
                                         <td class="p-4 text-zinc-300">${line.description}</td>
                                         <td class="p-4 text-right font-mono text-zinc-300">
                                             ${line.quantity} <span class="text-zinc-600 text-xs">${line.uom}</span>
@@ -394,20 +408,48 @@ export class GableQuoteDetail extends LitElement {
                                         <td class="p-4 text-right font-mono text-zinc-300">${formatPrice4(line.unit_price_ten_thousandths)}</td>
                                         ${hasCostData ? html`
                                             <td class="p-4 text-right font-mono text-zinc-500">
-                                                ${line.unit_cost_ten_thousandths > 0 ? formatPrice4(line.unit_cost_ten_thousandths) : '\u2014'}
+                                                ${isKitLine(line)
+                                                    ? html`<span class="text-zinc-600">${'\u2014'}</span>`
+                                                    : html`${line.unit_cost_ten_thousandths > 0 ? formatPrice4(line.unit_cost_ten_thousandths) : '\u2014'}`}
                                             </td>
                                         ` : nothing}
                                         <td class="p-4 text-right font-mono text-gable-green font-medium">${formatCents(line.line_total_cents)}</td>
                                         ${hasCostData ? html`
                                             <td class="p-4 text-right font-mono">
-                                                ${line.unit_cost_ten_thousandths > 0 ? html`
-                                                    <span class="${lineMarginPct >= 20 ? 'text-gable-green' : lineMarginPct >= 10 ? 'text-amber-400' : 'text-red-400'}">
+                                                ${isKitLine(line) ? html`
+                                                    <span class="${lineMarginPct >= 20 ? 'text-gable-green' : lineMarginPct >= 10 ? 'text-amber-400' : 'text-red-400'}" data-testid="quote-kit-margin">
                                                         ${lineMarginPct.toFixed(1)}%
                                                     </span>
-                                                ` : html`<span class="text-zinc-600">\u2014</span>`}
+                                                ` : html`
+                                                    ${line.unit_cost_ten_thousandths > 0 ? html`
+                                                        <span class="${lineMarginPct >= 20 ? 'text-gable-green' : lineMarginPct >= 10 ? 'text-amber-400' : 'text-red-400'}">
+                                                            ${lineMarginPct.toFixed(1)}%
+                                                        </span>
+                                                    ` : html`<span class="text-zinc-600">${'\u2014'}</span>`}
+                                                `}
                                             </td>
                                         ` : nothing}
                                     </tr>
+                                    ${group.components.map(part => html`
+                                        <tr class="hover:bg-white/5 transition-colors bg-black/20" data-testid="quote-kit-component">
+                                            <td class="p-4 pl-10 font-mono text-zinc-300">
+                                                ${part.sku}
+                                                <span class="ml-2 text-[10px] uppercase tracking-wide text-zinc-600">part</span>
+                                            </td>
+                                            <td class="p-4 pl-10 text-zinc-400">${part.description}</td>
+                                            <td class="p-4 text-right font-mono text-zinc-400">
+                                                ${part.quantity} <span class="text-zinc-600 text-xs">${part.uom}</span>
+                                            </td>
+                                            <td class="p-4 text-right font-mono text-zinc-600">${'\u2014'}</td>
+                                            ${hasCostData ? html`
+                                                <td class="p-4 text-right font-mono text-zinc-500">
+                                                    ${part.unit_cost_ten_thousandths > 0 ? formatPrice4(part.unit_cost_ten_thousandths) : '\u2014'}
+                                                </td>
+                                            ` : nothing}
+                                            <td class="p-4 text-right font-mono text-zinc-600">${'\u2014'}</td>
+                                            ${hasCostData ? html`<td class="p-4 text-right font-mono text-zinc-600">${'\u2014'}</td>` : nothing}
+                                        </tr>
+                                    `)}
                                 `;
                             })}
                         </tbody>

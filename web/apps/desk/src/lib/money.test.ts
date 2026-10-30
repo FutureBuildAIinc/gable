@@ -12,6 +12,7 @@ import {
   centsToInput,
   normalizeQuantity,
   numberToQuantity,
+  multiplyQuantities,
   extensionCents,
   formatQuantity,
   isPositiveQuantity,
@@ -198,5 +199,22 @@ describe('scaleTenThousandths', () => {
   it('is zero for a zero denominator or a non-finite input', () => {
     expect(scaleTenThousandths(100, 1, 0)).toBe(0)
     expect(scaleTenThousandths(Number.NaN, 1, 2)).toBe(0)
+  })
+})
+
+describe('multiplyQuantities', () => {
+  it('multiplies at the shared scale 4 and rounds once, half away from zero', () => {
+    expect(multiplyQuantities('2', '12')).toBe('24')
+    expect(multiplyQuantities('3', '0.5')).toBe('1.5')
+    // 0.3333 x 0.3333 is 0.11108889, which the shared scale 4 rounds to 0.1111
+    // (ADR 0005 section 2.6).
+    expect(multiplyQuantities('0.3333', '0.3333')).toBe('0.1111')
+    // Half away from zero: 0.0001 x 1.5 is 0.00015, which rounds up to 0.0002.
+    expect(multiplyQuantities('0.0001', '1.5')).toBe('0.0002')
+  })
+
+  it('refuses a quantity it cannot read', () => {
+    expect(multiplyQuantities('abc', '2')).toBeNull()
+    expect(multiplyQuantities('2', '')).toBeNull()
   })
 })

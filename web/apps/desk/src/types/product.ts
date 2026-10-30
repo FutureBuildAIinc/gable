@@ -21,6 +21,8 @@ export type ProductDimensionsUpdate = Schemas['ProductDimensionsUpdate'];
 export type ProductLeadTimeUpdate = Schemas['ProductLeadTimeUpdate'];
 export type ReorderAlert = Schemas['ReorderAlert'];
 export type ReorderAlertList = Schemas['ReorderAlertList'];
+export type KitComponent = Schemas['KitComponent'];
+export type KitComponentList = Schemas['KitComponentList'];
 
 /** Every unit the wire accepts, in the order a picker shows them. The Record keys must match the contract's UOM exactly. */
 const UOM_SET: Record<UOM, true> = {

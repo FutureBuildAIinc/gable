@@ -114,6 +114,27 @@ function scaledToQuantity(scaled: number): string {
 }
 
 /**
+ * Two quantities multiplied at the shared scale 4, rounded once, half away from
+ * zero: the way the kit explosion multiplies a kit line's quantity by the
+ * kit's per kit quantity (ADR 0005 section 2.6). "2.5" x "1.2" is "3".
+ */
+export function multiplyQuantities(a: string, b: string): string | null {
+    const left = parseScaled(a, 4);
+    const right = parseScaled(b, 4);
+    if (left === null || right === null) return null;
+    // The product of two scale 4 numbers is scale 8; bring it back to scale 4.
+    const product = BigInt(left) * BigInt(right);
+    const divisor = 10000n;
+    const negative = product < 0n;
+    const abs = negative ? -product : product;
+    let scaled = abs / divisor;
+    if ((abs % divisor) * 2n >= divisor) scaled += 1n;
+    const value = Number(scaled);
+    if (!Number.isSafeInteger(value)) return null;
+    return scaledToQuantity(negative ? -value : value);
+}
+
+/**
  * The line extension in cents: quantity x unit price (ten thousandths), rounded
  * once, half away from zero, the platform rule. Both factors are scaled integers
  * multiplied as BigInt (scale 10^8, divided down to 10^2). A line priced per another

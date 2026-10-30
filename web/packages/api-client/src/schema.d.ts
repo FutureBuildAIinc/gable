@@ -20757,6 +20757,8 @@ export interface components {
             density_volume_state: ("LOOSE" | "COMPACTED") | null;
             /** @description The product's picture path while the catalog.product_images setting is on; null while it is off or the product has none. */
             image_url: string | null;
+            /** @description True when a line that names this product explodes into a kit line and its component lines (ADR 0005 section 2.6). The definition itself is the kit components route's. */
+            is_kit: boolean;
             /** Format: date-time */
             created_at: string;
             /** Format: date-time */
@@ -21279,7 +21281,10 @@ export interface components {
             total_cents: number;
             /** Format: int64 */
             freight_cents: number;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description On the full document read the margin is computed from the lines: the total less the cost of every product and component line (the quantity in the stocking unit times the product's average cost, rounded once per line), so a kit's margin is its components' and a kit quoted below its parts reads negative. A list row carries the stored figure.
+             */
             margin_total_cents: number;
             delivery_type: components["schemas"]["QuoteDeliveryType"];
             /** Format: uuid */
@@ -21358,12 +21363,22 @@ export interface components {
             exposure_last_checked_at: string | null;
             lines: components["schemas"]["QuoteLine"][];
         };
-        /** @description One priced line. Every priced line carries the same fields: the quantity as a decimal string with its unit, the scaled unit price with its price unit, the conversion pair, and the extension in cents (quantity x unit price x price_uom_qty / uom_qty, rounded once, half away from zero). */
+        /** @description One priced line. Every priced line carries the same fields: the quantity as a decimal string with its unit, the scaled unit price with its price unit, the conversion pair, and the extension in cents (quantity x unit price x price_uom_qty / uom_qty, rounded once, half away from zero). A line that names a kit product is written by the server as one kit line, priced as a whole, followed by one component line per component of the kit's definition at quantity kit x per kit, unit price zero, extension zero (ADR 0005 section 2.6): line_type and parent_line_id say which is which, and a request never sends either. */
         QuoteLine: {
             /** Format: uuid */
             id: string;
             /** Format: uuid */
             quote_id: string;
+            /**
+             * @description The line's kind. A kit line is priced as a whole and carries no cost of its own (its components carry it); a component line carries quantity and cost at zero price. Written by the server at the line's create or edit, never sent by a client.
+             * @enum {string}
+             */
+            line_type: "product" | "kit" | "component";
+            /**
+             * Format: uuid
+             * @description Set on a component line only, naming its kit line.
+             */
+            parent_line_id: string | null;
             /**
              * Format: uuid
              * @description Null for a special order line the dealer does not stock.
@@ -21394,7 +21409,7 @@ export interface components {
             line_total_cents: number;
             /**
              * Format: int64
-             * @description The product's average cost times 10,000; read only.
+             * @description The product's average cost times 10,000; read only. A kit line's own cost says nothing about what the kit is made of: a kit's cost is its component lines', and the margin reads theirs.
              */
             unit_cost_ten_thousandths: number;
             /** Format: date-time */
