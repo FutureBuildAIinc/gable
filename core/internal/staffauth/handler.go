@@ -162,11 +162,13 @@ func (h *Handler) limited(w http.ResponseWriter, r *http.Request, d time.Duratio
 // body, then one budget per client address and per email across both doors.
 // It answers the refusal itself and reports false.
 //
-// On success it also returns the attempt's start, to hand to holdFloor.
-// The allowlist 403, the 400 and the 429 answer before Appwrite and are the
-// same for every address, so they carry no floor.
+// On success it also returns the attempt's start, taken at its end: past the
+// guard, the body and both limits, right before the service call. The floor
+// that start feeds must not be run out by work before it, or a client that
+// sends its body late would wait out the floor before the credential check
+// begins. The allowlist 403, the 400 and the 429 answer before Appwrite and
+// are the same for every address, so they carry no floor.
 func (h *Handler) passwordAttempt(w http.ResponseWriter, r *http.Request) (email, password string, begun time.Time, ok bool) {
-	begun = time.Now()
 	if h.emailPasswordAllowed != nil && !h.emailPasswordAllowed(r.Context()) {
 		httpx.WriteError(w, r, httpx.Forbidden("Sign in with email and password is not allowed for this dealer"))
 		return "", "", time.Time{}, false
@@ -188,7 +190,7 @@ func (h *Handler) passwordAttempt(w http.ResponseWriter, r *http.Request) (email
 		h.limited(w, r, d)
 		return "", "", time.Time{}, false
 	}
-	return body.Email, body.Password, begun, true
+	return body.Email, body.Password, time.Now(), true
 }
 
 // holdFloor waits until the sign in floor has passed since begun, so every
