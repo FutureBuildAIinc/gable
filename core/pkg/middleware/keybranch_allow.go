@@ -348,6 +348,7 @@ var keyBranchRoutes = map[string]KeyBranchRouteNote{
 	"PATCH /api/v1/products/{id}/lead-time":                        {KeyBranchClassRefused, "the product catalogue is dealer wide, no branch column; the reads stay stated limits"},
 	"PATCH /api/v1/products/{id}/margins":                          {KeyBranchClassRefused, "the product catalogue is dealer wide, no branch column; the reads stay stated limits"},
 	"PATCH /api/v1/products/{id}/pim/media/{mediaId}/primary":      {KeyBranchClassRefused, "product content is dealer wide, no branch column; the reads stay stated limits"},
+	"PATCH /api/v1/tint/bases/{id}":                                {KeyBranchClassRefused, "the tint catalogue is dealer wide; the reads stay stated limits"},
 	"POST /api/v1/admin/exposure-scan":                             {KeyBranchClassRefused, "the scan re-checks every branch quotes"},
 	"POST /api/v1/admin/settings/ai/test":                          {KeyBranchClassRefused, "a dealer wide configuration action that spends the provider key; no branch binds it"},
 	"POST /api/v1/admin/staff":                                     {KeyBranchClassRefused, "the staff roster and its module grants span every branch"},
