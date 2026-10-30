@@ -985,7 +985,7 @@ func demoSeedInstant(t *testing.T) string {
 // scratch database with the demo seed and its import asked for.
 func runCommand(t *testing.T, dbURL, pkg string) {
 	t.Helper()
-	cmd := exec.Command("go", "run", pkg)
+	cmd := exec.Command("go", "run", "-tags", "devauth", pkg)
 	cmd.Dir = "../../.."
 	cmd.Env = append(os.Environ(),
 		// every seed run of one test reads the same instant, so a boundary
@@ -994,7 +994,7 @@ func runCommand(t *testing.T, dbURL, pkg string) {
 		"DATABASE_URL="+dbURL,
 		demoSeedEnv+"=1",
 		demoImportEnv+"=1",
-		// the stack is a local dev one, and the environment's manager PIN is
+		// the stack is a local dev one (the run is a devauth build), and the environment's manager PIN is
 		// unset, so the fixed local PIN is the one the seed may write
 		"AUTH_MODE=dev",
 		demoManagerPINEnv+"=",
