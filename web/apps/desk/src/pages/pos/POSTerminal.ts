@@ -68,7 +68,7 @@ import { POS_SW_WARNING_ATTR } from '../../lib/pos-sw';
 const REGISTER_STORAGE_PREFIX = 'gable.pos.register.';
 // The sale each register last opened, so a visit that left it empty reuses it.
 const SALE_STORAGE_PREFIX = 'gable.pos.sale.';
-const fmt = (cents: number) => `$${(cents / 100).toFixed(2)}`;
+const fmt = formatCents;
 const tenderTitle = (m: TenderMethod) => (m === 'account' ? 'Charge to account' : m === 'store_credit' ? 'Store credit' : m);
 /** A line carries a quantity control when it has a quantity the route reprices. */
 const hasQuantityControl = (l: SaleLine) => l.parent_line_id === null && ['product', 'kit', 'charge'].includes(l.line_type);

@@ -18,6 +18,7 @@ import { customElement, state } from 'lit/decorators.js';
 import { LargeCashService } from '../../services/LargeCashService';
 import type { LargeCashForm8300, LargeCashStatement, LargeCashWorklistRow } from '../../types/largecash';
 import { deadlineWords, actionWords, moneyWords, statementLines } from './largeCashWords';
+import { formatCents } from '../../lib/utils.ts';
 
 const SURFACE = 'background:rgb(var(--gb-till-surface));border:1px solid rgb(var(--gb-till-edge))';
 const INK = 'color:rgb(var(--gb-till-text))';
@@ -203,7 +204,7 @@ export class LargeCashWorklist extends LitElement {
         <li class="rounded-xl p-4" style=${SURFACE} data-testid="large-cash-row" data-event-id=${row.event_id}>
           <div class="flex flex-wrap items-baseline justify-between gap-2">
             <div class="text-sm font-semibold" style=${INK}>
-              ${row.payer_name} &middot; $${(row.total_cents / 100).toFixed(2)}
+              ${row.payer_name} &middot; ${formatCents(row.total_cents)}
             </div>
             <div class="font-mono text-xs" style=${MUTED}>
               ${row.branch_name}${row.contributed_branch_ids.length > 1

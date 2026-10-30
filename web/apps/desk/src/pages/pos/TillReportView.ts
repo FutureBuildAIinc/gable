@@ -7,8 +7,9 @@ import type { TillReport } from '../../types/pos';
 import { formatDateTime } from '../../lib/dates.ts';
 import { kindLabel } from './movements.ts';
 import { cashierLabel, expectedDrawerCash, isBlind, reportMethodLabel, reportMethods, signedInPerson, type SignedInPerson, type TillReportKind } from './tillReport.ts';
+import { formatCents } from '../../lib/utils.ts';
 
-const fmt = (cents: number) => (cents < 0 ? `-$${(-cents / 100).toFixed(2)}` : `$${(cents / 100).toFixed(2)}`);
+const fmt = formatCents;
 
 const MUTED = 'color:rgb(var(--gb-till-muted))';
 const RULE = 'border-top:1px solid rgb(var(--gb-till-rule))';
