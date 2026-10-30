@@ -11,6 +11,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/gablelbm/gable/internal/platform/httpx"
@@ -205,7 +206,10 @@ type createLocationRequest struct {
 	Phone               *string  `json:"phone"`
 	TaxJurisdictionCode *string  `json:"tax_jurisdiction_code"`
 	DefaultTaxRate      *float64 `json:"default_tax_rate"`
+	CashRoundingMode    *string  `json:"cash_rounding_mode"`
 	Timezone            *string  `json:"timezone"`
+	CountryCode         *string  `json:"country_code"`
+	WalkInIdentityCents *int64   `json:"walk_in_identity_cents"`
 	Active              *bool    `json:"active"`
 }
 
@@ -226,7 +230,10 @@ func (req createLocationRequest) resolve(v *httpx.Validator, forceType LocationT
 		Phone:               req.Phone,
 		TaxJurisdictionCode: req.TaxJurisdictionCode,
 		DefaultTaxRate:      req.DefaultTaxRate,
+		CashRoundingMode:    cashRoundingMode(v, req.CashRoundingMode),
 		Timezone:            req.Timezone,
+		CountryCode:         normalizeCountry(req.CountryCode),
+		WalkInIdentityCents: walkInIdentityFloorCreate(v, req.WalkInIdentityCents),
 		Active:              req.Active == nil || *req.Active,
 	}
 	if forceType != "" {
@@ -263,9 +270,85 @@ type locationUpdateRequest struct {
 	Phone               *string  `json:"phone"`
 	TaxJurisdictionCode *string  `json:"tax_jurisdiction_code"`
 	DefaultTaxRate      *float64 `json:"default_tax_rate"`
+	CashRoundingMode    *string  `json:"cash_rounding_mode"`
 	Timezone            *string  `json:"timezone"`
-	Active              *bool    `json:"active"`
-	Revision            *int64   `json:"revision"`
+	CountryCode         *string  `json:"country_code"`
+	// WalkInIdentityCents is the branch's floor for asking a walk-in's
+	// identity on a cash sale over it (CP-17a, item 296). It is raw so the
+	// write can tell an absent field (the stored floor stays) from a null
+	// (the branch country's default) from a number (the floor in cents).
+	WalkInIdentityCents json.RawMessage `json:"walk_in_identity_cents"`
+	Active              *bool           `json:"active"`
+	Revision            *int64          `json:"revision"`
+}
+
+// normalizeCountry uppercases and trims a country code; an empty value
+// becomes nil (unset), never a stored empty string.
+func normalizeCountry(s *string) *string {
+	if s == nil {
+		return nil
+	}
+	v := strings.ToUpper(strings.TrimSpace(*s))
+	if v == "" {
+		return nil
+	}
+	return &v
+}
+
+// walkInIdentityFloorCreate parses the floor of a new branch: absent or null
+// is the branch country's default, and a number is the floor in cents.
+func walkInIdentityFloorCreate(v *httpx.Validator, cents *int64) *int64 {
+	if cents == nil {
+		return nil
+	}
+	if *cents < 0 {
+		v.Check(false, "walk_in_identity_cents", "must be zero or more: zero is the floor off")
+		return nil
+	}
+	return cents
+}
+
+// walkInIdentityFloor parses the branch's walk-in identity floor (CP-17a,
+// item 296): absent keeps the stored floor, null is the branch country's
+// default, and a number is the floor in cents. Zero is the dealer saying
+// off, and a negative amount is refused by name.
+func walkInIdentityFloor(v *httpx.Validator, raw json.RawMessage, current *int64) *int64 {
+	if len(raw) == 0 {
+		return current
+	}
+	if string(bytes.TrimSpace(raw)) == "null" {
+		return nil
+	}
+	var cents int64
+	if err := json.Unmarshal(raw, &cents); err != nil {
+		v.Check(false, "walk_in_identity_cents",
+			"must be a number of cents, or null for the branch country default")
+		return current
+	}
+	if cents < 0 {
+		v.Check(false, "walk_in_identity_cents", "must be zero or more: zero is the floor off")
+		return current
+	}
+	return &cents
+}
+
+// cashRoundingMode answers the cash rounding rule a new branch starts with
+// (CP-18): off, until a branch says otherwise. A rule the column cannot hold
+// is refused by name.
+func cashRoundingMode(v *httpx.Validator, mode *string) string {
+	if mode == nil || *mode == "" {
+		return CashRoundingOff
+	}
+	if !validCashRoundingMode(*mode) {
+		v.Check(false, "cash_rounding_mode", "must be one of: OFF, NEAREST_5_CENTS")
+		return CashRoundingOff
+	}
+	return *mode
+}
+
+// validCashRoundingMode answers whether a rule is one the column holds.
+func validCashRoundingMode(mode string) bool {
+	return mode == CashRoundingOff || mode == CashRoundingNearest5
 }
 
 func writeLocJSON(w http.ResponseWriter, status int, body any) {
@@ -518,6 +601,25 @@ func (h *Handler) UpdateLocation(w http.ResponseWriter, r *http.Request) {
 	loc.Path, loc.Code, loc.Description = req.Path, req.Code, req.Description
 	loc.Name, loc.Address, loc.City, loc.State, loc.Zip, loc.Phone = req.Name, req.Address, req.City, req.State, req.Zip, req.Phone
 	loc.TaxJurisdictionCode, loc.DefaultTaxRate, loc.Timezone = req.TaxJurisdictionCode, req.DefaultTaxRate, req.Timezone
+	// the floor: absent keeps the stored floor, null is the branch country's
+	// default and a number is the floor in cents (CP-17a, item 296)
+	floor := &httpx.Validator{}
+	loc.WalkInIdentityCents = walkInIdentityFloor(floor, req.WalkInIdentityCents, current.WalkInIdentityCents)
+	if err := floor.Err(); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	if req.CountryCode != nil {
+		loc.CountryCode = normalizeCountry(req.CountryCode)
+	}
+	if req.CashRoundingMode != nil && *req.CashRoundingMode != "" {
+		if !validCashRoundingMode(*req.CashRoundingMode) {
+			httpx.WriteError(w, r, httpx.BadRequest("the cash rounding rule is not one a branch can hold",
+				httpx.FieldError{Field: "cash_rounding_mode", Message: "must be one of: OFF, NEAREST_5_CENTS"}))
+			return
+		}
+		loc.CashRoundingMode = *req.CashRoundingMode
+	}
 	if req.Active != nil {
 		loc.Active = *req.Active // omitted keeps the stored value
 	}
@@ -772,12 +874,13 @@ func (h *Handler) ListMyBranches(w http.ResponseWriter, r *http.Request) {
 		out := make([]BranchSummary, 0, len(all))
 		for _, b := range all {
 			out = append(out, BranchSummary{
-				ID:       b.ID,
-				Code:     b.Code,
-				Name:     deref(b.Name),
-				Active:   b.Active,
-				IsHome:   false,
-				Timezone: deref(b.Timezone),
+				ID:               b.ID,
+				Code:             b.Code,
+				Name:             deref(b.Name),
+				Active:           b.Active,
+				IsHome:           false,
+				Timezone:         deref(b.Timezone),
+				CashRoundingMode: b.CashRoundingMode,
 			})
 		}
 		writeJSON(w, http.StatusOK, out)

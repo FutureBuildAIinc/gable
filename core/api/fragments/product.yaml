@@ -688,6 +688,64 @@ paths:
           $ref: '#/components/responses/WirePreconditionRequired'
         '500':
           $ref: '#/components/responses/InternalError'
+  /api/v1/products/{id}/density:
+    patch:
+      operationId: productUpdateDensity
+      tags: [product]
+      summary: Set or clear the weighed sale's density (CP-19)
+      description: >-
+        The pounds per cubic yard with the volume state the figure was
+        measured at (loose or compacted): the counter's only bridge between
+        a scale weight and a price by the cubic yard. Both fields together,
+        or a null pair to clear; one without the other is a 400. The body's
+        revision or If-Match carries the precondition.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - name: If-Match
+          in: header
+          required: false
+          schema:
+            type: string
+          description: The quoted revision; required unless the body carries it.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProductDensityUpdate'
+      responses:
+        '200':
+          description: The product with the persisted density, the new revision and its ETag.
+          headers:
+            ETag:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductView'
+        '400':
+          $ref: '#/components/responses/BadRequestEither'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/WireNotFound'
+        '409':
+          $ref: '#/components/responses/WireConflict'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '428':
+          $ref: '#/components/responses/WirePreconditionRequired'
+        '500':
+          $ref: '#/components/responses/InternalError'
   /api/v1/products/{id}/lead-time:
     patch:
       operationId: productUpdateLeadTime
@@ -716,6 +774,66 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/ProductLeadTimeUpdate'
+      responses:
+        '200':
+          description: The product with the new revision and its ETag.
+          headers:
+            ETag:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductView'
+        '400':
+          $ref: '#/components/responses/BadRequestEither'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/WireNotFound'
+        '409':
+          $ref: '#/components/responses/WireConflict'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '428':
+          $ref: '#/components/responses/WirePreconditionRequired'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/v1/products/{id}/consumer-durable:
+    patch:
+      operationId: productUpdateConsumerDurable
+      tags: [product]
+      summary: Set or clear the consumer durable flag
+      description: >-
+        The Form 8300 designated reporting transaction flag (CP-17a): the
+        counter's large cash classifier counts a qualifying negotiable
+        instrument only for a sale line of a flagged product priced over
+        the threshold. The default is false; the flagged exceptions are the
+        big ticket consumer goods.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - name: If-Match
+          in: header
+          required: false
+          schema:
+            type: string
+          description: The quoted revision; required unless the body carries it.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProductConsumerDurableUpdate'
       responses:
         '200':
           description: The product with the new revision and its ETag.
@@ -1129,10 +1247,11 @@ components:
       required: [id, sku, description, stock_uom, base_price_ten_thousandths,
         average_unit_cost_ten_thousandths, target_margin, commission_rate,
         vendor, vendor_id, upc, weight_lbs, length_in, width_in, height_in,
-        stackable, geometry_source, lead_time_days, reorder_point,
-        reorder_qty, on_hand, allocated, available, revision, created_at,
-        updated_at, sale_uom, price_uom, purchase_uom, board_thickness_in,
-        board_width_in, board_length_ft, random_length, units, image_url]
+        stackable, geometry_source, lead_time_days, consumer_durable,
+        reorder_point, reorder_qty, on_hand, allocated, available, revision,
+        created_at, updated_at, sale_uom, price_uom, purchase_uom,
+        board_thickness_in, board_width_in, board_length_ft, random_length,
+        units, image_url, density_lb_per_cy, density_volume_state]
       properties:
         id:
           type: string
@@ -1175,6 +1294,9 @@ components:
           type: [string, "null"]
         lead_time_days:
           type: [integer, "null"]
+        consumer_durable:
+          type: boolean
+          description: The Form 8300 designated reporting transaction flag (CP-17a); a lumber yard's default is false.
         reorder_point:
           type: string
           description: A decimal string at scale 4.
@@ -1220,6 +1342,16 @@ components:
           description: The product's unit set (ADR 0006 sections 3.1 and 3.2).
           items:
             $ref: '#/components/schemas/UnitSetRow'
+        density_lb_per_cy:
+          oneOf:
+            - $ref: '#/components/schemas/Quantity'
+            - type: "null"
+          description: >-
+            The weighed sale's density (CP-19): pounds per cubic yard, the
+            only bridge between a scale weight and a price by the yard.
+        density_volume_state:
+          oneOf: [{type: string, enum: [LOOSE, COMPACTED]}, {type: "null"}]
+          description: The volume state the density was measured at.
         image_url:
           type: [string, "null"]
           description: >-
@@ -1278,6 +1410,16 @@ components:
         random_length:
           type: boolean
           description: The product is sold by tally; it stocks in LF and carries no fixed length.
+        consumer_durable:
+          type: [boolean, "null"]
+          description: The Form 8300 designated reporting transaction flag (CP-17a); false when absent.
+        density_lb_per_cy:
+          oneOf:
+            - $ref: '#/components/schemas/Quantity'
+            - type: "null"
+          description: The weighed sale's density (CP-19); both fields together or neither.
+        density_volume_state:
+          oneOf: [{type: string, enum: [loose, compacted]}, {type: "null"}]
     ProductPage:
       type: object
       required: [items, next_cursor, limit]
@@ -1370,6 +1512,20 @@ components:
         revision:
           type: integer
           format: int64
+    ProductDensityUpdate:
+      type: object
+      additionalProperties: false
+      description: The density pair, both fields or a null pair to clear.
+      properties:
+        density_lb_per_cy:
+          oneOf:
+            - $ref: '#/components/schemas/Quantity'
+            - type: "null"
+        density_volume_state:
+          oneOf: [{type: string, enum: [loose, compacted]}, {type: "null"}]
+        revision:
+          type: [integer, "null"]
+          format: int64
     ProductDimensionsUpdate:
       type: object
       properties:
@@ -1391,6 +1547,16 @@ components:
       properties:
         lead_time_days:
           type: [integer, "null"]
+        revision:
+          type: integer
+          format: int64
+    ProductConsumerDurableUpdate:
+      type: object
+      required: [consumer_durable]
+      properties:
+        consumer_durable:
+          type: boolean
+          description: The Form 8300 designated reporting transaction flag (CP-17a).
         revision:
           type: integer
           format: int64

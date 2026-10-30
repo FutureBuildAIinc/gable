@@ -48,6 +48,7 @@ import (
 	"github.com/gablelbm/gable/internal/inventory"
 	"github.com/gablelbm/gable/internal/invoice"
 	"github.com/gablelbm/gable/internal/links"
+	"github.com/gablelbm/gable/internal/largecash"
 	"github.com/gablelbm/gable/internal/location"
 	"github.com/gablelbm/gable/internal/marketcheck"
 	"github.com/gablelbm/gable/internal/matching"
@@ -67,6 +68,7 @@ import (
 	"github.com/gablelbm/gable/internal/tax"
 	"github.com/gablelbm/gable/internal/techadmin"
 	"github.com/gablelbm/gable/internal/testutil"
+	"github.com/gablelbm/gable/internal/tint"
 	"github.com/gablelbm/gable/internal/unit"
 	"github.com/gablelbm/gable/internal/vendor"
 	"github.com/gablelbm/gable/internal/vision"
@@ -184,6 +186,7 @@ var pinKeyScopes = []string{
 	"matching:read", "matching:write", "delivery:read", "delivery:write",
 	"apps:read", "apps:write", "admin:settings", "admin:modules",
 	"parsing:write", "vision:write", "scheduling:read", "scheduling:write",
+	"tint:read", "tint:write",
 }
 
 func newKeyPinFixture(t *testing.T) *keyPinFixture {
@@ -216,7 +219,7 @@ func newKeyPinFixtureSwitched(t *testing.T, switchState string) *keyPinFixture {
 		parent any
 	}{{f.branchA, "BRANCH", nil}, {f.branchB, "BRANCH", nil}, {f.branchC, "BRANCH", nil}, {f.branchC2, "BRANCH", nil},
 		{f.yardA, "YARD", f.branchA}, {f.yardB, "YARD", f.branchB}} {
-		if _, err := db.Pool.Exec(ctx, `INSERT INTO locations (id, type, code, name, parent_id) VALUES ($1, $2, $3, $4, $5)`,
+		if _, err := db.Pool.Exec(ctx, `INSERT INTO locations (id, type, code, name, parent_id, country_code) VALUES ($1, $2, $3, $4, $5, 'US')`,
 			r.id, r.typ, "pin-"+r.id.String()[:8], "pin row "+r.id.String()[:8], r.parent); err != nil {
 			t.Fatalf("seed location: %v", err)
 		}
@@ -286,8 +289,8 @@ func newKeyPinFixtureSwitched(t *testing.T, switchState string) *keyPinFixture {
 		}
 	}
 	if _, err := db.Pool.Exec(ctx,
-		`INSERT INTO tax_exemptions (id, customer_id, exempt_reason, certificate_number, issuing_state)
-		VALUES ($1, $2, 'pin', 'PIN-CERT-1', 'WA')`, f.taxExempt, f.custB); err != nil {
+		`INSERT INTO tax_exemptions (id, customer_id, exempt_reason, certificate_number, issuing_state, effective_date)
+		VALUES ($1, $2, 'pin', 'PIN-CERT-1', 'WA', CURRENT_DATE - 1)`, f.taxExempt, f.custB); err != nil {
 		t.Fatalf("seed tax exemption: %v", err)
 	}
 	// A legacy row that names no branch: the denorm trigger refuses such rows
@@ -474,6 +477,7 @@ func newKeyPinFixtureSwitched(t *testing.T, switchState string) *keyPinFixture {
 		WithLedger(glSvc).WithAuditLog(audit.NewLogger(db)).
 		WithOutbox(outbox.NewWriter(db, "")).WithTxRunner(db)
 	wall.pos(mux, pos.NewHandler(posSvc), "admin", "owner", "cashier")
+	wall.largeCash(mux, largecash.NewHandler(largecash.NewService(db, nil, "")), "admin", "owner", "cashier")
 
 	// The AI spending routes exactly as serve registers them, each call
 	// audited with whoever spent the credit (the PD-6 ruling).
@@ -557,6 +561,9 @@ func newKeyPinFixtureSwitched(t *testing.T, switchState string) *keyPinFixture {
 		WithQuotes(quoteSvc).WithPurchaseOrders(poSvc).WithDeliveries(deliverySvc)
 	wall.documents(mux, docHandler)
 	wall.posReceipts(mux, docHandler, posSvc, "admin", "owner", "cashier")
+	// The tint catalogue, as serve mounts it: the saved colours are customer
+	// rows, so their write is held to the customer the body names.
+	wall.tint(mux, tint.NewService(tint.NewRepository(db)).WithTxRunner(db))
 	wall.emailDeliveries(mux, emaildelivery.NewHandler(deliverySvc))
 	wall.dealerProfile(mux, dealerprofile.NewHandler(profileSvc))
 	quoteKind := quote.NewDraftKind(quoteSvc)
@@ -1020,7 +1027,7 @@ func TestKeyBranchPin_LocationWrites(t *testing.T) {
 	// POST /branches: the directory create is refused for a bound key
 	// outright (a new branch is outside every pin), and stays open to the
 	// unbound key and the user.
-	newBranch := fmt.Sprintf(`{"type":"branch","code":"pin-new-%s","name":"pin new"}`, uuid.NewString()[:8])
+	newBranch := fmt.Sprintf(`{"type":"branch","code":"pin-new-%s","name":"pin new","country_code":"US"}`, uuid.NewString()[:8])
 	f.refuseForeign(t, "POST", "/api/v1/branches", newBranch, nil)
 	var n int
 	if err := f.db.Pool.QueryRow(context.Background(),
@@ -1032,7 +1039,7 @@ func TestKeyBranchPin_LocationWrites(t *testing.T) {
 	}
 	f.allow(t, "unbound", "POST", "/api/v1/branches", newBranch, nil, http.StatusCreated)
 	f.allow(t, "user", "POST", "/api/v1/branches",
-		fmt.Sprintf(`{"type":"branch","code":"pin-new-%s","name":"pin new"}`, uuid.NewString()[:8]), nil, http.StatusCreated)
+		fmt.Sprintf(`{"type":"branch","code":"pin-new-%s","name":"pin new","country_code":"US"}`, uuid.NewString()[:8]), nil, http.StatusCreated)
 
 	// PUT /branches/{id}: the foreign branch is refused and unchanged, the
 	// key's own branch passes, and the unbound key and the user keep theirs.
@@ -1398,8 +1405,8 @@ func (f *keyPinFixture) seedCatRule(t *testing.T, id, customer, category uuid.UU
 func (f *keyPinFixture) seedTaxExempt(t *testing.T, id, customer uuid.UUID) {
 	t.Helper()
 	if _, err := f.db.Pool.Exec(context.Background(),
-		`INSERT INTO tax_exemptions (id, customer_id, exempt_reason, certificate_number, issuing_state)
-		VALUES ($1, $2, 'pin', 'PIN-CERT-1', 'WA')`, id, customer); err != nil {
+		`INSERT INTO tax_exemptions (id, customer_id, exempt_reason, certificate_number, issuing_state, effective_date)
+		VALUES ($1, $2, 'pin', 'PIN-CERT-1', 'WA', CURRENT_DATE - 1)`, id, customer); err != nil {
 		t.Fatalf("seed tax exemption: %v", err)
 	}
 }
@@ -1569,6 +1576,63 @@ func TestKeyBranchPin_CustomerConfinedWrites(t *testing.T) {
 		f.allow(t, who, "DELETE", "/api/v1/pricing/category-rules/bulk",
 			fmt.Sprintf(`{"ids":[%q]}`, id.String()), nil, http.StatusNoContent)
 	}
+
+	// The saved colours (row CP-16): the create's body names the customer, and
+	// the read is walled to the customers that hold the pin.
+	colorID := f.seedTintColor(t)
+	savedBody := func(customer uuid.UUID, name string) string {
+		return fmt.Sprintf(`{"customer_id":%q,"color_id":%q,"name":%q}`, customer, colorID, name)
+	}
+	f.refuseForeign(t, "POST", "/api/v1/tint/saved-colors", savedBody(f.custB, "pin foreign"), nil)
+	if n := f.savedColorsOf(t, f.custB); n != 0 {
+		t.Errorf("refused saved colour create wrote the foreign customer's rows: %d", n)
+	}
+	f.allow(t, "bound", "POST", "/api/v1/tint/saved-colors", savedBody(f.custID, "pin own"), nil, http.StatusCreated)
+	for _, who := range []string{"unbound", "user"} {
+		f.allow(t, who, "POST", "/api/v1/tint/saved-colors", savedBody(f.custB, "pin free "+who), nil, http.StatusCreated)
+	}
+	// The read is walled to the pin: the bound key sees its own customer's
+	// saved colours and not the foreign customer's.
+	body := f.allow(t, "bound", "GET", "/api/v1/tint/saved-colors", "", nil, http.StatusOK)
+	if !strings.Contains(string(body), "pin own") {
+		t.Errorf("the bound key did not read its own customer's saved colour: %s", body)
+	}
+	if strings.Contains(string(body), "pin free") {
+		t.Errorf("the bound key read another customer's saved colour: %s", body)
+	}
+}
+
+// seedTintColor seeds a tint system and one colour, and answers the colour id.
+func (f *keyPinFixture) seedTintColor(t *testing.T) uuid.UUID {
+	t.Helper()
+	ctx := context.Background()
+	sys := uuid.New()
+	color := uuid.New()
+	if _, err := f.db.Pool.Exec(ctx, `INSERT INTO paint_tint_systems (id, code, name, manufacturer, unit_denominator)
+		VALUES ($1, $2, 'Pin tint', 'Pin Paints', 384)`, sys, "PIN"+sys.String()[:8]); err != nil {
+		t.Fatalf("seed tint system: %v", err)
+	}
+	if _, err := f.db.Pool.Exec(ctx, `INSERT INTO paint_colors (id, tint_system_id, manufacturer_code, name)
+		VALUES ($1, $2, 'HC-188', 'Essex Green')`, color, sys); err != nil {
+		t.Fatalf("seed tint colour: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = f.db.Pool.Exec(context.Background(), `DELETE FROM paint_saved_colors WHERE color_id = $1`, color)
+		_, _ = f.db.Pool.Exec(context.Background(), `DELETE FROM paint_colors WHERE id = $1`, color)
+		_, _ = f.db.Pool.Exec(context.Background(), `DELETE FROM paint_tint_systems WHERE id = $1`, sys)
+	})
+	return color
+}
+
+// savedColorsOf counts a customer's saved colours.
+func (f *keyPinFixture) savedColorsOf(t *testing.T, customer uuid.UUID) int {
+	t.Helper()
+	var n int
+	if err := f.db.Pool.QueryRow(context.Background(),
+		`SELECT count(*) FROM paint_saved_colors WHERE customer_id = $1`, customer).Scan(&n); err != nil {
+		t.Fatalf("count the saved colours: %v", err)
+	}
+	return n
 }
 
 // TestKeyBranchPin_SwitchOff pins the wall's independence from the
@@ -1658,6 +1722,13 @@ func TestKeyBranchPin_PosAndAccountRows(t *testing.T) {
 	f.twinLeg("GET", "/api/v1/pos/terminal-lost-items")
 	if !strings.Contains(string(buf), `"code":"unavailable"`) {
 		t.Errorf("bound key terminal lost items read answered another refusal: %s", buf)
+	}
+	// The manager's open refund claims list (CP-06): its sale join carries the
+	// branch wall, so the pinned key never reads another branch's claims.
+	_, buf = f.key(t, f.bound, "GET", "/api/v1/pos/refund-intents", "", nil)
+	f.twinLeg("GET", "/api/v1/pos/refund-intents")
+	if strings.Contains(string(buf), f.txnB.String()) {
+		t.Errorf("bound key refund intents list named the foreign sale: %s", buf)
 	}
 
 	// The open till of the foreign register: no session answers, while the
@@ -1767,6 +1838,19 @@ func TestKeyBranchPin_PosAndAccountRows(t *testing.T) {
 	f.twinLeg("GET", "/api/v1/pos/returns/"+f.retB.String())
 	f.allow(t, "unbound", "GET", "/api/v1/pos/returns/"+f.retB.String(), "", nil, http.StatusOK)
 	f.allow(t, "bound", "GET", "/api/v1/pos/returns/"+f.retA.String(), "", nil, http.StatusOK)
+
+	// The return preview (CP-06) prices a return of the sale it names: the
+	// foreign sale answers exactly what a missing sale answers, and nothing
+	// is written either way.
+	previewBody := fmt.Sprintf(`{"register_id":%q,"original_sale_id":%q,"refund_method":"cash","lines":[{"line_id":%q,"quantity":"1"}]}`,
+		f.regA, f.txnB.String(), f.lineB.String())
+	sMiss, _ = f.key(t, f.bound, "POST", "/api/v1/pos/returns/preview",
+		fmt.Sprintf(`{"register_id":%q,"original_sale_id":%q,"refund_method":"cash"}`, f.regA, missing), nil)
+	sPrev, bPrev := f.key(t, f.bound, "POST", "/api/v1/pos/returns/preview", previewBody, nil)
+	f.twinLeg("POST", "/api/v1/pos/returns/preview")
+	if sPrev != sMiss || strings.Contains(string(bPrev), f.txnB.String()) {
+		t.Errorf("bound key foreign return preview: %d %s, want the missing sale answer (%d, no B data)", sPrev, bPrev, sMiss)
+	}
 
 	// The transaction reads hold the pin already (branch_id predicate); the
 	// line writes now hold it too: no line is written on or removed from the

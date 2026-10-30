@@ -18,6 +18,7 @@ import (
 	"github.com/gablelbm/gable/internal/events"
 	"github.com/gablelbm/gable/internal/inventory"
 	"github.com/gablelbm/gable/internal/invoice"
+	"github.com/gablelbm/gable/internal/largecash"
 	"github.com/gablelbm/gable/internal/location"
 	"github.com/gablelbm/gable/internal/matching"
 	"github.com/gablelbm/gable/internal/order"
@@ -28,6 +29,7 @@ import (
 	"github.com/gablelbm/gable/internal/quote"
 	"github.com/gablelbm/gable/internal/reporting"
 	"github.com/gablelbm/gable/internal/scheduling"
+	"github.com/gablelbm/gable/internal/tint"
 	"github.com/gablelbm/gable/pkg/audit"
 	"github.com/gablelbm/gable/pkg/database"
 	"github.com/gablelbm/gable/pkg/middleware"
@@ -294,12 +296,39 @@ func (w *branchWall) draftGuard(db *database.DB, kind string, roles ...string) f
 		"POST /api/v1/drafts/"+kind+"/{id}/promote")
 }
 
+// tint mounts the paint tint catalogue (row CP-16): the dealer's own bases,
+// colorants, colours and per size formulas, the rescale, and the saved colours
+// per customer and job. The catalogue is dealer wide and every desk role
+// reads it mid sale, so those reads stay stated limits. The saved colours are
+// customer rows, so they are walled: the read is held to the customer its
+// query names and carries the customer predicate, so a branch bound key reads
+// only the saved colours of the customers that hold its pin, and the write is
+// held to the customer its body names. The counter dialogue offers saving a
+// colour, so the cashier may write one; the catalogue itself stays with admin
+// and owner.
+func (w *branchWall) tint(mux *http.ServeMux, svc *tint.Service) {
+	read := w.patternWall(w.scoped("admin", "owner", "sales", "warehouse", "finance", "cashier", "purchasing"),
+		middleware.Compose(userCustomerWall(w.db, tintSavedColorQueryCustomer(), false),
+			w.keyWall.CustomerBranch(tintSavedColorQueryCustomer())),
+		"GET /api/v1/tint/saved-colors")
+	write := w.scoped("admin", "owner")
+	counter := middleware.Compose(w.scoped("admin", "owner", "cashier"),
+		userCustomerWall(w.db, tintSavedColorBodyCustomer(), true),
+		w.keyWall.CustomerBodyBranch())
+	tint.NewHandler(svc).RegisterRoutes(mux, read, write, counter)
+}
+
 // pos mounts the POS routes: the repositories hold the by id reads and writes
 // to their branch, and the offline sync replays whole sales whose bodies name
 // a customer (an ACCOUNT tender invoices that customer at the register's
 // branch), so the sync is held to the pin through the customer each replayed
 // sale names (round 10 P1-1). The cashier creates refuse a machine key
 // outright in the handler (a cashier must be a user).
+// The third guard of RegisterRoutes is the variance pair's own (the queue
+// and the sign off): every role the counter's roles name plus finance, which
+// the sign off's claims path always allowed, so a cashier can reach the pair
+// to spend a manager's step up approval while a signed in finance manager
+// loses nothing (CP-04 slice 3).
 func (w *branchWall) pos(mux *http.ServeMux, h *pos.Handler, roles ...string) {
 	// The counter's operator routes (the refund resolve and payback, the
 	// terminal sweep and the lost answer queue, the finance money movers) run
@@ -313,7 +342,15 @@ func (w *branchWall) pos(mux *http.ServeMux, h *pos.Handler, roles ...string) {
 	// routes carry.
 	h.WithBranchGuard(w.guard).RegisterRoutes(mux,
 		w.patternWall(w.scoped(roles...), w.keyWall.CustomerBranch(posSyncCustomersOf()), "POST /api/v1/pos/sync"),
-		w.scoped("finance", "owner"))
+		w.scoped("finance", "owner"),
+		w.scoped(append(append([]string{}, roles...), "finance")...))
+}
+
+// largeCash mounts the large cash routes: the preview rides the counter's
+// roles and the branch middleware and holds the sale it names to the wall;
+// the dealer settings stay admin and owner.
+func (w *branchWall) largeCash(mux *http.ServeMux, h *largecash.Handler, roles ...string) {
+	h.WithBranchGuard(w.guard).RegisterRoutes(mux, middleware.RequireRole("admin", "owner"), w.scoped(roles...))
 }
 
 // posReceipts mounts the counter's receipt pair (print and email of a sale's

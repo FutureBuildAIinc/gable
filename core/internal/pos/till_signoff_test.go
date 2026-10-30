@@ -144,8 +144,11 @@ func TestTheSignOffQueueListsPendingDrawers(t *testing.T) {
 	queue := func(role string) resp {
 		return f.do("GET", "/api/v1/pos/till/signoffs?branch_id="+f.branchID.String(), nil, "X-Test-Role", role, "X-Test-Sub", mustUUID(t))
 	}
-	if r := queue("cashier"); r.status != http.StatusForbidden {
-		t.Errorf("the queue for a cashier = %d, want 403", r.status)
+	// the queue is behind the counter's own guard now (CP-04 slice 3): a
+	// cashier sees the drawers waiting, to step a manager up at the terminal;
+	// the sign off act itself still demands a manager, by claims or by PIN
+	if r := queue("cashier"); r.status != http.StatusOK {
+		t.Errorf("the queue for a cashier = %d, want 200", r.status)
 	}
 	r := queue("finance")
 	if r.status != http.StatusOK {

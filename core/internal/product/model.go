@@ -101,6 +101,11 @@ type Product struct {
 	ReorderQtyQ           httpx.Quantity `json:"-"`
 	Revision              int64          `json:"-"`
 
+	// ConsumerDurable is the Form 8300 designated reporting transaction
+	// flag (CP-17a): a lumber yard's default is false, and the flagged
+	// exceptions are the big ticket consumer goods.
+	ConsumerDurable bool `json:"-"`
+
 	// LeadTimeDays is the dealer-published lead time (migration 084): nil
 	// means unpublished and is a different fact than zero.
 	LeadTimeDays *int `json:"-"`
@@ -118,6 +123,12 @@ type Product struct {
 	BoardLengthFT    *httpx.Quantity  `json:"-"`
 	RandomLength     bool             `json:"-"`
 	Units            []UnitSetRowView `json:"-"`
+
+	// The density in pounds per cubic yard with its volume state (CP-19):
+	// the weighed line's only bridge between the ton and the cubic yard,
+	// null on a product without one.
+	DensityLbPerCY     *httpx.Quantity `json:"-"`
+	DensityVolumeState *string         `json:"-"`
 
 	// ImageURL is the picture path as the reads answer it: set only while
 	// the catalog.product_images setting is on (the repository applies the
@@ -156,7 +167,8 @@ type View struct {
 	Stackable      *bool    `json:"stackable"`
 	GeometrySource *string  `json:"geometry_source"`
 
-	LeadTimeDays *int `json:"lead_time_days"`
+	LeadTimeDays    *int `json:"lead_time_days"`
+	ConsumerDurable bool `json:"consumer_durable"`
 
 	ReorderPoint httpx.Quantity `json:"reorder_point"`
 	ReorderQty   httpx.Quantity `json:"reorder_qty"`
@@ -180,6 +192,11 @@ type View struct {
 	BoardLengthFT    *httpx.Quantity  `json:"board_length_ft"`
 	RandomLength     bool             `json:"random_length"`
 	Units            []UnitSetRowView `json:"units"`
+
+	// The weighed sale's density (CP-19): pounds per cubic yard and the
+	// volume state the figure was measured at, null without one.
+	DensityLbPerCY     *httpx.Quantity `json:"density_lb_per_cy"`
+	DensityVolumeState *string         `json:"density_volume_state"`
 
 	// ImageURL is the product's picture path while the catalog.product_images
 	// setting is on; null when it is off or the product has no picture.
@@ -223,13 +240,14 @@ func ViewOf(p *Product) View {
 		Vendor: p.Vendor, VendorID: p.VendorID, UPC: p.UPC, WeightLbs: p.WeightLbs,
 		LengthIn: p.LengthIn, WidthIn: p.WidthIn, HeightIn: p.HeightIn,
 		Stackable: p.Stackable, GeometrySource: p.GeometrySource,
-		LeadTimeDays: p.LeadTimeDays,
+		LeadTimeDays: p.LeadTimeDays, ConsumerDurable: p.ConsumerDurable,
 		ReorderPoint: rp, ReorderQty: rq,
 		OnHand: onHand, Allocated: allocated, Available: onHand - allocated,
 		Revision: p.Revision, CreatedAt: p.CreatedAt, UpdatedAt: p.UpdatedAt,
 		SaleUOM: p.SaleUOM, PriceUOM: p.PriceUOM, PurchaseUOM: p.PurchaseUOM,
 		BoardThicknessIn: p.BoardThicknessIn, BoardWidthIn: p.BoardWidthIn,
 		BoardLengthFT: p.BoardLengthFT, RandomLength: p.RandomLength,
+		DensityLbPerCY: p.DensityLbPerCY, DensityVolumeState: p.DensityVolumeState,
 		Units: p.Units, ImageURL: p.ImageURL,
 	}
 }

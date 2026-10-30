@@ -342,14 +342,17 @@ func TestTotalsAndTax(t *testing.T) {
 	shipTo := "0.100000"
 	branch := "0.050000"
 	zero := "0.000000"
+	zone := "0.088750"
 	cases := []struct {
 		name string
 		in   TaxInputs
 		want TaxSource
 		rate string
 	}{
-		{"exempt first", TaxInputs{Exempt: true, Delivery: true, ShipToRate: &shipTo, BranchRate: &branch}, TaxSourceExempt, "0.000000"},
-		{"a delivery takes the ship-to rate", TaxInputs{Delivery: true, ShipToRate: &shipTo, BranchRate: &branch}, TaxSourceShipToRate, "0.100000"},
+		{"exempt first", TaxInputs{Exempt: true, Delivery: true, ZoneRate: &zone, ShipToRate: &shipTo, BranchRate: &branch}, TaxSourceExempt, "0.000000"},
+		{"a delivery takes the zone rate", TaxInputs{Delivery: true, ZoneRate: &zone, ShipToRate: &shipTo, BranchRate: &branch}, TaxSourceZoneRate, "0.088750"},
+		{"a pickup never takes the zone rate", TaxInputs{Delivery: false, ZoneRate: &zone, ShipToRate: &shipTo, BranchRate: &branch}, TaxSourceBranchRate, "0.050000"},
+		{"a delivery with no zone takes the ship-to rate", TaxInputs{Delivery: true, ShipToRate: &shipTo, BranchRate: &branch}, TaxSourceShipToRate, "0.100000"},
 		{"a pickup takes the branch rate", TaxInputs{Delivery: false, ShipToRate: &shipTo, BranchRate: &branch}, TaxSourceBranchRate, "0.050000"},
 		{"a delivery with no ship-to rate falls to the branch", TaxInputs{Delivery: true, BranchRate: &branch}, TaxSourceBranchRate, "0.050000"},
 		{"zero is a configured rate", TaxInputs{BranchRate: &zero}, TaxSourceBranchRate, "0.000000"},

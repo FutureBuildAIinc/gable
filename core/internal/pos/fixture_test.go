@@ -28,8 +28,10 @@ import (
 	"github.com/gablelbm/gable/internal/gl"
 	"github.com/gablelbm/gable/internal/inventory"
 	"github.com/gablelbm/gable/internal/invoice"
+	"github.com/gablelbm/gable/internal/largecash"
 	"github.com/gablelbm/gable/internal/payment"
 	"github.com/gablelbm/gable/internal/pos"
+	"github.com/gablelbm/gable/internal/scale"
 	"github.com/gablelbm/gable/pkg/audit"
 	"github.com/gablelbm/gable/pkg/database"
 	"github.com/gablelbm/gable/pkg/middleware"
@@ -55,6 +57,9 @@ type fixture struct {
 	yardID       uuid.UUID
 	events       *recordingWriter
 	priorEntries map[string]bool
+	// largeCash is the branch country's large cash rules (CP-17a), wired
+	// into the fixture's counter the way serve wires them.
+	largeCash *largecash.Service
 	// paymentGateway, when an opt sets it, wires the payment route's card
 	// refunds at a terminal too, the way serve wires Run Payments.
 	paymentGateway payment.PaymentGateway
@@ -69,12 +74,27 @@ type fixture struct {
 	// till (CP-08), so the helper opens one with no float, as a cashier would,
 	// unless the test is proving that refusal.
 	noAutoTill bool
+	// scale and scaleDeviceID, when the withScale opt sets them, are the
+	// simulated scale the counter reads and the device row the ticket names
+	// (CP-19).
+	scale         *scale.Simulator
+	scaleDeviceID uuid.UUID
+	// ownBranch, when the fixture owns its branch, is that branch: a private
+	// locations row of type BRANCH carrying its own tax rate and its own
+	// cash rounding rule, with its own yard, register, stock and customer.
+	// Nothing outside the test can move that branch's rate or rule, so a
+	// test that depends on them holds its own.
+	ownBranch bool
 }
 
 // withoutTill is the opt of a test that proves the open till rule itself.
 func withoutTill() func(*fixture) { return func(f *fixture) { f.noAutoTill = true } }
 
 const defaultBranch = `(SELECT value::uuid FROM system_settings WHERE key = 'default_branch_id')`
+
+// lcTestVaultKey seals the payer's sensitive values in the counter's tests
+// (CP-17a): an obvious pattern, never a real key shape.
+const lcTestVaultKey = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
 
 // recordingWriter wraps the outbox writer, remembering what was written and
 // optionally failing one type (the transaction proofs). Contenders write
@@ -111,27 +131,53 @@ func (w *recordingWriter) Write(ctx context.Context, ev outbox.Event) error {
 // before it is served.
 func newFixture(t *testing.T, db *database.DB, opts ...func(*fixture)) *fixture {
 	t.Helper()
+	return newCounterFixture(t, db, false, opts...)
+}
+
+// newOwnBranchFixture builds the same counter on a branch of the fixture's
+// own: a private locations row of type BRANCH carrying its own tax rate and
+// its own cash rounding rule, its own yard, register, stock and customer,
+// every one of them removed when the test ends. No other package's fixture
+// writes that branch's row, so no other fixture can move the rate or the
+// rule a test here depends on.
+func newOwnBranchFixture(t *testing.T, db *database.DB, opts ...func(*fixture)) *fixture {
+	t.Helper()
+	return newCounterFixture(t, db, true, opts...)
+}
+
+// newCounterFixture builds the counter, either on the deployment's default
+// branch or on a branch the fixture owns.
+func newCounterFixture(t *testing.T, db *database.DB, own bool, opts ...func(*fixture)) *fixture {
+	t.Helper()
 	t.Setenv("AUTH_MODE", "dev")
 	ctx := context.Background()
 	f := &fixture{t: t, db: db, customerID: uuid.New(), productID: uuid.New(), kitID: uuid.New(),
-		sku: "POS-" + uuid.NewString()[:8], register: "REG-" + uuid.NewString()[:8]}
-	if err := db.Pool.QueryRow(ctx, `SELECT `+defaultBranch).Scan(&f.branchID); err != nil {
+		sku: "POS-" + uuid.NewString()[:8], register: "REG-" + uuid.NewString()[:8], scaleDeviceID: uuid.New(),
+		ownBranch: own}
+	if own {
+		// the branch the fixture owns: its own rate and its own rounding
+		// rule, on its own row, where no other fixture can reach them
+		f.branchID = uuid.New()
+		mustExec(t, db, `INSERT INTO locations (id, type, code, name, timezone, default_tax_rate, cash_rounding_mode)
+			VALUES ($1, 'BRANCH', $2, 'Counter own branch', 'America/New_York', 0.088750, 'OFF')`,
+			f.branchID, "BR-"+f.branchID.String()[:8])
+	} else if err := db.Pool.QueryRow(ctx, `SELECT `+defaultBranch).Scan(&f.branchID); err != nil {
 		t.Fatalf("default branch: %v", err)
 	}
-	mustExec(t, db, `INSERT INTO customers (id, name, account_number, primary_branch_id) VALUES ($1, 'Counter Co', $2, `+defaultBranch+`)`,
-		f.customerID, "WPOS-"+uuid.NewString()[:8])
+	mustExec(t, db, `INSERT INTO customers (id, name, account_number, primary_branch_id) VALUES ($1, 'Counter Co', $2, $3)`,
+		f.customerID, "WPOS-"+uuid.NewString()[:8], f.branchID)
 	mustExec(t, db, `INSERT INTO products (id, sku, description, uom_primary, base_price, average_unit_cost) VALUES ($1, $2, '2x4x8 SPF', 'PCS', 5.5, 3.25)`,
 		f.productID, f.sku)
 	mustExec(t, db, `INSERT INTO products (id, sku, description, uom_primary, base_price, average_unit_cost, is_kit) VALUES ($1, $2, 'bundle kit', 'EA', 11.00, 6.50, TRUE)`,
 		f.kitID, "KIT-"+uuid.NewString()[:8])
 	mustExec(t, db, `INSERT INTO product_kit_components (kit_product_id, component_product_id, quantity, position) VALUES ($1, $2, 2, 0)`,
 		f.kitID, f.productID)
-	mustExec(t, db, `UPDATE locations SET default_tax_rate = 0.088750 WHERE id = `+defaultBranch)
+	mustExec(t, db, `UPDATE locations SET default_tax_rate = 0.088750 WHERE id = $1`, f.branchID)
 	f.yardID = uuid.New()
-	mustExec(t, db, `INSERT INTO locations (id, type, code, parent_id, branch_id) VALUES ($1, 'YARD', $2, `+defaultBranch+`, `+defaultBranch+`)`,
-		f.yardID, "PY-"+f.yardID.String()[:8])
+	mustExec(t, db, `INSERT INTO locations (id, type, code, parent_id, branch_id) VALUES ($1, 'YARD', $2, $3, $3)`,
+		f.yardID, "PY-"+f.yardID.String()[:8], f.branchID)
 	mustExec(t, db, `INSERT INTO inventory (product_id, location_id, location, quantity, allocated) VALUES ($1, $2, 'Y', 100, 0)`, f.productID, f.yardID)
-	mustExec(t, db, `INSERT INTO pos_registers (id, location_id, name, branch_id) VALUES ($1, $2, 'Counter test', `+defaultBranch+`) ON CONFLICT (id) DO UPDATE SET location_id = EXCLUDED.location_id, branch_id = EXCLUDED.branch_id`, f.register, f.yardID)
+	mustExec(t, db, `INSERT INTO pos_registers (id, location_id, name, branch_id) VALUES ($1, $2, 'Counter test', $3) ON CONFLICT (id) DO UPDATE SET location_id = EXCLUDED.location_id, branch_id = EXCLUDED.branch_id`, f.register, f.yardID, f.branchID)
 
 	logger := slog.Default()
 	glSvc := gl.NewService(gl.NewRepository(db), nil, logger)
@@ -140,10 +186,15 @@ func newFixture(t *testing.T, db *database.DB, opts ...func(*fixture)) *fixture 
 	invoices := invoice.NewService(invoice.NewRepository(db), glSvc, acct, db).
 		WithAuditLog(audit.NewLogger(db)).WithOutbox(outbox.NewWriter(db, "")).WithStock(stock)
 	f.events = &recordingWriter{inner: outbox.NewWriter(db, "")}
+	lcVault, verr := payment.NewVault(lcTestVaultKey)
+	if verr != nil {
+		t.Fatalf("large cash vault: %v", verr)
+	}
+	f.largeCash = largecash.NewService(db, lcVault, lcTestVaultKey)
 	f.service = pos.NewService(db, pos.NewRepository(db), logger).
 		WithInvoices(invoices).WithAR(acct).WithInventory(stock).WithLedger(glSvc).
 		WithAuditLog(audit.NewLogger(db)).WithOutbox(f.events).WithTxRunner(db).
-		WithBankLines(bankrecon.NewDepositLines(db))
+		WithBankLines(bankrecon.NewDepositLines(db)).WithLargeCash(f.largeCash)
 	// the counter guards the AR core's applications as serve wires it (C2-5):
 	// an invoice whose sale's void has standing claims takes no application,
 	// and a payment whose unapplied cash is a declined void tender's credit
@@ -172,6 +223,11 @@ func newFixture(t *testing.T, db *database.DB, opts ...func(*fixture)) *fixture 
 	// route holds the claim's sale to the caller's grants, so the fixture
 	// proves the same hold serve proves
 	pos.NewHandler(f.service).WithBranchGuard(middleware.NewBranchGuard(db)).RegisterRoutes(mux)
+	// the fixture mounts no branch middleware, so the preview's guard admits
+	// every sale; the wall itself is proved in serve (the large cash preview
+	// wall test)
+	largecash.NewHandler(f.largeCash).WithBranchGuard(admitEverySale{}).RegisterRoutes(mux, nil,
+		func(next http.Handler) http.Handler { return next })
 	invoice.NewHandler(invoices).RegisterRoutes(mux)
 	// the payment route, as serve mounts it: the contention tests race real
 	// walk-in payments against the sales, and a paymentGateway opt wires its
@@ -210,10 +266,12 @@ func roleClaims(next http.Handler) http.Handler {
 		if role := r.Header.Get("X-Test-Role"); role != "" {
 			claims := &middleware.UserClaims{Role: role, Roles: []string{role}}
 			claims.Subject = r.Header.Get("X-Test-Sub")
+			claims.Email = r.Header.Get("X-Test-Email")
 			r = r.WithContext(context.WithValue(r.Context(), middleware.UserContextKey, claims))
 		} else if roles := r.Header.Get("X-Test-Roles"); roles != "" {
 			claims := &middleware.UserClaims{Roles: strings.Split(roles, ",")}
 			claims.Subject = r.Header.Get("X-Test-Sub")
+			claims.Email = r.Header.Get("X-Test-Email")
 			r = r.WithContext(context.WithValue(r.Context(), middleware.UserContextKey, claims))
 		}
 		next.ServeHTTP(w, r)
@@ -287,14 +345,20 @@ func (f *fixture) cleanup() {
 	exec(`DELETE FROM pos_return_lines WHERE return_id IN (SELECT id FROM pos_returns)`)
 	exec(`DELETE FROM pos_returns`)
 	exec(`DELETE FROM pos_tenders WHERE transaction_id IN ` + sales)
+	// the scale ticket and its line hold each other's keys; the links go
+	// before either side (CP-19)
+	exec(`UPDATE scale_tickets SET sale_line_id = NULL WHERE sale_line_id IS NOT NULL`)
+	exec(`UPDATE pos_line_items SET scale_ticket_id = NULL WHERE scale_ticket_id IS NOT NULL`)
 	exec(`DELETE FROM pos_line_items WHERE transaction_id IN ` + sales)
+	exec(`DELETE FROM scale_tickets`)
+	exec(`DELETE FROM scale_devices`)
 	exec(`DELETE FROM pos_transactions`)
 	exec(`DELETE FROM payments WHERE id IN `+pays, f.customerID)
 	exec(`DELETE FROM credit_memo_lines WHERE credit_memo_id IN `+cms, f.customerID)
 	exec(`DELETE FROM credit_memos WHERE id IN `+cms, f.customerID)
 	exec(`DELETE FROM invoice_lines WHERE invoice_id IN `+invs, f.customerID)
 	exec(`DELETE FROM invoices WHERE id IN `+invs, f.customerID)
-	// the entries the drawer's own acts posted (movements, variances) are named
+	// the counter's own acts posted (movements, variances) are named
 	// by their rows: release them before the entries go
 	exec(`DELETE FROM till_movements`)
 	exec(`DELETE FROM till_pickup_approvals`)
@@ -306,6 +370,9 @@ func (f *fixture) cleanup() {
 		exec(`DELETE FROM gl_journal_entries WHERE id = ANY($1::uuid[])`, entryIDs)
 	}
 
+	exec(`DELETE FROM large_cash_events`)
+	exec(`DELETE FROM large_cash_tenders`)
+	exec(`DELETE FROM large_cash_payers`)
 	exec(`DELETE FROM pos_sync_log`)
 	exec(`DELETE FROM till_variance_policy`)
 	exec(`DELETE FROM till_z_reports`)
@@ -318,6 +385,33 @@ func (f *fixture) cleanup() {
 	exec(`UPDATE customers SET balance_due = 0 WHERE id IN ($1, `+walkIn+`)`, f.customerID)
 	exec(`DELETE FROM products WHERE id = $1 OR id = $2`, f.productID, f.kitID)
 	exec(`DELETE FROM customers WHERE id = $1`, f.customerID)
+	f.cleanupOwnBranch()
+}
+
+// cleanupOwnBranch removes the branch the fixture owned, children first: the
+// ledger rows that name it, the links that point at it, and the row itself.
+// Every row it touches names this fixture's own branch, so another
+// package's rows are never reached.
+func (f *fixture) cleanupOwnBranch() {
+	if !f.ownBranch {
+		return
+	}
+	ctx := context.Background()
+	exec := func(sql string, args ...any) {
+		if _, err := f.db.Pool.Exec(ctx, sql, args...); err != nil {
+			f.t.Logf("cleanup: %s: %v", strings.Join(strings.Fields(sql), " "), err)
+		}
+	}
+	// the ledger first: an entry at this branch, the lines under it, and
+	// the reversal that names it from either side
+	exec(`UPDATE bank_transactions SET matched_journal_entry_id = NULL WHERE matched_journal_entry_id IN (SELECT id FROM gl_journal_entries WHERE branch_id = $1)`, f.branchID)
+	exec(`DELETE FROM gl_journal_lines WHERE branch_id = $1 OR journal_entry_id IN (SELECT id FROM gl_journal_entries WHERE branch_id = $1)`, f.branchID)
+	exec(`UPDATE gl_journal_entries SET reverses_entry_id = NULL WHERE reverses_entry_id IN (SELECT id FROM gl_journal_entries WHERE branch_id = $1)`, f.branchID)
+	exec(`DELETE FROM gl_journal_entries WHERE branch_id = $1`, f.branchID)
+	// the link's audit row names the branch it linked the customer to
+	exec(`DELETE FROM audit_log WHERE action = 'customer.branch_linked' AND changes->>'branch_id' = $1`, f.branchID.String())
+	exec(`DELETE FROM customer_branches WHERE branch_id = $1`, f.branchID)
+	exec(`DELETE FROM locations WHERE id = $1`, f.branchID)
 }
 
 func min(a, b int) int {
@@ -753,3 +847,9 @@ func eventTypes(t *testing.T, db *database.DB, entityType, entityID string) []st
 	}
 	return out
 }
+
+// admitEverySale is a branch guard that holds nothing, for a fixture with no
+// branch middleware.
+type admitEverySale struct{}
+
+func (admitEverySale) CheckPayloadBranch(context.Context, uuid.UUID) error { return nil }

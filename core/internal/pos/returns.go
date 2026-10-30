@@ -65,6 +65,12 @@ type returnLinePriced struct {
 	// feeCents is the restocking fee withheld from this line's refund, set
 	// with the totals (resolveReturnMoney).
 	feeCents int64
+	// misTint marks the mis tint return (row CP-16): the store's own error,
+	// accepted where a customer choice return of a tinted line is refused.
+	// tinted marks a returned line whose sale carried a tint, so the can
+	// goes to the mistint rack and never back into saleable stock.
+	misTint  bool
+	tinted   bool
 	uom      string
 	stockUOM *string
 	stockQty *httpx.Quantity
@@ -270,6 +276,13 @@ func (s *Service) priceReturn(ctx context.Context, in *ReturnIn, holdCustomer bo
 	// quantity belongs in one line.
 	seenLine := map[uuid.UUID]bool{}
 	resolved := make([]ReturnLineIn, len(in.Lines))
+	tintPolicy := false
+	if in.OriginalSaleID != nil {
+		var policyErr error
+		if tintPolicy, policyErr = s.repo.TintedNoReturn(ctx); policyErr != nil {
+			return nil, policyErr
+		}
+	}
 	for i := range in.Lines {
 		rl := in.Lines[i]
 		if rl.SaleLineID != nil {
@@ -281,6 +294,25 @@ func (s *Service) priceReturn(ctx context.Context, in *ReturnIn, holdCustomer bo
 			src, ok := byID[*rl.SaleLineID]
 			if !ok {
 				return nil, invalid(fmt.Sprintf("lines[%d].line_id", i), "names no line of the original sale")
+			}
+			// The tinted no return rule (row CP-16): a tinted can goes back
+			// on no shelf, so the counter refuses its return while the
+			// dealer's policy is on, unless the store mixed the wrong colour
+			// (a mis tint, the accepted exception everywhere).
+			if src.Tint != nil && tintPolicy && rl.ReasonCode != ReasonMisTint {
+				return nil, conflict("tinted_no_return",
+					"this line was tinted to order and is not returnable: a tinted can goes back on no shelf"+
+						" (return it as a mis tint when the store mixed the wrong colour)")
+			}
+			// A tinted can the store does take back does not go back into
+			// saleable stock (row CP-16): the trade rule is that it is
+			// re-tinted and put on the marked down rack, so the customer who
+			// brought it back cannot buy the same can for less. The server
+			// refuses the restock rather than trusting the screen's radio,
+			// because a rule only in the screen is not a rule.
+			if src.Tint != nil && rl.Restock {
+				return nil, invalid(fmt.Sprintf("lines[%d].restock", i),
+					"a tinted can does not go back into saleable stock: it is re-tinted and put on the marked down rack")
 			}
 			if rl.UnitPrice != nil {
 				return nil, invalid(fmt.Sprintf("lines[%d].unit_price_ten_thousandths", i),
@@ -359,7 +391,8 @@ func (s *Service) priceReturn(ctx context.Context, in *ReturnIn, holdCustomer bo
 			perUnit := httpx.Price(divRound(int64(*src.LineTotal)*1_000_000, int64(*src.Quantity)))
 			p := returnLinePriced{in: rl, lineTotal: int64(salesdoc.CostOf(rl.Quantity, perUnit)),
 				taxable: src.Taxable, saleLine: &src, perUnit: perUnit,
-				chargeCodeID: src.ChargeCodeID, lineType: string(src.LineType)}
+				chargeCodeID: src.ChargeCodeID, lineType: string(src.LineType),
+				misTint: rl.ReasonCode == ReasonMisTint, tinted: src.Tint != nil}
 			up := perUnit
 			p.in.UnitPrice = &up
 			priced = append(priced, p)
@@ -625,6 +658,63 @@ func (s *Service) resolveReturnMoney(ctx context.Context, st *returnState) error
 	return nil
 }
 
+// ReturnFigures are the money of a return before it is taken: the figures
+// the credit memo will state (its subtotal net of the fee, the tax, the
+// total, all negative as a credit), the fee itself, and the money that goes
+// back (positive), with each line's fee beside its refund.
+type ReturnFigures struct {
+	SubtotalCents      httpx.Cents `json:"subtotal_cents"`
+	TaxCents           httpx.Cents `json:"tax_cents"`
+	RestockingFeeCents httpx.Cents `json:"restocking_fee_cents"`
+	TotalCents         httpx.Cents `json:"total_cents"`
+	// RefundCents is the money back, positive: the total's other sign.
+	RefundCents httpx.Cents        `json:"refund_cents"`
+	Lines       []ReturnFigureLine `json:"lines"`
+}
+
+// ReturnFigureLine is one line of the figures: the sale line a linked return
+// names (null on a free line), its reason, its refund (negative, the memo
+// line's shape) and the fee withheld from it.
+type ReturnFigureLine struct {
+	LineID             *uuid.UUID  `json:"line_id"`
+	ReasonCode         string      `json:"reason_code"`
+	LineTotalCents     httpx.Cents `json:"line_total_cents"`
+	RestockingFeeCents httpx.Cents `json:"restocking_fee_cents"`
+}
+
+// PreviewReturn prices a return without taking it: the same read only
+// pricing and guards ReturnSale runs (priceReturn), nothing written, so the
+// counter states the restocking fee and the money back before the act. The
+// figures are the ones the return on the same lines will carry.
+func (s *Service) PreviewReturn(ctx context.Context, cashierID uuid.UUID, in *ReturnIn) (*ReturnFigures, error) {
+	if s.ar == nil || s.inventory == nil {
+		return nil, errNotConfigured
+	}
+	st, err := s.priceReturn(ctx, in, true)
+	if err != nil {
+		return nil, err
+	}
+	st.cashierID = cashierID
+	out := &ReturnFigures{
+		SubtotalCents:      httpx.Cents(-(st.subtotal - st.feeCents)),
+		TaxCents:           httpx.Cents(-st.taxCents),
+		RestockingFeeCents: httpx.Cents(st.feeCents),
+		TotalCents:         httpx.Cents(st.total),
+		RefundCents:        httpx.Cents(-st.total),
+		Lines:              make([]ReturnFigureLine, 0, len(st.priced)),
+	}
+	for i := range st.priced {
+		p := &st.priced[i]
+		var id *uuid.UUID
+		if p.saleLine != nil {
+			id = &p.saleLine.ID
+		}
+		out.Lines = append(out.Lines, ReturnFigureLine{LineID: id, ReasonCode: reasonOf(p.in.ReasonCode),
+			LineTotalCents: httpx.Cents(-p.lineTotal), RestockingFeeCents: httpx.Cents(p.feeCents)})
+	}
+	return out, nil
+}
+
 // ReturnSale records a counter return (ADR 0005 section 14.2 C2-5): a
 // credit memo created and posted in ONE act with its restock lines,
 // refunded in cash or card or left as account credit. The card refund goes
@@ -869,8 +959,18 @@ func (s *Service) postReturn(ctx context.Context, st *returnState, claim *refund
 				if err != nil {
 					return err
 				}
-				if bound && -st.total > refundableCash {
-					spent, err := s.consumeOverride(ctx, sale.ID, OverrideRefundMethod, -st.total, st.actor)
+				// The drawer pays the rounded figure (CP-18), so the bound is
+				// against the cash that actually leaves the drawer: the sale
+				// kept the rounded cash, and the refund pays the rounded cash
+				// back.
+				payout := -st.total
+				mode, err := s.repo.BranchCashRoundingMode(ctx, sale.BranchID)
+				if err != nil {
+					return err
+				}
+				payout, _ = RoundCashFor(mode, payout)
+				if bound && payout > refundableCash {
+					spent, err := s.consumeOverride(ctx, sale.ID, OverrideRefundMethod, payout, st.actor)
 					if err != nil {
 						return err
 					}
@@ -1095,6 +1195,7 @@ func (s *Service) postReturn(ctx context.Context, st *returnState, claim *refund
 				StockUOM: stockUOM, StockQuantity: stockQty,
 				UnitPrice: unitPrice, LineTotal: ptrC(-p.lineTotal), Restock: p.in.Restock,
 				ReasonCode: reasonOf(p.in.ReasonCode), RestockingFeeCents: httpx.Cents(p.feeCents),
+				MisTint: p.misTint, TintedReturn: p.tinted,
 				SaleLineID: p.in.SaleLineID, InvoiceLineID: invoiceLineID,
 				LineType: lineType, ChargeCodeID: p.chargeCodeID,
 			})
@@ -1293,10 +1394,25 @@ func (s *Service) postReturn(ctx context.Context, st *returnState, claim *refund
 		mergeEffects(&fxAll, fxPost)
 		// The refund: cash or card pays the credit out (DR 1020 / CR 1010),
 		// account leaves the credit open.
+		//
+		// Cash rounding without pennies (CP-18): the refund against the
+		// customer and the tax stays exact, because the rounding is a rule on
+		// how cash is handed over and not a change to the price of the goods.
+		// The cash that leaves the drawer is the rounded figure, and the
+		// difference goes to the rounding account in the direction opposite
+		// the sale that created it, so the two net to zero.
 		if in.RefundMethod == RefundCash || in.RefundMethod == RefundCard {
+			var rounding int64
+			if in.RefundMethod == RefundCash {
+				mode, err := s.repo.BranchCashRoundingMode(ctx, *branchID)
+				if err != nil {
+					return err
+				}
+				_, rounding = RoundCashFor(mode, -st.total)
+			}
 			_, rfx, err := s.ar.RefundCreditMemo(ctx, account.RefundCreditMemoIn{
 				MemoID: memoID, AmountCents: -st.total, Reason: in.Reason, Method: string(in.RefundMethod),
-				GatewayRefundID: in.GatewayTxID, Actor: st.actor, On: date})
+				GatewayRefundID: in.GatewayTxID, Actor: st.actor, On: date, RoundingCents: rounding})
 			if err != nil {
 				return err
 			}

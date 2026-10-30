@@ -514,5 +514,3 @@ func TestReceiptPrintPreservesRevisionUnbumpsFailedInvoiceAndRejectsVoidedSale(t
 		t.Errorf("print_count on VOIDED sale = %d, want 0", got)
 	}
 }
-
-

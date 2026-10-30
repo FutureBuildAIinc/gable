@@ -109,4 +109,20 @@ describe('the drawer cash dialog', () => {
     expect(text(q(el, '[data-testid="movement-failure"]'))).toContain('second person');
     expect((q(el, '[data-testid="movement-amount"]') as HTMLInputElement).value).toBe('40');
   });
+
+  it('records a pickup by a manager\'s step up approval with no typed taker', async () => {
+    const el = await mount<TillMovementDialog>('gable-till-movement-dialog', { sessionId: 's-1' });
+    q<HTMLButtonElement>(el, '[data-testid="movement-kind-pickup"]').click();
+    await update(el, {});
+    await type(el, 'movement-amount', '20');
+    q<HTMLButtonElement>(el, '[data-testid="movement-ask-manager"]').click();
+    await update(el, {});
+    const dlg = el.querySelector('gable-step-up-dialog');
+    expect(dlg).not.toBeNull();
+    expect(text(q(el, '[data-testid="step-up-detail"]'))).toContain('Take $20.00 from the drawer');
+    dlg!.dispatchEvent(new CustomEvent('step-up-approved', { detail: { token: 'tok-1', managerName: 'E2E Manager' }, bubbles: true }));
+    await flush();
+    const post = calls.find((c) => c.url.includes('/movements'));
+    expect(post?.body).toEqual({ kind: 'pickup', amount_cents: 2000, approval_token: 'tok-1' });
+  });
 });

@@ -20,6 +20,7 @@ import (
 	"github.com/gablelbm/gable/internal/pricing"
 	"github.com/gablelbm/gable/internal/product"
 	"github.com/gablelbm/gable/internal/salesdoc"
+	"github.com/gablelbm/gable/internal/taxzone"
 	"github.com/gablelbm/gable/internal/units"
 	"github.com/google/uuid"
 )
@@ -78,14 +79,14 @@ type fakePortalRepo struct {
 	newOrderID    uuid.UUID
 
 	// the pro portal's core (M35): /me, /today, the timeline, the feeds
-	meUser        *CustomerUser
-	meRole        string
-	todayQuotes   []TodayQuoteRow
+	meUser          *CustomerUser
+	meRole          string
+	todayQuotes     []TodayQuoteRow
 	todayDeliveries []TodayDeliveryRow
-	todayInvoices []TodayInvoiceRow
-	todayOrders   []TodayOrderRow
-	deliveryState *orderDeliveryState
-	quotes        []PortalQuoteDTO
+	todayInvoices   []TodayInvoiceRow
+	todayOrders     []TodayOrderRow
+	deliveryState   *orderDeliveryState
+	quotes          []PortalQuoteDTO
 
 	// failures
 	getCartErr    error
@@ -391,6 +392,10 @@ func (f *fakeCustomerRepo) GetCustomerByEmail(context.Context, string) (*custome
 	return nil, errors.New("not found")
 }
 
+func (f *fakeProductRepo) UpdateConsumerDurable(ctx context.Context, id uuid.UUID, consumerDurable bool, revision int64) (int64, error) {
+	return revision + 1, nil
+}
+
 type fakeProductRepo struct {
 	products map[uuid.UUID]*product.Product
 	gets     []uuid.UUID
@@ -456,6 +461,9 @@ func (f *fakeProductRepo) UpdateVendor(context.Context, uuid.UUID, *string, *uui
 	return nil
 }
 func (f *fakeProductRepo) UpdateDimensions(context.Context, uuid.UUID, product.Geometry, int64) (int64, error) {
+	return 0, nil
+}
+func (f *fakeProductRepo) UpdateDensity(context.Context, uuid.UUID, *httpx.Quantity, *string, int64) (int64, error) {
 	return 0, nil
 }
 func (f *fakeProductRepo) UpdateLeadTime(context.Context, uuid.UUID, *int, int64) (int64, error) {
@@ -767,6 +775,10 @@ func (f *fakeOrderRepo) DefaultShipToID(context.Context, uuid.UUID) (*uuid.UUID,
 func (f *fakeOrderRepo) ShipTo(context.Context, uuid.UUID) (*order.ShipToSnapshot, *string, error) {
 	return nil, nil, nil
 }
+func (f *fakeOrderRepo) TaxZone(context.Context, string, string, string, time.Time) (*taxzone.Snapshot, error) {
+	return nil, nil
+}
+
 func (f *fakeOrderRepo) BranchTaxRate(context.Context, uuid.UUID) (*string, error) {
 	rate := "0.000000"
 	return &rate, nil

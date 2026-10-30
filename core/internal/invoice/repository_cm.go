@@ -13,6 +13,7 @@ import (
 	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/gablelbm/gable/internal/salesdoc"
 	"github.com/gablelbm/gable/internal/tax"
+	"github.com/gablelbm/gable/pkg/database"
 	"github.com/gablelbm/gable/pkg/middleware"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -207,6 +208,9 @@ func (r *PostgresRepository) creditLines(ctx context.Context, id uuid.UUID) ([]C
 	if err := r.attachLineTallyRows(ctx, plain, "credit_memo_line_id"); err != nil {
 		return nil, err
 	}
+	if err := r.attachLineTints(ctx, plain, "credit_memo_line_id"); err != nil {
+		return nil, err
+	}
 	return out, nil
 }
 
@@ -334,6 +338,36 @@ func (r *PostgresRepository) ReplaceCreditLines(ctx context.Context, memoID uuid
 					return mapWriteError(err, "failed to insert a tally row")
 				}
 			}
+		}
+		if err := insertCreditLineTint(ctx, exec, l.ID, l.Tint); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func insertCreditLineTint(ctx context.Context, exec database.Executor, lineID uuid.UUID, t *salesdoc.LineTint) error {
+	if t == nil {
+		return nil
+	}
+	var id uuid.UUID
+	if err := exec.QueryRow(ctx, `
+		INSERT INTO paint_line_tints (credit_memo_line_id, formula_id, color_code, color_name, base_code,
+			container_size_code, rescaled, tint_charge_cents)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+		RETURNING id`,
+		lineID, t.FormulaID, t.ColorCode, t.ColorName, t.BaseCode, t.ContainerSizeCode,
+		t.Rescaled, tintCentsOrZero(t.TintChargeCents)).Scan(&id); err != nil {
+		return fmt.Errorf("failed to insert the credit memo line's tint: %w", err)
+	}
+	for i, c := range t.Components {
+		if _, err := exec.Exec(ctx, `
+			INSERT INTO paint_line_tint_components (line_tint_id, position, colorant_code, colorant_name,
+				whole_oz, increments_coarse, increments_fine, unit_denominator)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+			id, i, c.ColorantCode, c.ColorantName, c.Amount.WholeOZ, c.Amount.Coarse,
+			c.Amount.Fine, c.Amount.Denominator); err != nil {
+			return fmt.Errorf("failed to insert the tint's colorant: %w", err)
 		}
 	}
 	return nil

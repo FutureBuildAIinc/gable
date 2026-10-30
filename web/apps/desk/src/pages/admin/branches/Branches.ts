@@ -14,7 +14,16 @@ import { ApiError, apiErrorMessage } from '../../../services/apiError.ts';
 import { branchContext } from '../../../services/BranchContext.ts';
 import { ToastService } from '../../../lib/toast-service.ts';
 import type { Location } from '../../../types/location.ts';
+import { CASH_ROUNDING_OFF, CASH_ROUNDING_NEAREST_5, type CashRoundingMode } from '../../../lib/cashRounding.ts';
+import '../../../components/ui/gable-select.ts';
 import { router } from '../../../lib/router.ts';
+import { LargeCashService, type LargeCashSettings } from '../../../services/LargeCashService.ts';
+
+/** The branch's own cash rounding rule (CP-18), in words. */
+const CASH_ROUNDING_OPTIONS = [
+  { value: CASH_ROUNDING_OFF, label: 'Off (cash is taken exactly)' },
+  { value: CASH_ROUNDING_NEAREST_5, label: 'Nearest five cents' },
+];
 
 interface BranchForm {
   id?: string;
@@ -29,6 +38,16 @@ interface BranchForm {
   zip?: string;
   phone?: string;
   timezone?: string;
+  /** The branch's own cash rounding rule (CP-18). */
+  cash_rounding_mode: CashRoundingMode;
+  /** The branch's country, two letters; empty means the dealer's default country. */
+  country?: string;
+  /** The walk-in identity floor in dollars (CP-17a): the amount the dealer types. */
+  walkInFloor: string;
+  /** Whether the branch asks a walk-in's identity over the floor. */
+  walkInFloorOn: boolean;
+  /** Whether the dealer changed the floor; an untouched floor keeps the country default. */
+  walkInFloorTouched: boolean;
   active: boolean;
   /** The tax fields a person types: a jurisdiction code and a rate in percent. */
   taxJurisdiction: string;
@@ -45,10 +64,42 @@ const EMPTY_FORM: BranchForm = {
   zip: '',
   phone: '',
   timezone: 'America/New_York',
+  cash_rounding_mode: CASH_ROUNDING_OFF,
+  country: '',
+  walkInFloor: '',
+  walkInFloorOn: false,
+  walkInFloorTouched: false,
   active: true,
   taxJurisdiction: '',
   taxRatePercent: '',
 };
+
+/** The United States default walk-in identity floor (CP-17a): 3,000 dollars in cents. */
+export const US_DEFAULT_WALK_IN_FLOOR_CENTS = 300000;
+
+/**
+ * The branch country's default walk-in identity floor (CP-17a): 3,000 dollars
+ * on a United States branch, off on a Canadian one.
+ */
+export function countryWalkInFloorCents(country: string | undefined | null): number {
+  return (country ?? '').toUpperCase() === 'US' ? US_DEFAULT_WALK_IN_FLOOR_CENTS : 0;
+}
+
+/**
+ * The floor the branch runs: its own amount, else the branch country's default
+ * (the United States asks at 3,000 dollars, Canada is off).
+ */
+export function walkInFloorCents(branch: Location, dealerDefault: string | undefined | null): number {
+  const country = (branch.country_code || dealerDefault || '').toUpperCase();
+  if (country !== 'US' && country !== 'CA') {
+    // no rule family of its own: there is no large cash rule to ask about
+    return 0;
+  }
+  if (branch.walk_in_identity_cents !== null && branch.walk_in_identity_cents !== undefined) {
+    return branch.walk_in_identity_cents;
+  }
+  return countryWalkInFloorCents(country);
+}
 
 /** The stored rate is a fraction (0.08875 is 8.875 percent); a person types the percent. */
 export function fractionToPercent(fraction: number | null | undefined): string {
@@ -77,6 +128,9 @@ export class GableAdminBranches extends LitElement {
   @state() private _editorOpen = false;
   @state() private _saving = false;
   @state() private _form: BranchForm = { ...EMPTY_FORM };
+  // The dealer's large cash settings (CP-17a): the default country and the Canadian dealer threshold.
+  @state() private _largeCash: LargeCashSettings | null = null;
+  @state() private _largeCashSaving = false;
 
   connectedCallback() {
     super.connectedCallback();
@@ -94,10 +148,39 @@ export class GableAdminBranches extends LitElement {
     } finally {
       this._loading = false;
     }
+    try {
+      this._largeCash = await LargeCashService.read();
+    } catch {
+      this._largeCash = null;
+    }
+  }
+
+  private _updateLargeCash(patchSettings: Partial<LargeCashSettings>) {
+    if (!this._largeCash) return;
+    this._largeCash = { ...this._largeCash, ...patchSettings };
+  }
+
+  private async _saveLargeCash() {
+    if (!this._largeCash) return;
+    this._largeCashSaving = true;
+    try {
+      this._largeCash = await LargeCashService.save(this._largeCash);
+      ToastService.show('Large cash settings saved', 'success');
+    } catch (err) {
+      ToastService.show(apiErrorMessage(err, 'Failed to save the large cash settings'), 'error');
+    } finally {
+      this._largeCashSaving = false;
+    }
   }
 
   private _openCreate() {
-    this._form = { ...EMPTY_FORM };
+    const country = this._largeCash?.country_default ?? '';
+    const floor = countryWalkInFloorCents(country);
+    this._form = {
+      ...EMPTY_FORM,
+      walkInFloor: (floor / 100).toFixed(2),
+      walkInFloorOn: floor > 0,
+    };
     this._editorOpen = true;
   }
 
@@ -114,11 +197,28 @@ export class GableAdminBranches extends LitElement {
       zip: b.zip ?? '',
       phone: b.phone ?? '',
       timezone: b.timezone ?? 'America/New_York',
+      cash_rounding_mode: b.cash_rounding_mode ?? CASH_ROUNDING_OFF,
+      country: b.country_code ?? '',
+      walkInFloor: (walkInFloorCents(b, this._largeCash?.country_default) / 100).toFixed(2),
+      walkInFloorOn: walkInFloorCents(b, this._largeCash?.country_default) > 0,
+      walkInFloorTouched: false,
       active: b.active,
       taxJurisdiction: b.tax_jurisdiction_code ?? '',
       taxRatePercent: fractionToPercent(b.default_tax_rate),
     };
     this._editorOpen = true;
+  }
+
+  /**
+   * The floor the branch runs: its own amount, else the branch country's
+   * default (the United States asks at 3,000 dollars, Canada is off).
+   */
+  private _formFloorCents(): number {
+    const country = this._form.country || this._largeCash?.country_default || '';
+    if (!this._form.walkInFloorOn) return 0;
+    const typed = Number(this._form.walkInFloor.trim());
+    if (!Number.isFinite(typed) || typed < 0) return countryWalkInFloorCents(country);
+    return Math.round(typed * 100);
   }
 
   private _closeEditor() {
@@ -163,6 +263,11 @@ export class GableAdminBranches extends LitElement {
             zip: text(f.zip),
             phone: text(f.phone),
             timezone: text(f.timezone),
+            cash_rounding_mode: f.cash_rounding_mode,
+            country_code: f.country || null,
+            // The floor (CP-17a): a touched floor is the dealer's own amount,
+            // an untouched one keeps the country default the branch had.
+            walk_in_identity_cents: f.walkInFloorTouched ? this._formFloorCents() : loaded.walk_in_identity_cents,
             active: f.active,
             tax_jurisdiction_code: f.taxJurisdiction.trim() || null,
             default_tax_rate: taxRate,
@@ -183,6 +288,9 @@ export class GableAdminBranches extends LitElement {
           zip: f.zip?.trim() || undefined,
           phone: f.phone?.trim() || undefined,
           timezone: f.timezone?.trim() || undefined,
+          cash_rounding_mode: f.cash_rounding_mode,
+          country_code: f.country || undefined,
+          walk_in_identity_cents: f.walkInFloorTouched ? this._formFloorCents() : null,
           active: f.active,
           tax_jurisdiction_code: f.taxJurisdiction.trim() || undefined,
           default_tax_rate: taxRate ?? undefined,
@@ -262,6 +370,8 @@ export class GableAdminBranches extends LitElement {
           </div>
         </div>
 
+        ${this._renderLargeCashCard()}
+
         ${this._error ? html`
           <div class="bg-safety-red/10 border border-safety-red/30 text-safety-red text-sm px-4 py-3 rounded-lg">
             ${this._error}
@@ -332,6 +442,68 @@ export class GableAdminBranches extends LitElement {
     `;
   }
 
+  /** The dealer's large cash settings: the default country and the Canadian dealer threshold (CP-17a). */
+  private _renderLargeCashCard() {
+    const lc = this._largeCash;
+    return html`
+      <div class="bg-slate-steel border border-white/5 rounded-xl p-4">
+        <div class="flex flex-wrap items-end gap-4">
+          <div>
+            <h2 class="text-sm font-semibold text-white uppercase tracking-wider">Large cash</h2>
+            <p class="text-xs text-zinc-500 mt-1">The country picks the branch's large cash rule. A branch with no country of its own uses the dealer default.</p>
+          </div>
+          <label class="text-xs uppercase tracking-wider text-zinc-500 font-semibold">
+            Dealer default country
+            <gable-select
+              class="mt-1 block font-normal normal-case tracking-normal"
+              .value=${lc?.country_default ?? ''}
+              .options=${[
+                { value: '', label: 'Not set' },
+                { value: 'US', label: 'United States (Form 8300 rule)' },
+                { value: 'CA', label: 'Canada (dealer policy)' },
+              ]}
+              ?disabled=${!lc}
+              @change=${(e: Event) => this._updateLargeCash({ country_default: (e.target as HTMLInputElement).value })}
+            ></gable-select>
+          </label>
+          <label class="flex items-center gap-2 text-sm text-zinc-300">
+            <input
+              type="checkbox"
+              .checked=${lc?.ca_enabled ?? false}
+              ?disabled=${!lc}
+              @change=${(e: Event) => this._updateLargeCash({ ca_enabled: (e.target as HTMLInputElement).checked })}
+              class="rounded bg-slate-steel border-white/10 text-gable-green focus:ring-gable-green/30"
+            />
+            Canadian dealer threshold on
+          </label>
+          <label class="text-xs uppercase tracking-wider text-zinc-500 font-semibold">
+            Canadian threshold
+            <input
+              type="number"
+              min="0"
+              step="0.01"
+              .value=${lc ? (lc.ca_threshold_cents / 100).toFixed(2) : ''}
+              ?disabled=${!lc}
+              @input=${(e: Event) => {
+                const dollars = Number((e.target as HTMLInputElement).value);
+                if (!Number.isNaN(dollars)) this._updateLargeCash({ ca_threshold_cents: Math.round(dollars * 100) });
+              }}
+              class="mt-1 block w-32 bg-deep-space/60 border border-white/10 rounded-md px-3 py-2 text-sm text-white font-normal normal-case tracking-normal focus:outline-none focus:border-gable-green/50"
+            />
+          </label>
+          <button
+            @click=${() => { void this._saveLargeCash(); }}
+            ?disabled=${!lc || this._largeCashSaving}
+            class="px-4 py-2 text-sm font-semibold bg-gable-green text-deep-space rounded-lg hover:bg-gable-green/90 transition-colors disabled:opacity-50"
+          >${this._largeCashSaving ? 'Saving...' : 'Save settings'}</button>
+        </div>
+        <p class="text-xs text-zinc-500 mt-3">
+          The Canadian threshold is a dealer policy for the dealer's own records. It is not a FINTRAC report.
+        </p>
+      </div>
+    `;
+  }
+
   private _renderEditor() {
     const isEdit = !!this._form.id;
     return html`
@@ -362,7 +534,77 @@ export class GableAdminBranches extends LitElement {
             ${this._textField('State', 'state', 'CT')}
             ${this._textField('ZIP', 'zip', '')}
             ${this._textField('Phone', 'phone', '')}
+            <label class="block text-xs uppercase tracking-wider text-zinc-500 font-semibold">
+              Country
+              <gable-select
+                class="mt-1 block font-normal normal-case tracking-normal"
+                .value=${this._form.country ?? ''}
+                .options=${[
+                  { value: '', label: 'Dealer default' },
+                  { value: 'US', label: 'United States (Form 8300 rule)' },
+                  { value: 'CA', label: 'Canada (dealer policy)' },
+                ]}
+                @change=${(e: Event) => this._updateField('country', (e.target as HTMLInputElement).value)}
+              ></gable-select>
+              <span class="mt-1 block text-xs normal-case tracking-normal font-normal text-zinc-500">
+                The country picks the branch's large cash rule. A branch saved with no country of its own needs the dealer's default country.
+              </span>
+            </label>
+            <label class="block text-xs uppercase tracking-wider text-zinc-500 font-semibold md:col-span-2">
+              Walk-in identity floor
+              <span class="mt-2 flex items-center gap-2 text-sm font-normal normal-case tracking-normal text-zinc-300">
+                <input
+                  type="checkbox"
+                  data-testid="branch-walk-in-floor-on"
+                  .checked=${this._form.walkInFloorOn}
+                  @change=${(e: Event) => {
+                    this._updateField('walkInFloorOn', (e.target as HTMLInputElement).checked);
+                    this._updateField('walkInFloorTouched', true);
+                  }}
+                  class="rounded bg-slate-steel border-white/10 text-gable-green focus:ring-gable-green/30"
+                />
+                Ask a walk-in's identity on a cash sale over
+              </span>
+              <span class="mt-2 flex items-center gap-2">
+                <input
+                  type="text"
+                  inputmode="decimal"
+                  data-testid="branch-walk-in-floor"
+                  .value=${this._form.walkInFloor}
+                  ?disabled=${!this._form.walkInFloorOn}
+                  @input=${(e: Event) => {
+                    this._updateField('walkInFloor', (e.target as HTMLInputElement).value);
+                    this._updateField('walkInFloorTouched', true);
+                  }}
+                  class="w-32 bg-deep-space/60 border border-white/10 rounded-md px-3 py-2 text-sm text-white font-normal normal-case tracking-normal focus:outline-none focus:border-gable-green/50 disabled:opacity-50"
+                />
+                <span class="text-sm font-normal normal-case tracking-normal text-zinc-400">dollars</span>
+              </span>
+              <span class="mt-1 block text-xs font-normal normal-case tracking-normal text-zinc-500" data-testid="branch-walk-in-floor-note">
+                ${this._form.walkInFloorOn
+                  ? 'Over this amount the counter asks a walk-in who paid cash to identify themselves, so their cash sales are counted together.'
+                  : 'With this off, walk-in cash is not aggregated at this branch: each walk-in\u2019s cash is counted on its own.'}
+                ${this._walkInFloorDefaultWords()}
+              </span>
+            </label>
             <div class="md:col-span-2">${this._textField('Timezone', 'timezone', 'America/New_York')}</div>
+            <label class="block text-xs uppercase tracking-wider text-zinc-500 font-semibold md:col-span-2">
+              Cash rounding
+              <gable-select
+                data-testid="branch-cash-rounding"
+                .value=${this._form.cash_rounding_mode}
+                .options=${CASH_ROUNDING_OPTIONS}
+                @change=${(e: Event) =>
+                  this._updateField(
+                    'cash_rounding_mode',
+                    (e.target as HTMLSelectElement).value as CashRoundingMode,
+                  )}
+              ></gable-select>
+              <span class="mt-1 block text-xs font-normal normal-case tracking-normal text-zinc-500">
+                Rounds the cash at the counter to the nearest five cents. The sale total and the tax stay
+                exact, and the difference goes to the branch's rounding account.
+              </span>
+            </label>
             ${this._textField('Tax jurisdiction code', 'taxJurisdiction', 'CT-HARTFORD')}
             ${this._textField('Default tax rate (percent)', 'taxRatePercent', '8.875', true)}
             <label class="flex items-center gap-2 text-sm text-zinc-300 md:col-span-2">
@@ -391,6 +633,16 @@ export class GableAdminBranches extends LitElement {
         </div>
       </div>
     `;
+  }
+
+  /** The country default the branch starts from, in plain words. */
+  private _walkInFloorDefaultWords(): string {
+    const country = this._form.country || this._largeCash?.country_default || '';
+    if (!country) return 'No country default is set: the branch runs with the floor off.';
+    if (country.toUpperCase() === 'US') {
+      return 'The United States default is 3,000.00 dollars.';
+    }
+    return 'The Canadian default is off.';
   }
 
   private _textField(

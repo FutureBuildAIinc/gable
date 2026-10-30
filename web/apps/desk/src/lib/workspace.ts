@@ -76,6 +76,7 @@ const staticZones: AppZone[] = [
     { label: 'Daily Till', path: '/reports/daily-till' },
     { label: 'POS Terminal', path: '/pos' },
     { label: 'Lost card answers', path: '/pos/lost-answers' },
+    { label: 'Refund intents', path: '/pos/refund-intents' },
   ] },
   { prefix: '/reports', key: 'reporting', label: 'Reporting', icon: BarChart3, menu: [
     { label: 'Saved Reports', path: '/reports/saved' },
@@ -117,10 +118,14 @@ const staticZones: AppZone[] = [
   { prefix: '/admin/branches', key: 'location', label: 'Branches', icon: Building2, menu: [
     { label: 'Branches', path: '/admin/branches' },
   ] },
+  { prefix: '/admin/tax-zones', key: 'taxzone', label: 'Tax Zones', icon: Building2, menu: [
+    { label: 'Tax Zones', path: '/admin/tax-zones' },
+  ] },
   { prefix: '/admin', key: 'techadmin', label: 'Tech Admin', icon: Settings, menu: [
     { label: 'Settings', path: '/admin' },
     { label: 'Apps', path: '/admin/apps' },
     { label: 'Market Indices', path: '/admin/market-indices' },
+    { label: 'Counter Rules', path: '/admin/counter-rules' },
   ] },
   { prefix: '/sales', key: 'quote', label: 'Quotes', icon: FileText },
 ];

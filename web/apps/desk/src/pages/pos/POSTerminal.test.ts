@@ -9,6 +9,7 @@ const svc = vi.hoisted(() => ({
   currentTill: vi.fn(),
   startSale: vi.fn(),
   completeSale: vi.fn(),
+  largeCashPreview: vi.fn().mockResolvedValue({ asks_details: false, fields: [], dealer_threshold: false }),
   searchProducts: vi.fn(),
   findCustomers: vi.fn(),
   attachCustomer: vi.fn(),
@@ -16,12 +17,17 @@ const svc = vi.hoisted(() => ({
   removeItem: vi.fn(),
   changeQuantity: vi.fn(),
   getSale: vi.fn(),
+  searchSales: vi.fn(),
+  createReturn: vi.fn(),
+  previewReturn: vi.fn(),
+  returnReasons: vi.fn(),
   openTill: vi.fn(),
   tillReport: vi.fn(),
   closeTill: vi.fn(),
   recordMovement: vi.fn(),
   printReceipt: vi.fn(),
   emailReceipt: vi.fn(),
+  settings: vi.fn(),
 }));
 
 vi.mock('../../services/POSService', async (orig) => {
@@ -34,7 +40,7 @@ import type { POSTerminal } from './POSTerminal';
 import { branchContext } from '../../services/BranchContext';
 import { authCustody } from '@gable/auth';
 import { openAppDialog, answerAppDialog, chooseOption } from '../../test/dom';
-import type { CounterRegister } from '../../types/pos';
+import type { CounterRegister, SaleSummary } from '../../types/pos';
 
 const reg = (id: string, branch: string, name = 'Front till'): CounterRegister => ({
   id, name, branch_id: `b-${branch}`, branch_code: branch.toUpperCase(), branch_name: `${branch} yard`,
@@ -67,7 +73,7 @@ function sale(over: Partial<Sale> = {}): Sale {
 const account: CounterCustomer = {
   id: 'cu1', name: 'Test Builders', account_number: 'A-100', standing: 'good',
   credit_limit_cents: 500000, available_credit_cents: 400000, open_receivable_cents: 100000,
-  po_required: false, jobs: [],
+  po_required: false, job_required: false, jobs: [],
 } as unknown as CounterCustomer;
 
 async function mount(s: Sale): Promise<POSTerminal> {
@@ -146,7 +152,7 @@ describe('the counter as the Panels layout', () => {
     expect(q(el, 'pos-change').textContent).toContain('$13.50');
     q(el, 'pos-pay').click();
     await new Promise((r) => setTimeout(r, 0));
-    expect(svc.completeSale).toHaveBeenCalledWith('s1', 3, [{ method: 'cash', amount_cents: 10000 }]);
+    expect(svc.completeSale).toHaveBeenCalledWith('s1', 3, [{ method: 'cash', amount_cents: 10000 }], []);
   });
 
   it('takes a split between two tenders as the added tender plus the entry', async () => {
@@ -163,7 +169,7 @@ describe('the counter as the Panels layout', () => {
     expect(svc.completeSale).toHaveBeenCalledWith('s1', 3, [
       { method: 'cash', amount_cents: 5000 },
       { method: 'card', amount_cents: 3650 },
-    ]);
+    ], []);
   });
 
   it('charges the on account tender for the whole total once a customer with credit is named', async () => {
@@ -179,7 +185,7 @@ describe('the counter as the Panels layout', () => {
     await el.updateComplete;
     q(el, 'pos-pay').click();
     await new Promise((r) => setTimeout(r, 0));
-    expect(svc.completeSale).toHaveBeenCalledWith('s1', 3, [{ method: 'account', amount_cents: 8650 }]);
+    expect(svc.completeSale).toHaveBeenCalledWith('s1', 3, [{ method: 'account', amount_cents: 8650 }], []);
   });
 
   it('keeps Pay off while the sale has no lines or the tenders fall short', async () => {
@@ -207,16 +213,16 @@ describe('the counter as the Panels layout', () => {
     await new Promise((r) => setTimeout(r, 0));
     await el.updateComplete;
     expect(svc.completeSale).toHaveBeenCalledTimes(1);
-    expect(svc.completeSale).toHaveBeenLastCalledWith('s1', 3, [{ method: 'cash', amount_cents: 10000 }]);
+    expect(svc.completeSale).toHaveBeenLastCalledWith('s1', 3, [{ method: 'cash', amount_cents: 10000 }], []);
     await typeInto(el, '86.50');
     q(el, 'pos-pay').click();
     await new Promise((r) => setTimeout(r, 0));
     expect(svc.completeSale).toHaveBeenCalledTimes(2);
-    expect(svc.completeSale).toHaveBeenLastCalledWith('s1', 3, [{ method: 'cash', amount_cents: 8650 }]);
+    expect(svc.completeSale).toHaveBeenLastCalledWith('s1', 3, [{ method: 'cash', amount_cents: 8650 }], []);
   });
 
   describe('the account refusal guards', () => {
-    type Inner = { _customer: CounterCustomer | null; _sale: Sale; _poText: string; _tenderMethod: string; _chooseMethod(m: string): void };
+    type Inner = { _customer: CounterCustomer | null; _sale: Sale; _poText: string; _jobId: string; _tenderMethod: string; _accountRefusal: string | null; _chooseMethod(m: string): void };
     const inner = (el: POSTerminal) => el as unknown as Inner;
     const withCustomer = async (c: CounterCustomer, po = ''): Promise<POSTerminal> => {
       const el = await mount(sale({ customer_id: c.id }));
@@ -228,13 +234,14 @@ describe('the counter as the Panels layout', () => {
     const onHold = { ...account, standing: 'no_credit', available_credit_cents: 0 } as unknown as CounterCustomer;
     const overLimit = { ...account, standing: 'over_limit', available_credit_cents: -2000 } as unknown as CounterCustomer;
     const needsPO = { ...account, po_required: true } as unknown as CounterCustomer;
+    const needsJob = { ...account, job_required: true, jobs: [{ id: 'j1', name: 'Ridge Build' }] } as unknown as CounterCustomer;
     const pay = async (el: POSTerminal) => {
       q(el, 'pos-pay').click();
       await new Promise((r) => setTimeout(r, 0));
       await el.updateComplete;
     };
 
-    for (const [name, c] of [['on hold', onHold], ['over the limit', overLimit], ['asking for a PO that is empty', needsPO]] as const) {
+    for (const [name, c] of [['on hold', onHold], ['over the limit', overLimit], ['asking for a PO that is empty', needsPO], ['requiring a job that is not picked', needsJob]] as const) {
       it(`refuses the choice of the account for a customer ${name}`, async () => {
         const el = await withCustomer(c);
         expect((q(el, 'tender-account') as HTMLButtonElement).disabled).toBe(true);
@@ -254,6 +261,42 @@ describe('the counter as the Panels layout', () => {
         expect(svc.completeSale).not.toHaveBeenCalled();
       });
     }
+
+    it('marks the Job select as required for a charge and clears the refusal when a job is picked', async () => {
+      const el = await withCustomer(needsJob);
+      const label = el.querySelector('label[for="pos-job"]');
+      expect(label?.textContent).toMatch(/required for a charge/);
+      expect(inner(el)._accountRefusal).toMatch(/requires a job on every charge sale/);
+      expect((q(el, 'tender-account') as HTMLButtonElement).disabled).toBe(true);
+      inner(el)._jobId = 'j1';
+      await el.updateComplete;
+      expect(inner(el)._accountRefusal).toBeNull();
+      expect((q(el, 'tender-account') as HTMLButtonElement).disabled).toBe(false);
+    });
+
+    it('says the account has no job on file when the requirement cannot be met', async () => {
+      const noneOnFile = { ...account, job_required: true, jobs: [] } as unknown as CounterCustomer;
+      const el = await withCustomer(noneOnFile);
+      expect(el.querySelector('label[for="pos-job"]')).toBeTruthy();
+      expect(inner(el)._accountRefusal).toMatch(/none on file/);
+      const select = el.querySelector('#pos-job') as HTMLSelectElement;
+      expect(select.disabled).toBe(true);
+      expect(select.textContent).toContain('No jobs on file');
+      expect(el.querySelector('#pos-customer')?.textContent).toContain('add one on the account page');
+    });
+
+    it('shows the chosen job and purchase order on the summary panels and the completed sale', async () => {
+      const el = await withCustomer(needsJob, 'PO-42');
+      inner(el)._jobId = 'j1';
+      inner(el)._sale = sale({ customer_id: needsJob.id, customer_po: 'PO-42', job_id: 'j1', status: 'completed' });
+      await el.updateComplete;
+      expect(q(el, 'review-po').textContent).toBe('PO-42');
+      expect(q(el, 'review-job').textContent).toBe('Ridge Build');
+      expect(q(el, 'pos-order-refs').textContent).toContain('PO PO-42');
+      expect(q(el, 'pos-order-refs').textContent).toContain('Job Ridge Build');
+      expect(q(el, 'pos-complete-refs').textContent).toContain('PO PO-42');
+      expect(q(el, 'pos-complete-refs').textContent).toContain('Job Ridge Build');
+    });
 
     it('rechecks at Pay when the customer goes on hold after the account was chosen', async () => {
       const el = await withCustomer(account);
@@ -281,7 +324,7 @@ describe('the counter as the Panels layout', () => {
       inner(el)._poText = 'PO-7';
       await el.updateComplete;
       await pay(el);
-      expect(svc.completeSale).toHaveBeenCalledWith('s1', 3, [{ method: 'account', amount_cents: 8650 }]);
+      expect(svc.completeSale).toHaveBeenCalledWith('s1', 3, [{ method: 'account', amount_cents: 8650 }], []);
     });
     it('rechecks at Pay an account tender already added to the list, after the PO is cleared', async () => {
       const el = await withCustomer(needsPO, 'PO-7');
@@ -378,7 +421,9 @@ describe('the counter as the Panels layout', () => {
   describe('the visual review', () => {
     // a catalogue chip is a selection, not an action
     const filled = (el: Element) => [...el.querySelectorAll('button')]
-      .filter((b) => b.className.includes('bg-gable-green') && b.getAttribute('data-testid') !== 'catalog-chip');
+      .filter((b) => b.className.includes('bg-gable-green') && b.getAttribute('data-testid') !== 'catalog-chip'
+        // the phone's pinned pay bar is the narrow surface's own Pay, not a second primary of the page body
+        && b.getAttribute('data-testid') !== 'pos-pay-bar-button');
 
     it('before a till is open, Pay is a disabled neutral button and Open Till the one primary', async () => {
       const el = await mount(sale());
@@ -444,14 +489,25 @@ describe('the counter as the Panels layout', () => {
       expect(q(el, 'pos-order-summary').contains(q(el, 'pos-pay'))).toBe(true);
     });
 
-    it('keeps two columns down to 900 pixels and stacks the order summary and Pay first below that', async () => {
+    it('keeps two columns down to 768 pixels and puts the catalogue first below that (the touch order)', async () => {
       const el = await mount(sale());
-      expect(q(el, 'pos-body').className).toContain('min-[900px]:flex-row');
-      expect(q(el, 'pos-items').className).toMatch(/min-\[900px\]:w-\[/);
-      expect(q(el, 'pos-panels').className).toContain('order-first');
-      expect(q(el, 'pos-panels').className).toContain('min-[900px]:order-none');
-      expect(q(el, 'pos-order-summary').className).toContain('order-first');
-      expect(q(el, 'pos-order-summary').className).toContain('min-[900px]:order-none');
+      expect(q(el, 'pos-body').className).toContain('min-[768px]:flex-row');
+      expect(q(el, 'pos-items').className).toMatch(/min-\[768px\]:w-\[/);
+      expect(q(el, 'pos-items').className).not.toContain('order-last');
+      expect(q(el, 'pos-panels').className).not.toContain('order-first');
+      // Below 768 the working order is the thumb's: the panels (one step open
+      // at a time) above the ticket, the ticket last; a pinned pay bar carries
+      // the total and Pay at the bottom of the screen.
+      const panels = q(el, 'pos-panels');
+      const items = q(el, 'pos-items');
+      expect(items.compareDocumentPosition(panels) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      const summary = q(el, 'pos-order-summary');
+      expect(panels.compareDocumentPosition(summary) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      expect(summary.className).not.toContain('order-first');
+      const bar = q(el, 'pos-pay-bar');
+      expect(bar).toBeTruthy();
+      expect(bar.className).toContain('min-[768px]:hidden');
+      expect(q(el, 'pos-body').compareDocumentPosition(bar) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     });
 
     it('lists every line of the order summary, never in a clipped scroller', async () => {
@@ -873,6 +929,29 @@ describe('the Panels board', () => {
       await el.updateComplete;
       expect(expanded(el, 'customer')).toBe('true');
       expect(expanded(el, 'payment')).toBe('false');
+      el.remove();
+    });
+
+    it('offers the way back to Customer for a missing job, worded for the job', async () => {
+      const needsJobOnly = { ...account, job_required: true, jobs: [{ id: 'j1', name: 'Ridge Build' }] } as unknown as CounterCustomer;
+      const el = await withCustomer(needsJobOnly);
+      expect(q(el, 'pos-account-refusal').textContent).toContain('requires a job on every charge sale');
+      toggle(el, 'payment').click();
+      await el.updateComplete;
+      expect(expanded(el, 'customer')).toBe('false');
+      const way = q(el, 'pos-refusal-customer');
+      expect(way.textContent).toContain('Pick the job in Customer');
+      way.click();
+      await el.updateComplete;
+      expect(expanded(el, 'customer')).toBe('true');
+      el.remove();
+    });
+
+    it('offers no way back for a job when the account has none on file to pick', async () => {
+      const noJobs = { ...account, job_required: true, jobs: [] } as unknown as CounterCustomer;
+      const el = await withCustomer(noJobs);
+      expect(q(el, 'pos-account-refusal').textContent).toContain('none on file');
+      expect(q(el, 'pos-refusal-customer')).toBeNull();
       el.remove();
     });
 
@@ -1860,7 +1939,7 @@ describe('no tender until the cashier chooses one', () => {
     q(el, 'pos-pay').click();
     await settle();
     expect(svc.completeSale).toHaveBeenCalledTimes(1);
-    expect(svc.completeSale).toHaveBeenCalledWith('s1', 3, [{ method: 'account', amount_cents: 8650 }]);
+    expect(svc.completeSale).toHaveBeenCalledWith('s1', 3, [{ method: 'account', amount_cents: 8650 }], []);
     el.remove();
   });
 
@@ -2118,7 +2197,7 @@ describe('the counter hotkeys and their pinned legend', () => {
     const ev = await key(el, 'F12');
     expect(ev.defaultPrevented).toBe(true);
     await settle();
-    expect(svc.completeSale).toHaveBeenCalledWith('s1', 3, [{ method: 'card', amount_cents: 8650 }]);
+    expect(svc.completeSale).toHaveBeenCalledWith('s1', 3, [{ method: 'card', amount_cents: 8650 }], []);
     el.remove();
   });
 
@@ -2372,7 +2451,7 @@ describe('a quantity change under tenders already added', () => {
     await settle();
     expect(svc.completeSale).toHaveBeenCalledWith('s1', 4, [
       { method: 'cash', amount_cents: 4000 }, { method: 'cash', amount_cents: 4650 },
-    ]);
+    ], []);
     el.remove();
   });
 
@@ -2478,7 +2557,7 @@ describe('PR 150 fix round 3: a normal split pays, and the two refused cases say
     await settle();
     expect(svc.completeSale).toHaveBeenCalledWith('s1', 3, [
       { method: 'card', amount_cents: 4000 }, { method: 'cash', amount_cents: 6000 },
-    ]);
+    ], []);
     el.remove();
   });
 
@@ -2557,7 +2636,7 @@ describe('PR 150 round 4: one rule for splits', () => {
     await new Promise((r) => setTimeout(r, 0));
     expect(svc.completeSale).toHaveBeenCalledWith('s1', 3, [
       { method: 'card', amount_cents: 4000 }, { method: 'cash', amount_cents: 5000 },
-    ]);
+    ], []);
     el.remove();
   });
 });
@@ -2748,6 +2827,534 @@ describe('drawer cash and a count held for sign off (CP-08)', () => {
     expect(el.textContent).toContain('Z-Report - Till Closed');
     expect(el.querySelector('[data-testid="till-waiting-signoff"]')).toBeNull();
     el.remove();
+  });
+
+  it('rounds cash due from the selected register branch even when branchContext.current is another branch (CP-18)', async () => {
+    (branchContext as unknown as { _branches: unknown[] })._branches = [
+      { id: 'b-other', code: 'LK', name: 'Lake Country Outpost', active: true, is_home: false, timezone: 'America/Vancouver', cash_rounding_mode: 'OFF' },
+      { id: 'b-main', code: 'MAIN', name: 'main yard', active: true, is_home: false, timezone: 'America/Vancouver', cash_rounding_mode: 'NEAREST_5_CENTS' },
+    ];
+    branchContext.setCurrent('b-other');
+    const el = await mount(sale({ subtotal_cents: 103, tax_cents: 0, total_cents: 103 }));
+    await chooseCash(el);
+    const cashDue = q(el, 'pos-cash-due');
+    expect(cashDue).not.toBeNull();
+    expect(cashDue.textContent).toContain('nearest 5 cents');
+    expect(cashDue.textContent).toContain('$1.05');
+    el.remove();
+    (branchContext as unknown as { _branches: unknown[] })._branches = [];
+    branchContext.setCurrent(null);
+  });
+});
+
+describe('return a past sale', () => {
+  beforeEach(() => { vi.clearAllMocks(); localStorage.clear(); });
+
+  const summary = (over: Partial<SaleSummary> = {}): SaleSummary => ({
+    id: 'past1', number: 'POS-000042', revision: 2, branch_id: 'b', register_id: 'REG-01', cashier_id: 'c',
+    customer_id: 'cu1', customer_name: 'Test Builders', currency: 'USD', total_cents: 12500, status: 'completed',
+    invoice_id: 'inv1', invoice_number: 'IN-000042', completed_at: new Date().toISOString(), created_at: new Date().toISOString(), business_day: '2026-10-28', item_count: 2,
+    ...over,
+  });
+
+  const fullSale = (over: Partial<Sale> = {}): Sale => sale({
+    id: 'past1', number: 'POS-000042', revision: 2, status: 'completed', total_cents: 12500,
+    lines: [line('a', 7500), line('b', 5000)] as unknown as Sale['lines'], ...over,
+  });
+
+  it('opens the search panel, searches, and renders results', async () => {
+    svc.searchSales.mockResolvedValue({ items: [summary()], next_cursor: null, limit: 50 });
+    const el = await mount(sale());
+    q(el, 'return-search-open').click();
+    await el.updateComplete;
+    expect(el.textContent).toContain('Return a past sale');
+    const query = q(el, 'return-search-query') as HTMLInputElement;
+    query.value = 'POS-000042';
+    query.dispatchEvent(new Event('input'));
+    await el.updateComplete;
+    q(el, 'return-search-submit').click();
+    await new Promise((r) => setTimeout(r, 0));
+    await el.updateComplete;
+    expect(svc.searchSales).toHaveBeenCalledWith('POS-000042', undefined);
+    const result = q(el, 'return-search-result');
+    expect(result).toBeTruthy();
+    expect(q(result, 'return-search-result-number').textContent).toContain('POS-000042');
+    expect(q(result, 'return-search-result-customer').textContent).toContain('Test Builders');
+    expect(q(result, 'return-search-result-total').textContent).toContain('$125.00');
+    expect(q(result, 'return-search-result-status').textContent).toContain('Completed');
+    expect(q(result, 'return-search-result-date').textContent).toContain('2026-10-28');
+    el.remove();
+  });
+
+  it('shows an open result as not returnable, with no pick button', async () => {
+    svc.searchSales.mockResolvedValue({ items: [summary({ status: 'open', invoice_id: null, invoice_number: null })], next_cursor: null, limit: 50 });
+    const el = await mount(sale());
+    q(el, 'return-search-open').click();
+    await el.updateComplete;
+    const query = q(el, 'return-search-query') as HTMLInputElement;
+    query.value = 'POS';
+    query.dispatchEvent(new Event('input'));
+    q(el, 'return-search-submit').click();
+    await new Promise((r) => setTimeout(r, 0));
+    await el.updateComplete;
+    expect(q(el, 'return-search-result-status').textContent).toContain('Open');
+    expect(q(el, 'return-search-result-not-completed').textContent).toContain('Not completed yet');
+    expect(q(el, 'return-search-result-pick')).toBeNull();
+    el.remove();
+  });
+
+  it('shows a voided result as not returnable', async () => {
+    svc.searchSales.mockResolvedValue({ items: [summary({ status: 'voided' })], next_cursor: null, limit: 50 });
+    const el = await mount(sale());
+    q(el, 'return-search-open').click();
+    await el.updateComplete;
+    const query = q(el, 'return-search-query') as HTMLInputElement;
+    query.value = 'void';
+    query.dispatchEvent(new Event('input'));
+    q(el, 'return-search-submit').click();
+    await new Promise((r) => setTimeout(r, 0));
+    await el.updateComplete;
+    expect(q(el, 'return-search-result-voided').textContent).toContain('Voided - cannot be returned');
+    expect(q(el, 'return-search-result-pick')).toBeNull();
+    el.remove();
+  });
+
+  it('picks a completed result and opens the return dialog on that sale', async () => {
+    svc.searchSales.mockResolvedValue({ items: [summary()], next_cursor: null, limit: 50 });
+    svc.getSale.mockResolvedValue(fullSale());
+    svc.returnReasons.mockResolvedValue([]);
+    const el = await mount(sale());
+    q(el, 'return-search-open').click();
+    await el.updateComplete;
+    const query = q(el, 'return-search-query') as HTMLInputElement;
+    query.value = 'POS-000042';
+    query.dispatchEvent(new Event('input'));
+    q(el, 'return-search-submit').click();
+    await new Promise((r) => setTimeout(r, 0));
+    await el.updateComplete;
+    q(el, 'return-search-result-pick').click();
+    await new Promise((r) => setTimeout(r, 0));
+    await el.updateComplete;
+    expect(svc.getSale).toHaveBeenCalledWith('past1');
+    expect(q(el, 'return-qty')).toBeTruthy();
+    expect(el.textContent).toContain('POS-000042');
+    el.remove();
+  });
+
+  it('shows the already-returned reason when every product line is fully returned', async () => {
+    svc.searchSales.mockResolvedValue({ items: [summary()], next_cursor: null, limit: 50 });
+    svc.getSale.mockResolvedValue(fullSale({ returned_quantities: { a: '1', b: '1' } }));
+    const el = await mount(sale());
+    q(el, 'return-search-open').click();
+    await el.updateComplete;
+    (q(el, 'return-search-query') as HTMLInputElement).value = 'POS-000042';
+    q(el, 'return-search-query').dispatchEvent(new Event('input'));
+    q(el, 'return-search-submit').click();
+    await new Promise((r) => setTimeout(r, 0));
+    await el.updateComplete;
+    q(el, 'return-search-result-pick').click();
+    await new Promise((r) => setTimeout(r, 0));
+    await el.updateComplete;
+    expect(q(el, 'return-search-error').textContent).toContain('Everything on this sale has already been returned');
+    expect(q(el, 'return-qty')).toBeNull();
+    el.remove();
+  });
+
+  it('searches by date when no query text is typed', async () => {
+    const day = new Date().toISOString().slice(0, 10);
+    svc.searchSales.mockResolvedValue({ items: [summary()], next_cursor: null, limit: 50 });
+    const el = await mount(sale());
+    q(el, 'return-search-open').click();
+    await el.updateComplete;
+    const dateField = q(el, 'return-search-date') as HTMLInputElement;
+    dateField.value = day;
+    dateField.dispatchEvent(new Event('input'));
+    await el.updateComplete;
+    q(el, 'return-search-submit').click();
+    await new Promise((r) => setTimeout(r, 0));
+    await el.updateComplete;
+    expect(svc.searchSales).toHaveBeenCalledWith('', day);
+    expect(q(el, 'return-search-result')).toBeTruthy();
+    el.remove();
+  });
+
+  it('defaults restock to back to stock and sends restock choices with the return', async () => {
+    svc.searchSales.mockResolvedValue({ items: [summary()], next_cursor: null, limit: 50 });
+    svc.getSale.mockResolvedValue(fullSale());
+    svc.returnReasons.mockResolvedValue([]);
+    svc.previewReturn.mockResolvedValue({
+      subtotal_cents: -7500, tax_cents: 0, restocking_fee_cents: 0, total_cents: -7500, refund_cents: 7500,
+      lines: [{ line_id: 'a', reason_code: 'other', line_total_cents: -7500, restocking_fee_cents: 0 }],
+    });
+    svc.createReturn.mockResolvedValue({ id: 'r1', number: 'RTN-000001', total_cents: -7500, restocking_fee_cents: 0, refund_method: 'cash' });
+    const el = await mount(sale());
+    q(el, 'return-search-open').click();
+    await el.updateComplete;
+    (q(el, 'return-search-query') as HTMLInputElement).value = 'POS-000042';
+    q(el, 'return-search-query').dispatchEvent(new Event('input'));
+    q(el, 'return-search-submit').click();
+    await new Promise((r) => setTimeout(r, 0));
+    await el.updateComplete;
+    q(el, 'return-search-result-pick').click();
+    await new Promise((r) => setTimeout(r, 0));
+    await el.updateComplete;
+    // Default is back to stock for both lines.
+    expect((el as unknown as { _returnRestockByLine: Record<string, boolean> })._returnRestockByLine).toEqual({ a: true, b: true });
+    // Mark first line damaged, leave second back to stock.
+    const damaged = [...el.querySelectorAll('[data-testid="return-restock-damaged"]')][0] as HTMLInputElement;
+    damaged.click();
+    await el.updateComplete;
+    const qty = [...el.querySelectorAll('[data-testid="return-qty"]')][0] as HTMLInputElement;
+    qty.value = '1';
+    qty.dispatchEvent(new Event('input'));
+    await el.updateComplete;
+    const note = q(el, 'return-note') as HTMLInputElement;
+    note.value = 'customer reported damage';
+    note.dispatchEvent(new Event('input'));
+    await el.updateComplete;
+    // the return waits for the server's figures, so the act waits for them too
+    await new Promise((r) => setTimeout(r, 350));
+    await el.updateComplete;
+    q(el, 'return-take').click();
+    await new Promise((r) => setTimeout(r, 0));
+    await el.updateComplete;
+    expect(svc.createReturn).toHaveBeenCalledWith(expect.objectContaining({
+      lines: [{ line_id: 'a', quantity: '1', restock: false }],
+    }));
+    expect(el.textContent).toContain('Return RTN-000001 complete - $75.00 refunded cash');
+    el.remove();
+  });
+
+  it('states the restocking fee and the refund before the return is taken', async () => {
+    svc.searchSales.mockResolvedValue({ items: [summary()], next_cursor: null, limit: 50 });
+    svc.getSale.mockResolvedValue(fullSale());
+    svc.returnReasons.mockResolvedValue([
+      { code: 'defective', label: 'Defective', restocking_fee_bps: 0, needs_note: false },
+      { code: 'changed_mind', label: 'Changed their mind', restocking_fee_bps: 1500, needs_note: false },
+    ]);
+    svc.previewReturn.mockResolvedValue({
+      subtotal_cents: -6375, tax_cents: 0, restocking_fee_cents: 1125, total_cents: -6375, refund_cents: 6375,
+      lines: [{ line_id: 'a', reason_code: 'changed_mind', line_total_cents: -7500, restocking_fee_cents: 1125 }],
+    });
+    svc.createReturn.mockResolvedValue({ id: 'r2', number: 'RTN-000002', total_cents: -6375, restocking_fee_cents: 1125, refund_method: 'cash' });
+    const el = await mount(sale());
+    q(el, 'return-search-open').click();
+    await el.updateComplete;
+    (q(el, 'return-search-query') as HTMLInputElement).value = 'POS-000042';
+    q(el, 'return-search-query').dispatchEvent(new Event('input'));
+    q(el, 'return-search-submit').click();
+    await new Promise((r) => setTimeout(r, 0));
+    await el.updateComplete;
+    q(el, 'return-search-result-pick').click();
+    await new Promise((r) => setTimeout(r, 0));
+    await el.updateComplete;
+    const qty = [...el.querySelectorAll('[data-testid="return-qty"]')][0] as HTMLInputElement;
+    qty.value = '1';
+    qty.dispatchEvent(new Event('input'));
+    await el.updateComplete;
+    // the figures come from the server, once the dialog's debounce settles
+    await new Promise((r) => setTimeout(r, 350));
+    await el.updateComplete;
+    expect(svc.previewReturn).toHaveBeenCalledWith(expect.objectContaining({
+      original_sale_id: 'past1',
+      lines: [{ line_id: 'a', quantity: '1', restock: true }],
+    }));
+    expect(q(el, 'return-figures')).toBeTruthy();
+    expect(q(el, 'return-figures-fee').textContent).toBe('$11.25');
+    expect(q(el, 'return-figures-refund').textContent).toBe('$63.75');
+    expect(q(el, 'return-figures-line-fee').textContent).toContain('Item a');
+    expect(q(el, 'return-figures-line-fee').textContent).toContain('Changed their mind');
+    el.remove();
+  });
+
+  /** Opens the return dialog on the past sale, the way the counter does. */
+  async function openOnPastSale(el: POSTerminal) {
+    q(el, 'return-search-open').click();
+    await el.updateComplete;
+    (q(el, 'return-search-query') as HTMLInputElement).value = 'POS-000042';
+    q(el, 'return-search-query').dispatchEvent(new Event('input'));
+    q(el, 'return-search-submit').click();
+    await new Promise((r) => setTimeout(r, 0));
+    await el.updateComplete;
+    q(el, 'return-search-result-pick').click();
+    await new Promise((r) => setTimeout(r, 0));
+    await el.updateComplete;
+  }
+
+  it('asks the server for the figures even when no reason carries a fee', async () => {
+    svc.searchSales.mockResolvedValue({ items: [summary()], next_cursor: null, limit: 50 });
+    svc.getSale.mockResolvedValue(fullSale());
+    svc.returnReasons.mockResolvedValue([
+      { code: 'defective', label: 'Defective', restocking_fee_bps: 0, needs_note: false },
+    ]);
+    svc.previewReturn.mockResolvedValue({
+      subtotal_cents: -7500, tax_cents: 0, restocking_fee_cents: 0, total_cents: -7500, refund_cents: 7500,
+      lines: [{ line_id: 'a', reason_code: 'other', line_total_cents: -7500, restocking_fee_cents: 0 }],
+    });
+    const el = await mount(sale());
+    await openOnPastSale(el);
+    const qty = [...el.querySelectorAll('[data-testid="return-qty"]')][0] as HTMLInputElement;
+    qty.value = '1';
+    qty.dispatchEvent(new Event('input'));
+    await el.updateComplete;
+    await new Promise((r) => setTimeout(r, 350));
+    await el.updateComplete;
+    expect(svc.previewReturn).toHaveBeenCalled();
+    expect(el.querySelector('[data-testid="return-figures"]')).toBeNull();
+    el.remove();
+  });
+
+  it('states a fee that was set after the counter read the reason list', async () => {
+    svc.searchSales.mockResolvedValue({ items: [summary()], next_cursor: null, limit: 50 });
+    svc.getSale.mockResolvedValue(fullSale());
+    // the list the counter reads carries no fee in force
+    svc.returnReasons.mockResolvedValue([
+      { code: 'changed_mind', label: 'Changed their mind', restocking_fee_bps: 0, needs_note: false },
+    ]);
+    const el = await mount(sale());
+    await openOnPastSale(el);
+    // the dealer sets a fee after the list was read: the server's preview is
+    // the only word on the fee in force, never the kept list
+    svc.previewReturn.mockResolvedValue({
+      subtotal_cents: -6375, tax_cents: 0, restocking_fee_cents: 1125, total_cents: -6375, refund_cents: 6375,
+      lines: [{ line_id: 'a', reason_code: 'changed_mind', line_total_cents: -7500, restocking_fee_cents: 1125 }],
+    });
+    const qty = [...el.querySelectorAll('[data-testid="return-qty"]')][0] as HTMLInputElement;
+    qty.value = '1';
+    qty.dispatchEvent(new Event('input'));
+    await el.updateComplete;
+    await new Promise((r) => setTimeout(r, 350));
+    await el.updateComplete;
+    expect(svc.previewReturn).toHaveBeenCalled();
+    expect(q(el, 'return-figures')).toBeTruthy();
+    expect(q(el, 'return-figures-fee').textContent).toBe('$11.25');
+    expect(q(el, 'return-figures-refund').textContent).toBe('$63.75');
+    expect(el.querySelector('[data-testid="return-fee-note"]')).toBeTruthy();
+    el.remove();
+  });
+
+  it('reads the reason list again when the dialog opens, so a fee set since is in the label', async () => {
+    svc.searchSales.mockResolvedValue({ items: [summary()], next_cursor: null, limit: 50 });
+    svc.getSale.mockResolvedValue(fullSale());
+    svc.returnReasons.mockResolvedValue([
+      { code: 'changed_mind', label: 'Changed their mind', restocking_fee_bps: 0, needs_note: false },
+    ]);
+    svc.previewReturn.mockResolvedValue({
+      subtotal_cents: -7500, tax_cents: 0, restocking_fee_cents: 0, total_cents: -7500, refund_cents: 7500,
+      lines: [{ line_id: 'a', reason_code: 'other', line_total_cents: -7500, restocking_fee_cents: 0 }],
+    });
+    const el = await mount(sale());
+    await openOnPastSale(el);
+    expect(svc.returnReasons).toHaveBeenCalledTimes(1);
+    // the dealer sets a fee after the counter read the list
+    svc.returnReasons.mockResolvedValue([
+      { code: 'changed_mind', label: 'Changed their mind', restocking_fee_bps: 1500, needs_note: false },
+    ]);
+    // the dialog is closed and opened again: the list is read again
+    const row = q(el, 'return-take').closest('div') as HTMLElement;
+    const cancel = [...row.querySelectorAll('button')].find((b) => b.textContent?.trim() === 'Cancel');
+    cancel?.click();
+    await el.updateComplete;
+    await openOnPastSale(el);
+    expect(svc.returnReasons).toHaveBeenCalledTimes(2);
+    const qty = [...el.querySelectorAll('[data-testid="return-qty"]')][0] as HTMLInputElement;
+    qty.value = '1';
+    qty.dispatchEvent(new Event('input'));
+    await el.updateComplete;
+    const select = q(el, 'return-reason') as HTMLElement & { options: { value: string; label: string }[] };
+    expect(select.options.map((o) => o.label)).toContain('Changed their mind (15% restocking fee)');
+    el.remove();
+  });
+
+  it('keeps Take the Return off while the figures are still being asked for', async () => {
+    svc.searchSales.mockResolvedValue({ items: [summary()], next_cursor: null, limit: 50 });
+    svc.getSale.mockResolvedValue(fullSale());
+    svc.returnReasons.mockResolvedValue([
+      { code: 'changed_mind', label: 'Changed their mind', restocking_fee_bps: 1500, needs_note: false },
+    ]);
+    svc.previewReturn.mockResolvedValue({
+      subtotal_cents: -6375, tax_cents: 0, restocking_fee_cents: 1125, total_cents: -6375, refund_cents: 6375,
+      lines: [{ line_id: 'a', reason_code: 'changed_mind', line_total_cents: -7500, restocking_fee_cents: 1125 }],
+    });
+    const el = await mount(sale());
+    await openOnPastSale(el);
+    const qty = [...el.querySelectorAll('[data-testid="return-qty"]')][0] as HTMLInputElement;
+    qty.value = '1';
+    qty.dispatchEvent(new Event('input'));
+    await el.updateComplete;
+    // the debounce has not fired yet: the figures are not on the screen
+    expect(svc.previewReturn).not.toHaveBeenCalled();
+    expect(el.querySelector('[data-testid="return-figures"]')).toBeNull();
+    expect((q(el, 'return-take') as HTMLButtonElement).disabled).toBe(true);
+    await new Promise((r) => setTimeout(r, 350));
+    await el.updateComplete;
+    expect(svc.previewReturn).toHaveBeenCalled();
+    expect(q(el, 'return-figures')).toBeTruthy();
+    expect((q(el, 'return-take') as HTMLButtonElement).disabled).toBe(false);
+    el.remove();
+  });
+
+  it('keeps Take the Return off while the figures are still in flight', async () => {
+    svc.searchSales.mockResolvedValue({ items: [summary()], next_cursor: null, limit: 50 });
+    svc.getSale.mockResolvedValue(fullSale());
+    svc.returnReasons.mockResolvedValue([
+      { code: 'changed_mind', label: 'Changed their mind', restocking_fee_bps: 1500, needs_note: false },
+    ]);
+    let answer: (f: unknown) => void = () => {};
+    const held = new Promise((resolve) => { answer = resolve; });
+    svc.previewReturn.mockReturnValue(held as Promise<never>);
+    const el = await mount(sale());
+    await openOnPastSale(el);
+    const qty = [...el.querySelectorAll('[data-testid="return-qty"]')][0] as HTMLInputElement;
+    qty.value = '1';
+    qty.dispatchEvent(new Event('input'));
+    await el.updateComplete;
+    await new Promise((r) => setTimeout(r, 350));
+    await el.updateComplete;
+    expect(svc.previewReturn).toHaveBeenCalled();
+    expect(el.querySelector('[data-testid="return-figures"]')).toBeNull();
+    expect((q(el, 'return-take') as HTMLButtonElement).disabled).toBe(true);
+    answer({
+      subtotal_cents: -6375, tax_cents: 0, restocking_fee_cents: 1125, total_cents: -6375, refund_cents: 6375,
+      lines: [{ line_id: 'a', reason_code: 'changed_mind', line_total_cents: -7500, restocking_fee_cents: 1125 }],
+    });
+    await el.updateComplete;
+    await new Promise((r) => setTimeout(r, 0));
+    await el.updateComplete;
+    expect(q(el, 'return-figures')).toBeTruthy();
+    expect((q(el, 'return-take') as HTMLButtonElement).disabled).toBe(false);
+    el.remove();
+  });
+});
+
+describe('the dealer check ID rule at the counter', () => {
+  beforeEach(() => { vi.clearAllMocks(); localStorage.clear(); });
+
+  const rule = (mode: 'never' | 'every_check' | 'over_amount', over_cents: number | null = null) =>
+    ({ revision: 2, rules: { check_limit_cents: null, check_id_required: { mode, over_cents } } });
+  const chooseCheck = async (el: POSTerminal) => {
+    q(el, 'tender-check').click();
+    await el.updateComplete;
+  };
+  const checkTheID = async (el: POSTerminal) => {
+    (el.querySelector('#pos-id-checked') as HTMLInputElement).checked = true;
+    (el.querySelector('#pos-id-checked') as HTMLInputElement).dispatchEvent(new Event('change'));
+    await el.updateComplete;
+    await chooseOption(el.querySelector('#pos-id-type') as HTMLElement & { value: string }, 'drivers_license');
+  };
+
+  it('asks for the ID before Pay on a check the rule covers, and pays once it is checked', async () => {
+    svc.settings.mockResolvedValue(rule('over_amount', 5000));
+    svc.completeSale.mockResolvedValue(sale({ status: 'completed' }));
+    const el = await mount(sale());
+    await new Promise((r) => setTimeout(r, 0));
+    await el.updateComplete;
+    await chooseCheck(el);
+    await typeInto(el, '86.50');
+    expect(q(el, 'pos-check-id-needed').textContent)
+      .toContain(`Checks over $50.00 in total need the customer's ID`);
+    expect((q(el, 'pos-pay') as HTMLButtonElement).disabled).toBe(true);
+    expect(q(el, 'pos-pay').textContent).toContain("Check the customer's ID");
+    expect(svc.completeSale).not.toHaveBeenCalled();
+    await checkTheID(el);
+    expect(el.querySelector('[data-testid="pos-check-id-needed"]')).toBeNull();
+    expect((q(el, 'pos-pay') as HTMLButtonElement).disabled).toBe(false);
+    q(el, 'pos-pay').click();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(svc.completeSale).toHaveBeenCalledWith('s1', 3,
+      [{ method: 'check', amount_cents: 8650, id_checked: true, id_type: 'drivers_license' }], []);
+    el.remove();
+  });
+
+  it('carries the one ID check onto an added check once the split passes the figure', async () => {
+    svc.settings.mockResolvedValue(rule('over_amount', 5000));
+    svc.completeSale.mockResolvedValue(sale({ status: 'completed' }));
+    const el = await mount(sale());
+    await new Promise((r) => setTimeout(r, 0));
+    await el.updateComplete;
+    // the first check, under the figure alone, is added with no ID asked
+    await chooseCheck(el);
+    await typeInto(el, '43.25');
+    expect(el.querySelector('[data-testid="pos-check-id-needed"]')).toBeNull();
+    q(el, 'pos-add-tender').click();
+    await el.updateComplete;
+    // the second check passes the figure together: the one ID stamps both
+    await chooseCheck(el);
+    await typeInto(el, '43.25');
+    expect(q(el, 'pos-check-id-needed').textContent)
+      .toContain(`Checks over $50.00 in total need the customer's ID`);
+    expect(q(el, 'pos-added-check-id').textContent).toContain('ID not checked yet');
+    expect((q(el, 'pos-pay') as HTMLButtonElement).disabled).toBe(true);
+    await checkTheID(el);
+    expect(el.querySelector('[data-testid="pos-check-id-needed"]')).toBeNull();
+    expect(q(el, 'pos-added-check-id').textContent).toContain('ID checked');
+    expect((q(el, 'pos-pay') as HTMLButtonElement).disabled).toBe(false);
+    q(el, 'pos-pay').click();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(svc.completeSale).toHaveBeenCalledWith('s1', 3, [
+      { method: 'check', amount_cents: 4325, id_checked: true, id_type: 'drivers_license' },
+      { method: 'check', amount_cents: 4325, id_checked: true, id_type: 'drivers_license' },
+    ], []);
+    el.remove();
+  });
+
+  it('holds the ID when two checks together pass the figure, each under it', async () => {
+    svc.settings.mockResolvedValue(rule('over_amount', 5000));
+    const el = await mount(sale());
+    await new Promise((r) => setTimeout(r, 0));
+    await el.updateComplete;
+    // a first check under the figure, with the ID, joins the split
+    (el as unknown as { _pendingTenders: { method: string; amount_cents: number; id_checked: boolean; id_type: string }[] })
+      ._pendingTenders = [{ method: 'check', amount_cents: 4325, id_checked: true, id_type: 'state_id' }];
+    await el.updateComplete;
+    await chooseCheck(el);
+    await typeInto(el, '43.25');
+    expect(q(el, 'pos-check-id-needed').textContent)
+      .toContain(`Checks over $50.00 in total need the customer's ID`);
+    expect((q(el, 'pos-pay') as HTMLButtonElement).disabled).toBe(true);
+    await checkTheID(el);
+    expect(el.querySelector('[data-testid="pos-check-id-needed"]')).toBeNull();
+    expect((q(el, 'pos-pay') as HTMLButtonElement).disabled).toBe(false);
+    el.remove();
+  });
+
+  it('warns a walk-in at entry when the check is over the dealer wide limit the same read carries', async () => {
+    svc.settings.mockResolvedValue(
+      { revision: 2, rules: { check_limit_cents: 10000, check_id_required: { mode: 'never', over_cents: null } } });
+    const el = await mount(sale());
+    await new Promise((r) => setTimeout(r, 0));
+    await el.updateComplete;
+    await chooseCheck(el);
+    await typeInto(el, '150.00');
+    expect(q(el, 'pos-check-limit').textContent).toContain('Check limit $100.00');
+    q(el, 'pos-add-tender').click();
+    await el.updateComplete;
+    expect(q(el, 'pos-check-over').textContent).toContain('over the check limit');
+    expect(svc.completeSale).not.toHaveBeenCalled();
+    el.remove();
+  });
+
+  it('asks on every check when the rule is every check, and never when no rule is set', async () => {
+    svc.settings.mockResolvedValue(rule('every_check'));
+    const el = await mount(sale());
+    await new Promise((r) => setTimeout(r, 0));
+    await el.updateComplete;
+    await chooseCheck(el);
+    await typeInto(el, '86.50');
+    expect(q(el, 'pos-check-id-needed').textContent)
+      .toContain(`This check needs the customer's ID`);
+    el.remove();
+
+    svc.settings.mockResolvedValue(rule('never'));
+    const el2 = await mount(sale());
+    await new Promise((r) => setTimeout(r, 0));
+    await el2.updateComplete;
+    q(el2, 'tender-check').click();
+    await el2.updateComplete;
+    await typeInto(el2, '86.50');
+    expect(el2.querySelector('[data-testid="pos-check-id-needed"]')).toBeNull();
+    expect((q(el2, 'pos-pay') as HTMLButtonElement).disabled).toBe(false);
+    el2.remove();
   });
 });
 

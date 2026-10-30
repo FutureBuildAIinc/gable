@@ -18,6 +18,7 @@ carries a matching `SPDX-License-Identifier` header, and
 | `web/packages/` *(shared: auth, design-system)* | `LicenseRef-OpenLBM-Surface-1.0` | [LICENSES/LicenseRef-OpenLBM-Surface-1.0.txt](LICENSES/LicenseRef-OpenLBM-Surface-1.0.txt) |
 | `tauri/` *(the native shells around the web apps)* | `LicenseRef-OpenLBM-Surface-1.0` | [LICENSES/LicenseRef-OpenLBM-Surface-1.0.txt](LICENSES/LicenseRef-OpenLBM-Surface-1.0.txt) |
 | `docs/` | `LicenseRef-OpenLBM-Docs-1.0` | [LICENSES/LicenseRef-OpenLBM-Docs-1.0.txt](LICENSES/LicenseRef-OpenLBM-Docs-1.0.txt) |
+| `deploy/` *(the deploy recipe: the compose file, its check and their README)* | `LicenseRef-OpenLBM-Docs-1.0` | [LICENSES/LicenseRef-OpenLBM-Docs-1.0.txt](LICENSES/LicenseRef-OpenLBM-Docs-1.0.txt) |
 
 ## Precedence
 

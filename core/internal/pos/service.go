@@ -15,10 +15,12 @@ import (
 	"github.com/gablelbm/gable/internal/account"
 	"github.com/gablelbm/gable/internal/gl"
 	"github.com/gablelbm/gable/internal/invoice"
+	"github.com/gablelbm/gable/internal/largecash"
 	"github.com/gablelbm/gable/internal/payment"
 	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/gablelbm/gable/internal/salesdoc"
 	"github.com/gablelbm/gable/internal/tax"
+	"github.com/gablelbm/gable/internal/taxzone"
 	"github.com/gablelbm/gable/internal/units"
 	"github.com/gablelbm/gable/pkg/audit"
 	"github.com/gablelbm/gable/pkg/database"
@@ -107,6 +109,20 @@ type Service struct {
 	terminalWait   time.Duration
 	terminalCrash  func(point string) error
 	bank           BankLines
+	// largeCash is the branch country's large cash rules (CP-17a); nil
+	// keeps the completion as it was (a stack with no rules wired).
+	largeCash LargeCashCore
+	// scale is the branch scale's driver (CP-19); nil keeps the manual
+	// weight entry path, which carries its reason instead.
+	scale ScaleReader
+}
+
+// LargeCashCore is the slice of the large cash module the counter drives:
+// the preview the payment panel asks before Pay and the capture that rides
+// the completion's transaction.
+type LargeCashCore interface {
+	Preview(ctx context.Context, f *largecash.CompletionFacts) (*largecash.Preview, error)
+	Capture(ctx context.Context, f *largecash.CompletionFacts) error
 }
 
 // ARCore is the slice of the AR core the counter drives (account.Service).
@@ -127,6 +143,9 @@ type CounterInventory interface {
 	IssueQty(ctx context.Context, productID, branchID uuid.UUID, qty httpx.Quantity) error
 	RestockQty(ctx context.Context, productID, branchID uuid.UUID, qty httpx.Quantity) error
 }
+
+// WithLargeCash wires the branch country's large cash rules (CP-17a).
+func (s *Service) WithLargeCash(lc LargeCashCore) *Service { s.largeCash = lc; return s }
 
 // NewService builds the counter's service.
 func NewService(db *database.DB, repo Repository, logger *slog.Logger) *Service {
@@ -267,19 +286,90 @@ func eventJSON(v map[string]any) []byte {
 	return raw
 }
 
-// estimateTax is the cart's live estimate at the branch rate; the money
+// estimateTax is the cart's live estimate through the one resolver; the money
 // moment resolves its own tax through the provider or the resolver
 // (ADR 0005 section 3: the estimate is not the bill).
 func (s *Service) estimateTax(ctx context.Context, sale *Sale, taxableCents httpx.Cents) int64 {
-	rate, ok, err := s.repo.BranchTaxRate(ctx, &sale.BranchID)
-	if err != nil || !ok {
+	// the estimate runs the same resolver the completion runs (CP-10): an
+	// exempt customer, a delivered sale's ship-to zone, then the branch rate
+	customerID := sale.CustomerID
+	if customerID == nil {
+		if id, _, err := s.repo.WalkInCustomer(ctx); err == nil {
+			customerID = &id
+		}
+	}
+	if customerID == nil {
 		return 0
 	}
-	scaled, _, err := salesdoc.ParseTaxRate(rate)
+	resolved, err := s.ResolveSaleTax(ctx, sale, *customerID)
+	if err != nil || resolved.Rate == nil {
+		return 0
+	}
+	scaled, _, err := salesdoc.ParseTaxRate(*resolved.Rate)
 	if err != nil {
 		return 0
 	}
 	return int64(salesdoc.TaxAt(taxableCents, scaled))
+}
+
+// zoneFor resolves a delivered sale's ship to to the zone that covers it
+// (CP-10), nil when the sale is a pickup or names no ship to or no zone
+// covers the place of receipt.
+func (s *Service) zoneFor(ctx context.Context, sale *Sale) (*taxzone.Snapshot, error) {
+	if (sale.DeliveryType != "delivery" && sale.DeliveryType != "DELIVERY") || sale.ShipToID == nil {
+		return nil, nil
+	}
+	snap, _, err := s.repo.ShipTo(ctx, *sale.ShipToID)
+	if err != nil {
+		return nil, err
+	}
+	country := ""
+	if snap.Country != nil {
+		country = *snap.Country
+	}
+	// The zone's effective window is read on the branch's own business day,
+	// never the server's clock (the exemption reads the same day).
+	day, err := s.repo.BranchLocalDate(ctx, sale.BranchID, s.now())
+	if err != nil {
+		return nil, err
+	}
+	return s.repo.TaxZone(ctx, country, snap.PostalCode, snap.Region, day)
+}
+
+// ResolveSaleTax builds the counter sale's tax inputs (CP-10): the
+// exemption, the ship to a delivered sale names with its zone and its typed
+// rate, and the branch rate, and runs the one resolver Gable has. The
+// exemption reads through exemptOn, the one window rule on the branch's
+// business day the running totals, the completion, the returns and the
+// exchanges all read, and it still outranks the ship to's zone.
+func (s *Service) ResolveSaleTax(ctx context.Context, sale *Sale, customerID uuid.UUID) (salesdoc.ResolvedTax, error) {
+	exempt, err := s.exemptOn(ctx, sale.BranchID, customerID)
+	if err != nil {
+		return salesdoc.ResolvedTax{}, err
+	}
+	inputs := salesdoc.TaxInputs{Exempt: exempt, Delivery: sale.DeliveryType == "delivery" || sale.DeliveryType == "DELIVERY"}
+	if inputs.Delivery && sale.ShipToID != nil {
+		_, typedRate, err := s.repo.ShipTo(ctx, *sale.ShipToID)
+		if err != nil {
+			return salesdoc.ResolvedTax{}, err
+		}
+		inputs.ShipToRate = typedRate
+		zone, err := s.zoneFor(ctx, sale)
+		if err != nil {
+			return salesdoc.ResolvedTax{}, err
+		}
+		if zone != nil {
+			inputs.ZoneRate = &zone.CombinedRate
+		}
+	}
+	rate, ok, err := s.repo.BranchTaxRate(ctx, &sale.BranchID)
+	if err != nil {
+		return salesdoc.ResolvedTax{}, err
+	}
+	if ok {
+		inputs.BranchRate = &rate
+	}
+	return salesdoc.ResolveTax(inputs)
 }
 
 // exemptOn reads whether the customer's certificate exempts a sale on the
@@ -343,9 +433,26 @@ func (s *Service) StartSale(ctx context.Context, in *StartSale, actor string) (*
 		currency = facts.Currency
 	}
 	var out *Sale
+	// The ship to a delivered sale names must be the customer's own (CP-10):
+	// the read is unwalled, the customer was walled above.
+	if in.ShipToID != nil {
+		ok, err := s.repo.ShipToBelongsTo(ctx, *in.ShipToID, *in.CustomerID)
+		if err != nil {
+			return nil, err
+		}
+		if !ok {
+			return nil, httpx.BadRequest("the ship to is not the customer's",
+				httpx.FieldError{Field: "ship_to_id", Message: "no such ship to for this customer"})
+		}
+	}
+	deliveryType := in.DeliveryType
+	if deliveryType == "" {
+		deliveryType = "pickup"
+	}
 	err = s.inTx(ctx, func(ctx context.Context) error {
 		sale := &Sale{RegisterID: in.RegisterID, CashierID: in.CashierID, CustomerID: in.CustomerID,
 			Status: StatusOpen, Currency: currency, WalkInID: walkInID,
+			DeliveryType: deliveryType, ShipToID: in.ShipToID,
 			Lines: []salesdoc.Line{}, Tenders: []Tender{}}
 		session, err := s.openDrawer(ctx, in.RegisterID)
 		if err != nil {
@@ -579,6 +686,39 @@ func (s *Service) priceLine(ctx context.Context, sale *Sale, pl salesdoc.ParsedL
 			cost := ref.AverageCost
 			line.CostSource, line.StockingUnitCost = &source, &cost
 		}
+
+		// A paint line's tint (row CP-16): the line price is the base price
+		// plus the dealer's tint rule. The rule follows the tint, not only
+		// the container: a tier covers the base tier it names and the
+		// colorant total it names, and the flat figure covers the rest (0
+		// when the tint is folded into the shelf price, the dominant retail
+		// model). The charge rides the tint record so the documents show it
+		// as its own amount.
+		//
+		// The dealer's rule is the only charge (money checklist item 6: the
+		// rule the screen shows is enforced on the server): what the
+		// request carried is overwritten here, and the colorant total and
+		// the base tier are read from the server's own rows, so the charge
+		// frozen on the record is the charge the price carries, never the
+		// number the screen happened to send.
+		if pl.Tint != nil {
+			rule, err := s.repo.TintChargeRule(ctx)
+			if err != nil {
+				return line, out, err
+			}
+			baseTier, err := s.repo.TintBaseTier(ctx, pl.Tint.FormulaID, pl.ProductID, pl.Tint.BaseCode)
+			if err != nil {
+				return line, out, err
+			}
+			charge := rule.Charge(salesdoc.TotalColorantOZ(pl.Tint.Components), baseTier)
+			c := httpx.Cents(charge)
+			pl.Tint.TintChargeCents = &c
+			if charge > 0 && line.UnitPrice != nil {
+				p := *line.UnitPrice + httpx.Price(charge*100)
+				line.UnitPrice = &p
+			}
+			line.Tint = pl.Tint
+		}
 	}
 	if pl.DiscountPercent != nil {
 		pct := *pl.DiscountPercent
@@ -724,7 +864,10 @@ func (s *Service) lookups(ctx context.Context, parsed []salesdoc.ParsedLine) (ma
 }
 
 // AddLine adds one line to an open cart: priced, extended, with the audit
-// rows an override or a discount owes, all in the add's own transaction.
+// rows an override or a discount owes, all in the add's own transaction. When
+// a request line names an open line of this sale (line.id), it replaces that
+// line in place in the same transaction, keeping any override price or
+// discount already on the line so tinting a scanned can never leaves two cans.
 func (s *Service) AddLine(ctx context.Context, saleID uuid.UUID, parsed []salesdoc.ParsedLine, actor string) (*Sale, error) {
 	if err := s.holdSaleBranch(ctx, saleID); err != nil {
 		return nil, err
@@ -750,32 +893,94 @@ func (s *Service) AddLine(ctx context.Context, saleID uuid.UUID, parsed []salesd
 			}
 			sale.WalkInID = walkInID
 		}
-		var priced []salesdoc.Line
-		var audits []audit.Entry
-		for i := range parsed {
-			line, out, err := s.priceLine(ctx, sale, parsed[i], actor)
-			if err != nil {
-				return err
-			}
-			priced = append(priced, line)
-			audits = append(audits, out.overrides...)
-			audits = append(audits, out.discounts...)
-		}
-		lines, err := s.explodeAndExtend(ctx, priced)
-		if err != nil {
-			return err
-		}
 		existing, err := s.repo.GetLines(ctx, saleID)
 		if err != nil {
 			return err
 		}
-		// the new lines keep the order Explode built (a kit before its
-		// components), numbered after the cart's own
-		for i := range lines {
-			lines[i].Position = len(existing) + i
+		var appended []salesdoc.Line
+		var audits []audit.Entry
+		for i := range parsed {
+			in := parsed[i]
+			if in.ID != nil {
+				var old *salesdoc.Line
+				for j := range existing {
+					if existing[j].ID == *in.ID {
+						old = &existing[j]
+					}
+				}
+				if old == nil {
+					return httpx.NotFound("line not found on this sale")
+				}
+				if old.ParentLineID != nil {
+					return invalid("line_id", "is a kit component: change the kit line, its components follow")
+				}
+				merged := mergeReplacedLine(old, in)
+				line, pricedOut, err := s.priceLine(ctx, sale, merged, actor)
+				if err != nil {
+					return err
+				}
+				line.ID = old.ID
+				if in.UnitPrice == nil && in.DiscountPercent == nil && in.DiscountAmount == nil {
+					line.PriceAdjustedBy = old.PriceAdjustedBy
+				}
+				family, err := s.explodeAndExtend(ctx, []salesdoc.Line{line})
+				if err != nil {
+					return err
+				}
+				var places []int
+				for j := range existing {
+					if existing[j].ID == old.ID || (existing[j].ParentLineID != nil && *existing[j].ParentLineID == old.ID) {
+						places = append(places, existing[j].Position)
+					}
+				}
+				for j := range family {
+					if j < len(places) {
+						family[j].Position = places[j]
+					} else {
+						family[j].Position = places[len(places)-1] + (j - len(places) + 1)
+					}
+				}
+				if err := s.repo.RemoveLine(ctx, saleID, old.ID); err != nil {
+					return err
+				}
+				if err := s.repo.AddLines(ctx, saleID, family); err != nil {
+					return err
+				}
+				if in.UnitPrice != nil || old.PriceSource != salesdoc.PriceSourceOverride {
+					for _, e := range pricedOut.overrides {
+						e.Changes["line_id"] = old.ID
+						audits = append(audits, e)
+					}
+				}
+				if in.DiscountPercent != nil || in.DiscountAmount != nil {
+					for _, e := range pricedOut.discounts {
+						e.Changes["line_id"] = old.ID
+						audits = append(audits, e)
+					}
+				}
+				continue
+			}
+			line, out, err := s.priceLine(ctx, sale, in, actor)
+			if err != nil {
+				return err
+			}
+			appended = append(appended, line)
+			audits = append(audits, out.overrides...)
+			audits = append(audits, out.discounts...)
 		}
-		if err := s.repo.AddLines(ctx, saleID, lines); err != nil {
-			return err
+		if len(appended) > 0 {
+			lines, err := s.explodeAndExtend(ctx, appended)
+			if err != nil {
+				return err
+			}
+			// the new lines keep the order Explode built (a kit before its
+			// components), numbered after the cart's own
+			for i := range lines {
+				lines[i].Position = len(existing) + i
+			}
+			if err := s.repo.AddLines(ctx, saleID, lines); err != nil {
+				return err
+			}
 		}
 		for i := range audits {
 			if s.auditLog != nil {
@@ -794,6 +999,61 @@ func (s *Service) AddLine(ctx context.Context, saleID uuid.UUID, parsed []salesd
 		return nil, err
 	}
 	return out, nil
+}
+
+// mergeReplacedLine overlays a line request onto the existing cart line it
+// replaces (for example tinting a scanned plain base line in place): the
+// request's tint, product, unit and quantity take effect, while an override
+// price or a discount already on the cart line stays unless the request sends
+// its own.
+func mergeReplacedLine(old *salesdoc.Line, in salesdoc.ParsedLine) salesdoc.ParsedLine {
+	qty := in.Quantity
+	if !in.HasQuantity && old.Quantity != nil {
+		qty = *old.Quantity
+	}
+	out := parsedFromLine(old, qty)
+	out.ID = in.ID
+	if in.LineType != "" {
+		out.LineType = in.LineType
+	}
+	if in.ProductID != nil {
+		out.ProductID = in.ProductID
+	}
+	if in.SKU != "" {
+		out.SKU = in.SKU
+	}
+	if in.Description != "" {
+		out.Description = in.Description
+	}
+	if in.UOM != "" {
+		out.UOM = in.UOM
+	}
+	if in.PriceUOM != "" && (in.UOMQty > 0 || in.UnitPrice != nil) {
+		out.PriceUOM = in.PriceUOM
+	}
+	if in.UOMQty > 0 && in.PriceUOMQty > 0 {
+		out.UOMQty, out.PriceUOMQty = in.UOMQty, in.PriceUOMQty
+	}
+	if in.HasQuantity {
+		out.HasQuantity = true
+		out.Quantity = in.Quantity
+	}
+	if len(in.TallyRows) > 0 {
+		out.TallyRows = in.TallyRows
+	}
+	if in.UnitPrice != nil {
+		out.UnitPrice = in.UnitPrice
+		out.OverrideReason = in.OverrideReason
+	}
+	if in.DiscountPercent != nil || in.DiscountAmount != nil {
+		out.DiscountPercent = in.DiscountPercent
+		out.DiscountAmount = in.DiscountAmount
+		out.DiscountReason = in.DiscountReason
+	}
+	if in.Tint != nil {
+		out.Tint = in.Tint
+	}
+	return out
 }
 
 // ChangeLineQuantity sets one line's quantity on an open cart. The line is
@@ -840,6 +1100,9 @@ func (s *Service) ChangeLineQuantity(ctx context.Context, saleID, lineID uuid.UU
 		}
 		if old.LineType == salesdoc.LineText || old.Quantity == nil {
 			return invalid("line_id", "has no quantity to change")
+		}
+		if old.WeightSource != nil {
+			return invalid("line_id", "is weighed: the quantity is the scale's; remove the line and weigh again")
 		}
 		if sale.CustomerID == nil {
 			walkInID, _, err := s.repo.WalkInCustomer(ctx)
@@ -914,6 +1177,10 @@ func (s *Service) ChangeLineQuantity(ctx context.Context, saleID, lineID uuid.UU
 // parsedFromLine turns a stored line back into the request line that made it,
 // at a new quantity: what the cashier fixed (an override price and its reason,
 // a discount, a charge's price) is carried, a list price is left to the engine.
+// A paint line's tint (row CP-16) is carried whole: the formula the customer
+// bought and the tint charge the dealer set belong to the line, not to the
+// request that first made it, so a quantity change or a customer change
+// reprices the line and keeps both.
 func parsedFromLine(l *salesdoc.Line, qty httpx.Quantity) salesdoc.ParsedLine {
 	pl := salesdoc.ParsedLine{
 		LineType:    l.LineType,
@@ -951,6 +1218,22 @@ func parsedFromLine(l *salesdoc.Line, qty httpx.Quantity) salesdoc.ParsedLine {
 	pl.DiscountPercent = l.DiscountPercent
 	pl.DiscountAmount = l.DiscountAmount
 	pl.DiscountReason = derefString(l.DiscountReason)
+	// The tint rides the line (row CP-16). The charge the dealer set is
+	// already inside the line's price, so on an override or manual line the
+	// frozen tint charge is taken back out before priceLine runs and adds
+	// the dealer's tint charge once.
+	if l.Tint != nil {
+		if pl.UnitPrice != nil && l.Tint.TintChargeCents != nil && *l.Tint.TintChargeCents > 0 {
+			base := *pl.UnitPrice - httpx.Price(int64(*l.Tint.TintChargeCents)*100)
+			if base < 0 {
+				base = 0
+			}
+			pl.UnitPrice = &base
+		}
+		tint := *l.Tint
+		tint.Components = append([]salesdoc.TintComponent(nil), l.Tint.Components...)
+		pl.Tint = &tint
+	}
 	return pl
 }
 

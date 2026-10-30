@@ -29,7 +29,7 @@ const branch = (over: Partial<Location> = {}): Location => ({
     id: 'b1', parent_id: null, path: 'West', type: 'branch', code: 'WEST', description: null,
     name: 'West Yard', address: null, city: null, state: null, zip: null, phone: null,
     tax_jurisdiction_code: null, default_tax_rate: null, timezone: 'America/New_York',
-    active: true, branch_id: null, revision: 4, created_at: '', updated_at: '',
+    cash_rounding_mode: 'OFF', active: true, branch_id: null, revision: 4, created_at: '', updated_at: '',
     ...over,
 } as Location);
 
@@ -38,6 +38,17 @@ async function mount(): Promise<GableAdminBranches> {
     const el = document.createElement('gable-admin-branches') as GableAdminBranches;
     document.body.appendChild(el);
     await new Promise((r) => setTimeout(r, 0));
+    await el.updateComplete;
+    return el;
+}
+
+async function openEditor(over: Partial<Location> = {}): Promise<GableAdminBranches> {
+    loc.listAllBranches.mockResolvedValue([branch(over)]);
+    const el = document.createElement('gable-admin-branches') as GableAdminBranches;
+    document.body.appendChild(el);
+    await new Promise((r) => setTimeout(r, 0));
+    await el.updateComplete;
+    (q(el, 'tbody tr') as HTMLElement).querySelectorAll('button')[1].click(); // Edit
     await el.updateComplete;
     return el;
 }
@@ -95,6 +106,40 @@ describe('the branch form tax fields', () => {
         save.click();
         await new Promise((r) => setTimeout(r, 0));
         expect(loc.updateBranch).not.toHaveBeenCalled();
+        el.remove();
+    });
+});
+
+// The branch editor's own cash rounding rule (CP-18): a branch turns the rule
+// on for itself, and the setting travels with the branch it belongs to.
+describe('the branch editor cash rounding setting', () => {
+    beforeEach(() => { vi.clearAllMocks(); document.body.innerHTML = ''; });
+
+    it('shows the rule the branch carries, and the other one beside it', async () => {
+        const el = await openEditor({ cash_rounding_mode: 'OFF' });
+        const select = q(el, '[data-testid="branch-cash-rounding"]') as HTMLSelectElement;
+        expect(select.value).toBe('OFF');
+        expect(Array.from(select.options).map((o) => o.value)).toEqual(['OFF', 'NEAREST_5_CENTS']);
+        el.remove();
+    });
+
+    it('saves the rule the manager picked', async () => {
+        const el = await openEditor({ cash_rounding_mode: 'OFF' });
+        const select = q(el, '[data-testid="branch-cash-rounding"]') as HTMLSelectElement;
+        select.value = 'NEAREST_5_CENTS';
+        select.dispatchEvent(new Event('change'));
+        await el.updateComplete;
+        const save = [...el.querySelectorAll('button')].find((b) => b.textContent?.includes('Save changes')) as HTMLElement;
+        save.click();
+        await new Promise((r) => setTimeout(r, 0));
+        expect(loc.updateBranch).toHaveBeenCalledWith('b1',
+            expect.objectContaining({ cash_rounding_mode: 'NEAREST_5_CENTS' }), 4);
+        el.remove();
+    });
+
+    it('leaves a branch that already rounds the cash showing its own rule', async () => {
+        const el = await openEditor({ cash_rounding_mode: 'NEAREST_5_CENTS' });
+        expect((q(el, '[data-testid="branch-cash-rounding"]') as HTMLSelectElement).value).toBe('NEAREST_5_CENTS');
         el.remove();
     });
 });

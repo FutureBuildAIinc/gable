@@ -379,9 +379,11 @@ as `curl` against `http://127.0.0.1:8080`; `$TARNWICK` is the id from
    for Tarnwick the Store credit tender is offered with what the account holds; pay half in store credit and half in
    cash. The credit memo is used up by that much, the till expects only the cash, and Void of that sale gives the
    credit back.
-7. **Returns with reasons and a fee.** Set a fee for one reason (`INSERT INTO system_settings (key, value) VALUES
-   ('pos.restocking_fee_bps.changed_mind', '1500')`). On a completed sale press Return, name a line and pick "Changed
-   their mind (15% restocking fee)": the return refunds the line less the fee, and the credit memo (open it from
+7. **Returns with reasons and a fee.** Set the fee on the screen: as an owner or admin open Admin, Counter rules
+   (`/admin/counter-rules`), press "Use the suggested fees" (the customer's own reasons at 15 percent, the dealer's
+   own mistakes at none) and Save. On a completed sale press Return, name a line and pick "Changed
+   their mind": the dialog states the restocking fee and the refund after it before the return is taken. Take the
+   return: it refunds the line less the stated fee to the cent, and the credit memo (open it from
    Credit Memos) shows "Restocking fee" as its own line. "Other" asks for a note.
 8. **An exchange.** On a completed sale press Return, name a line and a reason, press Exchange and pick the goods
    that replace it. The screen states the credit the return is worth, the replacement and what the customer pays or
@@ -392,6 +394,65 @@ as `curl` against `http://127.0.0.1:8080`; `$TARNWICK` is the id from
    press Seal signature: "Signed by ... sealed" with the first characters of the seal. Print the 80mm receipt
    twice: the second says Reprint with its count (the 80mm layout needs the receipt renderer; without it the screen
    says the layout is not available).
+
+### The manager step up at the counter
+
+Needs the demo seed with at least two yards, at the Point of Sale with the till open, signed in as the yard's cashier
+(Jordan Pike at Kelowna Main Yard). A manager (Morgan Hale, the owner) has a counter PIN: an admin sets it on the
+admin page's Staff tab (Set PIN beside the manager's row; a PIN is 4 to 8 digits, never one repeated digit or a plain
+run), which is the same as
+`curl -X PUT .../api/v1/admin/staff/$MANAGER/counter-pin -d '{"pin":"4481"}'` with `$MANAGER` the manager's staff id.
+The walk proves the approval is the manager's own, whoever is signed in at the terminal.
+
+1. **The manager list.** `curl ".../api/v1/pos/step-up/managers?act=override"` lists only staff with a PIN whose role
+   may approve an override (admin or owner): Morgan is there, Jordan is not.
+2. **A wrong PIN says so, plainly.** Ask a manager to approve (an over limit check or a blocked account sale), type
+   the reason, pick the manager and type a wrong PIN: the dialog says "That PIN is not right" and nothing is
+   recorded. Five wrong tries in a row lock the PIN: the dialog says "This manager's PIN is locked: an admin can
+   unlock it", and the Staff tab shows Locked with an Unlock that clears it.
+3. **The approval names the manager.** With the right PIN the terminal says "Approved by Morgan Hale" and the sale
+   goes through. The sale's override row names the manager by name
+   (`select approved_by from pos_account_overrides order by created_at desc limit 1;`), and so does its audit row.
+   The manager cannot approve their own sale: a sale rung up under the manager's own login is refused with
+   "A manager cannot approve their own sale".
+4. **One approval, one act.** The approval token is spent by its one act: replaying it, spending it on another sale or
+   different terms, or after its few minutes have passed is refused ("This approval does not cover this, is used up or
+   expired: ask the manager again").
+5. **A pickup taken by the manager's PIN.** In Drawer Cash pick Pickup, type the amount and press "Ask the manager
+   taking it": the manager picks themselves and types the PIN. The movement records with the manager as the taker
+   (`select taken_by from till_movements where kind='pickup' order by created_at desc limit 1;`), and the same
+   approval cannot take a different amount.
+6. **A held variance signed off by the manager's PIN.** Close the drawer with a count far over the branch's
+   threshold: the count waits for a manager. On the Daily Till page the queue lists it; type why the variance is
+   accepted, press Sign off, and the manager steps up with the same PIN: the session closes signed off by the
+   manager by name, and its over and short posts. The closer and the cashier cannot sign their own drawer off.
+
+### A credit hold from accounts receivable stops the charge (CP-11)
+
+Needs the demo seed with at least two yards and the counter open (the walk above). `$TARNWICK` is the customer id as
+before; the hold calls are accounts receivable's own routes, the ones the AR screen drives.
+
+1. **AR places the hold.** `curl -X POST .../api/v1/ar/credit-holds -H 'Content-Type: application/json'
+   -d '{"customer_id":"'$TARNWICK'","reason":"past due 60 days"}'` answers 201 with the hold. The account's flag is
+   set in the same transaction: `GET .../api/v1/ar/credit-holds?customer_id=$TARNWICK` lists it as active.
+2. **The counter states it.** At Point of Sale find Tarnwick and attach the account: the standing line says
+   "On credit hold" in the red the zero limit uses, and the line under it carries the hold's own words ("past due
+   60 days") and that nothing can be put on the account. Ring a line: Charge to account is off, and the ways
+   forward are Ask a manager to approve and Pay another way; there is no Take the amount on the account, because
+   paying the balance does not lift a hold.
+3. **The server refuses the charge.** `GET .../api/v1/pos/customers/$TARNWICK/standing?amount_cents=599` answers
+   the verdict blocked with the reason `account_hold`; a completion with an account tender
+   (`POST .../api/v1/pos/transactions/<sale>/complete`) answers 409 with the same blocker and writes nothing: no
+   invoice, no balance, no ledger row.
+4. **The account still buys.** Pay the same sale in cash: "Sale complete", and the account's balance does not move.
+5. **A manager may approve the one sale.** Start a sale, press Ask a manager to approve, type a reason: the charge
+   goes through for that sale only; the next sale is blocked again.
+6. **An override window on the hold.** `POST .../api/v1/ar/credit-holds/<hold id>/override` with
+   `"override_reason": "agreed on the phone", "override_until": "<an hour ahead>", "max_order_cents": 599`: a sale
+   of at most $5.99 on the account completes, one over the cap is refused with the cap in the words, and after the
+   window the hold stands as before.
+7. **AR releases the hold.** `POST .../api/v1/ar/credit-holds/<hold id>/release -d '{"reason":"paid up"}'`: the
+   counter attaches the account again and the charge completes.
 
 ### The card terminal at the counter, from the claim to the manager's queue
 
@@ -497,6 +558,55 @@ it posts. Run `curl` against <http://127.0.0.1:8080>; each yard's id is in `GET 
    bank line, who matched it and the difference in cents between the bank and the slip (nothing when they agree). The
    line is now matched in bank reconciliation to the day's deposit entry, so no other day can take it.
 
+### CP-19: the scale at the counter (bulk materials)
+
+Proves: CP-19 (scale integration for bulk materials: the standard protocol behind an interface, the simulated
+scale, the weigh in and weigh out with the ticket on the line, the manual weight with its reason), across two
+yards: `KEL-MAIN` (`REG-01`) and `LK` (`REG-LK`). The local stack wires the simulated SMA scale
+(`POS_SCALE_SIMULATOR` defaults on in docker-compose; unset it to run without a scale), so the deck is driven
+with curl and the dealer's steps run in the desk. Run `curl` against <http://127.0.0.1:8080>.
+
+1. **A bulk product with a density.** Create one sold by the ton, its density on the record:
+   `curl -s -X POST -H 'Content-Type: application/json' -d '{"sku":"AGG-BASE","description":"Crushed base rock","stock_uom":"TON","base_price_ten_thousandths":300000,"density_lb_per_cy":"2700","density_volume_state":"loose"}' http://127.0.0.1:8080/api/v1/products`
+   answers 201 with `density_lb_per_cy` read back. Give it stock: in `make pg-shell`,
+   `insert into inventory (product_id, location_id, location, quantity, allocated) select id, (select id from locations where type='YARD' limit 1), 'Y', 500, 0 from products where sku='AGG-BASE';`
+   A dealer changing the figure later uses the product's density field (PATCH `/api/v1/products/<id>/density`
+   with the revision).
+2. **The scale reads.** `curl -s "http://127.0.0.1:8080/api/v1/pos/scale?register_id=REG-01"` answers the
+   branch's device (the simulated yard scale, its certificate field marked as a simulation) and the reading:
+   zero, at rest. Put the empty truck on the deck:
+   `curl -s -X PUT -H 'Content-Type: application/json' -d '{"weight_lb":"32000"}' http://127.0.0.1:8080/api/v1/pos/scale/simulator`,
+   then the same GET reads 32,000 lb.
+3. **Weigh in (Jordan Pike, Point of Sale at `REG-01`).** Open Till, then open the Scale panel: the reading
+   shows the deck. Type the truck's plate `DEMO-7` and Weigh in: the open tickets list gains ticket
+   `WT-000001` (or the next number of the run) at 32,000 lb, source scale, the device named on it.
+4. **Weigh out onto the line.** Load the truck:
+   `curl -s -X PUT -H 'Content-Type: application/json' -d '{"weight_lb":"44400"}' .../api/v1/pos/scale/simulator`.
+   Start a sale, add AGG-BASE, select the line, and in the Scale panel choose DEMO-7's open weigh in and Weigh
+   out. The line now reads 6.2 TON (12,400 lb net at 2,000 lb to the ton), carries the badge "NET 12400 lb"
+   with the weigh out's ticket number, and the ticket reads gross 44,400, tare 32,000, net 12,400, basis
+   double_draft: the net is Gable's subtraction of two gross readings, and the ticket says so.
+5. **The money and the paper.** Pay the sale in cash. The line total is $186.00 (6.2 tons at $30) plus the
+   branch's tax, and the printed 80mm receipt carries the ticket number with G 44400 / T 32000 / N 12400 under
+   the line. `GET /api/v1/pos/scale/tickets?register_id=REG-01` lists both tickets; the weigh in reads
+   completed.
+6. **A moving or overloaded scale refuses.** Drive the deck to a moving load:
+   `curl -s -X PUT -H 'Content-Type: application/json' -d '{"motion":true}' .../api/v1/pos/scale/simulator` and
+   weigh in: the answer is 409 `scale_reading_refused`, no number is handed over. The same for
+   `{"status":"over_capacity"}`. Clear with `{"motion":false,"status":"none","weight_lb":"0"}`.
+7. **The manual weight with its reason (second yard).** At `REG-LK` with the deck at zero: open a sale, add
+   AGG-BASE, select the line and in the Scale panel choose Enter weight by hand: 12,400 lb, reason "The scale
+   is not answering". The line weighs at 6.2 TON with the MAN WT badge, its ticket reads source manual with
+   the reason, and the receipt prints MAN WT. The reason is a closed list
+   (`GET /api/v1/pos/scale/manual-reasons`); an invented one is a 400. While the deck shows anything but zero
+   the entry is refused 409 `scale_not_zero` (Handbook 44's rule, checked at the point of entry).
+8. **A yard line needs the density.** Create a second product stocked by the cubic yard with no density
+   (`stock_uom":"CY"`), give it stock, and weigh a truck onto its line the same way: the weigh out is refused
+   409 `density_required`, and the counter says the product needs a pounds per cubic yard figure. Set the
+   density (step 1's PATCH) and the weigh out lands the yards (the net divided by the density).
+9. **The void keeps the number.** Weigh in a truck (`WT-...`), then in the ticket list void it with a reason:
+   the list keeps the row, status void, same number, and a weigh out against it answers 409. A ticket that
+   prices a line cannot be voided (`ticket_on_line`); the line goes first.
 ### The X report mid shift, and the stored Z reports (CP-08)
 
 Needs the demo seed with at least two yards, signed in as the cashier of a yard (Jordan Pike at Kelowna Main Yard,
@@ -522,6 +632,74 @@ figures in full.
    closes of the day list, the one just made first among them, each with its balanced or over and short words. Open
    one: the Z REPORT sheet reads the frozen close, the count against the expected, read only, and prints the same
    way. At Lake Country Outpost the list holds only that register's reports.
+### The yard sale: the counter on a handheld (CP-12)
+
+Proves: CP-12 (mobile sales in the yard, on a tablet or handheld). The counter is the yard sale: the same `/pos` screen
+made touch first and framed by the field shell, not a second sale screen.
+
+Note on who is signed in: the cashier persona is Jordan Pike (cashier, `KEL-MAIN`). The browser runs narrow: set the
+window to a phone width (390) or a tablet width (820). The walk needs the field shell's dev sign in (dev mode on the
+local stack) and the browser's own dev tools to narrow the viewport.
+
+1. **The way in (Jordan Pike).** Open the field shell (`/field/`) and sign in as Cashier. The bottom tab bar offers one
+   tab, Sale; the Yard and Driver tabs are not the cashier's. Press Sale: the counter opens inside the shell's frame,
+   on `KEL-MAIN`'s register, with the shell's top bar (the yard picker, the account chip) and no second header of its
+   own.
+2. **The screen fits a phone.** At 390 the document never scrolls sideways: the header is one row (the sale's number,
+   the yard and register on one truncated line; the till state as a chip; the till's money controls behind the Till
+   button; no keyboard legend). The working order is the thumb's: the Items card first, then the ticket, then payment,
+   with a pinned pay bar at the bottom carrying the total and Pay.
+3. **A cash sale in the yard (Jordan Pike).** Open Till with a float if none is open (the Till button holds Open Till
+   when there is none). Find `2x4x8 SPF Premium` by typing `LUM-248-PREM` in the search and pressing Enter. Choose
+   Cash, press Pay on the pinned bar: the sale completes, the receipt prints (Print receipt, then the button reads
+   Reprint), and `GET /api/v1/pos/transactions?register_id=REG-01` lists it completed.
+4. **The scanner.** Press Scan on the Items card: the barcode scanner opens. The camera is the webview's own
+   permission (the OS asks once); on a desktop browser allow the camera and scan `LUM-248-PREM`: the line lands. The
+   camera inside a Tauri webview is proved by hand on the target device, once, and noted here.
+5. **A tablet at 820.** Widen to 820: the same screen becomes two columns (the Items card on the left, the panels on
+   the right), the pinned bar is gone and the Pay button is in the order summary card. The same sale completes.
+6. **Money never queues at the yard.** Cut the connection (dev tools, offline): the shell's banner says the truth, and
+   Pay is refused in the same words ("You are offline; the shell and its apps need the connection, and money never
+   queues."). No sale is created: the transaction list is unchanged. Offline selling stays the work shell's alone.
+7. **Who may sell.** The cashier opens the handheld (the Field profile lists the cashier next to warehouse and driver);
+   the warehouse hand does not sell: signing in as Warehouse offers the Yard tab only, and the server's counter wall
+   (admin, owner, cashier) is unchanged.
+
+### CP-06: return any past sale, the restock choice per line, and the refund claims queue
+
+Proves: CP-06 items 3 to 5 (a past sale is found and returned, the restock choice is per line, and the refund
+claims waiting on a manager have a screen), at the counter of `KEL-MAIN` (`REG-01`) with the second yard `LK`
+(`REG-LK`) beside it. Sign in and open Point of Sale.
+
+1. **Ring the sale to return later (Jordan Pike).** Open Till at `REG-01`, then ring two lines (a 2x4x8 SPF
+   Premium and a second product) for the account Snowfern Cabin Co and take the exact cash. The receipt's number
+   (`POS-000...`) is the sale's own number and its barcode text. Start a new sale so nothing of the first stays
+   on screen.
+2. **Find the past sale.** Press "Return a past sale". Type the first sale's number: the list answers it with its
+   customer, total and date. The same sale is found by its invoice number (`IN-...`) and by the customer's name,
+   and the date field narrows a search to one day. A voided sale in the list reads "Voided - cannot be returned"
+   and cannot be picked. The same search through the API is
+   `curl -s "http://127.0.0.1:8080/api/v1/pos/transactions?q=Snowfern"` (the sale number goes in `q` the same
+   way), and a walk-in sale's row carries `customer_name: null`.
+3. **Return one line damaged and one to stock.** Pick the sale: the return dialog opens on it. On the first line
+   choose "Damaged, not restocked"; on the second leave "Back to stock" on; take one of each back and Take the
+   Return. The credit memo and the cash refund post (`select number, status from credit_memos order by created_at
+   desc limit 1;` in `make pg-shell`), and the stock adds back only the second line's goods (`select quantity from
+   inventory where product_id = '<the first product>'` is unchanged by the damaged line). The sale now reads its
+   `returned_quantities` (`GET /api/v1/pos/transactions/<id>`), and picking it again shows each line's remainder;
+   a sale whose lines all came back reads "Everything on this sale has already been returned".
+4. **The second yard never sees the first yard's sales.** At `REG-LK` (or with the `X-Branch-Id` of `LK` on the
+   curl), the same number search answers an empty list: the branch wall holds the search to the caller's yard.
+5. **The refund claims queue (Robin Diaz).** Open Daily Till's menu and press "Refund intents" beside "Lost card
+   answers" (or go straight to `/pos/refund-intents`). Every claim still waiting on a person lists with its sale
+   number, amount, tender, state in words and how long it has been waiting: a claim "Waiting on the terminal's
+   answer" is settled with Resolve (record "The terminal refunded it" with the terminal's refund id, or "No refund
+   went out" with the reconciliation reference, each with a reason); a claim "Refund declined - the credit is
+   held" is paid back to its card with Pay back and a reason. A settled claim and a paid back credit leave the
+   list. On a stack with no card terminal the list is empty and the routes say so plainly. The API is
+   `GET /api/v1/pos/refund-intents`, guarded as the resolve routes are: a cashier's call answers 403.
+
+The remaining walks of the plan land with their items.
 
 ### CP-10: the exempt sale, the certificate on file and the branch's own rate
 

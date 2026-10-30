@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/gablelbm/gable/internal/platform/httpx"
+	"github.com/gablelbm/gable/internal/tint"
 	"github.com/gablelbm/gable/pkg/middleware"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -77,6 +78,29 @@ func (r *PostgresRepository) Buyers(ctx context.Context, customerID uuid.UUID) (
 			return nil, err
 		}
 		out = append(out, b)
+	}
+	return out, rows.Err()
+}
+
+// CounterAlerts lists the customer's alerts that speak at the counter: the
+// ones still open that are marked for the counter, oldest first.
+func (r *PostgresRepository) CounterAlerts(ctx context.Context, customerID uuid.UUID) ([]CounterAlert, error) {
+	rows, err := r.ex(ctx).Query(ctx, `
+		SELECT id, kind, text, acknowledge_required
+		FROM customer_alerts
+		WHERE customer_id = $1 AND ended_at IS NULL AND show_at_counter
+		ORDER BY created_at, id`, customerID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read the counter alerts: %w", err)
+	}
+	defer rows.Close()
+	out := []CounterAlert{}
+	for rows.Next() {
+		var a CounterAlert
+		if err := rows.Scan(&a.ID, &a.Kind, &a.Text, &a.AcknowledgeRequired); err != nil {
+			return nil, err
+		}
+		out = append(out, a)
 	}
 	return out, rows.Err()
 }
@@ -314,6 +338,7 @@ func (r *PostgresRepository) ReceiptSaleByInvoice(ctx context.Context, invoiceID
 		Scan(&s.ID, &s.Number, &s.Revision, &s.BranchID, &s.RegisterID, &s.CashierID, &s.CustomerID, &s.Currency,
 			&s.SubtotalCents, &s.TaxCents, &s.TotalCents, &s.ChangeCents, &s.TillSessionID, &s.Status, &s.InvoiceID,
 			&completed, &created, &s.CustomerPO, &s.JobID, &s.BuyerContactID, &s.PrintCount, &s.ExchangeReturnID,
+			&s.DeliveryType, &s.ShipToID,
 			&out.cashierName, &out.customerName, &out.accountNumber, &out.jobName)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, httpx.NotFound("sale not found")
@@ -323,6 +348,10 @@ func (r *PostgresRepository) ReceiptSaleByInvoice(ctx context.Context, invoiceID
 	}
 	s.CompletedAt = httpx.PtrTimestamp(completed)
 	s.CreatedAt = httpx.TimestampOf(created)
+	s.DeliveryType = strings.ToLower(s.DeliveryType)
+	if s.DeliveryType == "" {
+		s.DeliveryType = "pickup"
+	}
 	return &out, nil
 }
 
@@ -387,4 +416,74 @@ func (r *PostgresRepository) LinkExchange(ctx context.Context, returnID, saleID 
 		return fmt.Errorf("failed to link the exchange's sale: %w", err)
 	}
 	return nil
+}
+
+// TintChargeRule reads the dealer's tint charge rule (row CP-16): the flat
+// figure per container and the tiers that may cover it. None set means no
+// charge, the dominant retail model folding the tint into the shelf price.
+func (r *PostgresRepository) TintChargeRule(ctx context.Context) (tint.ChargeRule, error) {
+	return tint.ReadChargeRule(ctx, r.ex(ctx))
+}
+
+// TintBaseTier reads the tier of the base a tint mixes in: "deep" for the
+// deepest base of a system, "flat" otherwise, and "" when the base cannot be
+// resolved (a hand written line with no formula and no matching base). The
+// server resolves it from the formula first and from the line's base next, so
+// the charge never differs from what the preview quoted and never follows a
+// tier word the screen sent.
+func (r *PostgresRepository) TintBaseTier(ctx context.Context, formulaID, productID *uuid.UUID, baseCode string) (string, error) {
+	if formulaID != nil {
+		var deep bool
+		err := r.ex(ctx).QueryRow(ctx, `
+			SELECT b.is_deepest FROM paint_formulas f JOIN paint_bases b ON b.id = f.base_id
+			WHERE f.id = $1`, *formulaID).Scan(&deep)
+		if err == nil {
+			if deep {
+				return tint.BaseTierDeep, nil
+			}
+			return tint.BaseTierFlat, nil
+		}
+		if !errors.Is(err, pgx.ErrNoRows) {
+			return "", fmt.Errorf("failed to read the tint base tier: %w", err)
+		}
+	}
+	baseCode = strings.TrimSpace(baseCode)
+	if baseCode == "" && productID == nil {
+		return "", nil
+	}
+	var deep bool
+	err := r.ex(ctx).QueryRow(ctx, `
+		SELECT b.is_deepest
+		FROM paint_bases b
+		WHERE ($1 <> '' AND b.code = $1 AND ($2::uuid IS NULL OR b.product_id = $2 OR b.product_id IS NULL))
+		   OR ($1 = '' AND $2::uuid IS NOT NULL AND b.product_id = $2)
+		ORDER BY CASE WHEN $2::uuid IS NOT NULL AND b.product_id = $2 THEN 0 ELSE 1 END,
+		         b.created_at DESC
+		LIMIT 1`, baseCode, productID).Scan(&deep)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("failed to read the tint base tier: %w", err)
+	}
+	if deep {
+		return tint.BaseTierDeep, nil
+	}
+	return tint.BaseTierFlat, nil
+}
+
+// TintedNoReturn reads the tinted no return policy: off unless the setting
+// holds true, because the rule is a dealer policy and the large retailers
+// run it both ways.
+func (r *PostgresRepository) TintedNoReturn(ctx context.Context) (bool, error) {
+	var value *string
+	err := r.ex(ctx).QueryRow(ctx,
+		`SELECT value FROM system_settings WHERE key = $1`, settingTintedNoReturn).Scan(&value)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("failed to read the tinted no return setting: %w", err)
+	}
+	return value != nil && strings.TrimSpace(*value) == "true", nil
 }

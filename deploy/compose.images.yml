@@ -1,0 +1,187 @@
+# SPDX-License-Identifier: LicenseRef-OpenLBM-Docs-1.0
+# SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
+#
+# The deploy recipe, run from prebuilt images instead of a build on the host:
+# the same services, the same environment rules and the same health checks as
+# deploy/compose.yml, with `image:` refs in place of `build:`. The images come
+# from the repository's own `publish-images` workflow, which builds
+# core/Dockerfile and web/Dockerfile for a commit and pushes them to GHCR under
+# the organization; deploy/README.md ("Running from prebuilt images") says how
+# to dispatch it and how to point a platform at this file.
+#
+# The one difference from the recipe: the web image is chosen by two values.
+#
+#   GABLE_IMAGE_TAG     required. The commit sha the images were built for
+#                       (the workflow tags every image with the full sha).
+#   GABLE_WEB_TAG_PREFIX  empty for a customer, `demo-` for the demo. The demo
+#                       web image is built with the persona sign in
+#                       (VITE_AUTH_DEV_MODE=true) and carries the `demo-`
+#                       prefix on its tag; the customer web image does not.
+#
+# Everything else is the recipe unchanged: no published port, every secret with
+# no default, the seed once guard, and the plain warning below on AUTH_MODE=dev.
+# See deploy/compose.yml's header for the full commentary.
+#
+# AUTH_MODE=dev gives every caller full reach: no JWT is verified and every
+# role check passes, so anyone who reaches the port has the whole ERP, the
+# general ledger, the AR and the payments. The demo is safe only because the
+# platform's access gate (one shared password in front of the domain) keeps
+# the public out, and because the demo holds sample data and nothing else.
+# Never run a customer this way.
+
+x-core-image: &core-image
+  # One core image: the migrate, core and worker services all run the one
+  # binary it holds; each subcommand is one role.
+  image: ghcr.io/futurebuildaiinc/gable-core:${GABLE_IMAGE_TAG:?set GABLE_IMAGE_TAG to the commit sha the images were built for}
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-gable_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD to the database password (openssl rand -hex 16)}
+      POSTGRES_DB: ${POSTGRES_DB:-gable_db}
+    # The named volume holds the data. GABLE_PG_VOLUME names it, so a backup
+    # and a restore always have the same name to point at. Give a second
+    # deployment on the same host its own name.
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-gable_user} -d ${POSTGRES_DB:-gable_db}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    restart: unless-stopped
+
+  # One shot: migrate, then seed. The seed is the demo's data and it runs on
+  # the first start only (DEMO_SEED_ONCE, the recipe's seed once guard).
+  # `restart: no` is what makes it a one shot service: the platform does not
+  # start it again after it exits.
+  migrate:
+    <<: *core-image
+    command: ["sh", "-c", "./core migrate && ./core seed"]
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-gable_user}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD to the database password}@postgres:5432/${POSTGRES_DB:-gable_db}?sslmode=disable
+      # The demo data. Unset (the customer variant), nothing is seeded and the
+      # seed says so and exits.
+      DEMO_SEED: ${DEMO_SEED-}
+      DEMO_SEED_IMPORT: ${DEMO_SEED_IMPORT-}
+      # The seed's memory: it writes a marker when it finishes and skips on a
+      # later run. DEMO_SEED_FORCE=1 asks for a reseed on purpose.
+      DEMO_SEED_ONCE: ${DEMO_SEED_ONCE-1}
+      DEMO_SEED_FORCE: ${DEMO_SEED_FORCE-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      disable: true
+    restart: "no"
+
+  # The HTTP API.
+  core:
+    <<: *core-image
+    command: ["./core", "serve"]
+    environment:
+      # AUTH_MODE=dev for the demo, unset for a customer. With AUTH_MODE unset
+      # the core is fail-closed and requires JWKS_URL (AUTH_ISSUER is optional
+      # and checks the token's iss claim when set). Note: staff sign in moves
+      # to Appwrite in ADR 0012. See the note at the top of deploy/compose.yml.
+      AUTH_MODE: ${AUTH_MODE-}
+      JWKS_URL: ${JWKS_URL-}
+      AUTH_ISSUER: ${AUTH_ISSUER-}
+      PORT: "8080"
+      DATABASE_URL: postgres://${POSTGRES_USER:-gable_user}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD to the database password}@postgres:5432/${POSTGRES_DB:-gable_db}?sslmode=disable
+      # Seals the keys an administrator enters in Tech Admin. The README says
+      # how to make one. The same value every run, never in a file.
+      PAYMENT_VAULT_KEY: ${PAYMENT_VAULT_KEY:?set PAYMENT_VAULT_KEY to 64 hex characters (openssl rand -hex 32)}
+      # The portal's session secret.
+      PORTAL_JWT_SECRET: ${PORTAL_JWT_SECRET:?set PORTAL_JWT_SECRET to a long random string}
+      # The deployment's public address, and the origins allowed to call the
+      # API. Both are the same address on a single domain deployment.
+      GABLE_PUBLIC_URL: ${GABLE_PUBLIC_URL:?set GABLE_PUBLIC_URL to the deployment's public address}
+      CORS_ORIGINS: ${CORS_ORIGINS:?set CORS_ORIGINS to the deployment's public address}
+      # The platform's proxy network, so each visitor has their own rate limit
+      # budget instead of sharing one with every other visitor.
+      TRUSTED_PROXIES: ${TRUSTED_PROXIES:?set TRUSTED_PROXIES to the platform's proxy network}
+      RATE_LIMIT_PER_MINUTE: ${RATE_LIMIT_PER_MINUTE:-120}
+      EDI_OUTPUT_DIR: /app/edi_out
+      # Mail. Empty keeps the log sender: the report runs and its result is
+      # logged instead of being delivered. Set all four to send mail.
+      SMTP_HOST: ${SMTP_HOST-}
+      SMTP_PORT: ${SMTP_PORT-}
+      SMTP_FROM: ${SMTP_FROM-}
+      SMTP_TLS: ${SMTP_TLS-}
+    expose:
+      - "8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8080/healthz/ready || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+    restart: unless-stopped
+
+  # The background jobs. It serves no HTTP, so the image's curl health check
+  # is replaced by a process check (the entrypoint is the only `core` process
+  # in the container).
+  worker:
+    <<: *core-image
+    command: ["./core", "worker"]
+    environment:
+      AUTH_MODE: ${AUTH_MODE-}
+      DATABASE_URL: postgres://${POSTGRES_USER:-gable_user}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD to the database password}@postgres:5432/${POSTGRES_DB:-gable_db}?sslmode=disable
+      PAYMENT_VAULT_KEY: ${PAYMENT_VAULT_KEY:?set PAYMENT_VAULT_KEY to 64 hex characters (openssl rand -hex 32)}
+      PORTAL_JWT_SECRET: ${PORTAL_JWT_SECRET:?set PORTAL_JWT_SECRET to a long random string}
+      EDI_OUTPUT_DIR: /app/edi_out
+      SMTP_HOST: ${SMTP_HOST-}
+      SMTP_PORT: ${SMTP_PORT-}
+      SMTP_FROM: ${SMTP_FROM-}
+      SMTP_TLS: ${SMTP_TLS-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD-SHELL", "pidof core >/dev/null"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 15s
+    restart: unless-stopped
+
+  # nginx: the front door at /, the desk everywhere else, and /api proxied to
+  # core. The API snippet is the same file the local stack mounts; the image
+  # itself is the one the publish-images workflow built for the commit (the
+  # demo variant's tag, when GABLE_WEB_TAG_PREFIX is `demo-`, was built with
+  # the persona sign in).
+  web:
+    image: ghcr.io/futurebuildaiinc/gable-web:${GABLE_WEB_TAG_PREFIX:-}${GABLE_IMAGE_TAG:?set GABLE_IMAGE_TAG to the commit sha the images were built for}
+    volumes:
+      - ${GABLE_REPO_ROOT:-..}/web/nginx-local-api.conf:/etc/nginx/gable-api.conf:ro
+    expose:
+      - "8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+      core:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8080/ || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 10s
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+    name: ${GABLE_PG_VOLUME:-gable_postgres_data}

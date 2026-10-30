@@ -17,6 +17,8 @@ import (
 	"github.com/gablelbm/gable/internal/platform/pictures"
 	"github.com/gablelbm/gable/internal/salesdoc"
 	"github.com/gablelbm/gable/internal/tax"
+	"github.com/gablelbm/gable/internal/taxzone"
+	"github.com/gablelbm/gable/internal/tint"
 	"github.com/gablelbm/gable/internal/units"
 	"github.com/gablelbm/gable/pkg/branchctx"
 	"github.com/gablelbm/gable/pkg/database"
@@ -43,12 +45,39 @@ type Repository interface {
 	VoidSale(ctx context.Context, id uuid.UUID) error
 	NextSaleNumber(ctx context.Context) (string, error)
 	NextReturnNumber(ctx context.Context) (string, error)
+	// ShipToBelongsTo checks the ship to a delivered sale names is its
+	// customer's own (CP-10).
+	ShipToBelongsTo(ctx context.Context, shipToID, customerID uuid.UUID) (bool, error)
+	// ShipTo reads the ship to's snapshot and its typed rate (CP-10).
+	ShipTo(ctx context.Context, shipToID uuid.UUID) (*salesdoc.ShipToSnapshot, *string, error)
+	// TaxZone resolves a place of receipt through the zone tables (CP-10),
+	// nil when no zone covers it.
+	TaxZone(ctx context.Context, country, postal, region string, on time.Time) (*taxzone.Snapshot, error)
+	// SaveSaleShipTo freezes the ship to onto the sale row at completion.
+	SaveSaleShipTo(ctx context.Context, saleID uuid.UUID, snapshot []byte) error
+	// SetSaleDelivery names a delivered sale's ship to and delivery type
+	// (CP-10); an empty delivery type leaves the sale a pickup.
+	SetSaleDelivery(ctx context.Context, saleID uuid.UUID, shipToID *uuid.UUID, deliveryType string) error
 	ListSales(ctx context.Context, f SaleFilter, limit int) ([]SaleSummary, error)
 
 	// Lines
 	AddLines(ctx context.Context, saleID uuid.UUID, lines []salesdoc.Line) error
 	RemoveLine(ctx context.Context, saleID, lineID uuid.UUID) error
 	GetLines(ctx context.Context, saleID uuid.UUID) ([]salesdoc.Line, error)
+	// SetLineWeight writes a weighed line's weight block (CP-19).
+	SetLineWeight(ctx context.Context, lineID uuid.UUID, w LineWeight) error
+
+	// Scale tickets and the branch's device (CP-19)
+	InsertScaleTicket(ctx context.Context, t *ScaleTicket) error
+	GetScaleTicket(ctx context.Context, id uuid.UUID) (*ScaleTicket, error)
+	LockScaleTicket(ctx context.Context, id uuid.UUID) (*ScaleTicket, error)
+	FindOpenWeighIn(ctx context.Context, branchID uuid.UUID, vehicleRef string) (*ScaleTicket, error)
+	ListScaleTickets(ctx context.Context, branchID uuid.UUID, status, vehicleRef string) ([]ScaleTicket, error)
+	CompleteScaleTicket(ctx context.Context, id uuid.UUID, revision int64) error
+	VoidScaleTicket(ctx context.Context, id uuid.UUID, reason string, revision int64) error
+	// LinkScaleTicketLine names the sale line the ticket prices.
+	LinkScaleTicketLine(ctx context.Context, ticketID, lineID uuid.UUID) error
+	ActiveScaleDevice(ctx context.Context, branchID uuid.UUID) (*ScaleDevice, error)
 
 	// Tenders
 	AddTender(ctx context.Context, t *Tender) error
@@ -61,6 +90,10 @@ type Repository interface {
 	// ReturnedQtyByLine sums, per sale line, the quantity every earlier
 	// return of the sale brought back (the return's cap).
 	ReturnedQtyByLine(ctx context.Context, saleID uuid.UUID) (map[uuid.UUID]httpx.Quantity, error)
+	// ListOpenRefundIntents lists the refund claims a manager still owes an
+	// answer: every PENDING claim, and a void's FAILED claim while its
+	// tender's payment still holds the credit the pay back route returns.
+	ListOpenRefundIntents(ctx context.Context, limit int) ([]RefundIntentSummary, error)
 	// RefundedCentsByLine sums the cents every earlier return refunded per
 	// sale line, and RefundedTaxCents the tax they took back: the remainder
 	// rule of repeated partial returns reads them. CardRefundedCents sums
@@ -242,8 +275,26 @@ type Repository interface {
 	LockCreditMemo(ctx context.Context, memoID uuid.UUID) (openMemo, error)
 	LockCustomer(ctx context.Context, customerID uuid.UUID) error
 	DefaultCheckLimitCents(ctx context.Context) (*int64, error)
+	CheckIDRequiredOverCents(ctx context.Context) (*int64, error)
+	// The settings write half (CP-04): the system_settings rows and the
+	// revision anchor, inside the caller's transaction.
+	writeSetting(ctx context.Context, key, value string) error
+	deleteSetting(ctx context.Context, key string) error
+	// writeRestockingFees rewrites every reason's fee rows in one act (CP-06).
+	writeRestockingFees(ctx context.Context, fees map[string]int) error
+	// writeTintCharge writes the dealer's tint charge rule rows in one act
+	// (CP-16): the flat figure and the tier list.
+	writeTintCharge(ctx context.Context, rule tint.ChargeRule) error
+	// writeTintedNoReturn writes the dealer's tinted no return policy (CP-16).
+	writeTintedNoReturn(ctx context.Context, on bool) error
+	readPosSettingsRevision(ctx context.Context) (int64, error)
+	lockPosSettingsRevision(ctx context.Context) (int64, error)
+	bumpPosSettingsRevision(ctx context.Context, to int64) error
 	Buyers(ctx context.Context, customerID uuid.UUID) ([]Buyer, error)
 	BuyerOf(ctx context.Context, customerID, contactID uuid.UUID) (*Buyer, bool, error)
+	// CounterAlerts are the customer's alerts that speak at the counter: the
+	// open ones marked for it.
+	CounterAlerts(ctx context.Context, customerID uuid.UUID) ([]CounterAlert, error)
 	SetSaleBuyer(ctx context.Context, saleID uuid.UUID, contactID *uuid.UUID) error
 	InsertSignature(ctx context.Context, sig *storedSignature) error
 	GetSignature(ctx context.Context, saleID uuid.UUID) (*storedSignature, bool, error)
@@ -251,6 +302,16 @@ type Repository interface {
 	UnbumpPrintCount(ctx context.Context, saleID uuid.UUID) error
 	ReceiptSaleByInvoice(ctx context.Context, invoiceID uuid.UUID) (*receiptSaleFacts, error)
 	RestockingFeeBps(ctx context.Context) (map[string]int, error)
+	// TintChargeRule reads the dealer's tint charge rule (row CP-16): the flat
+	// figure per container and the tiers that may cover it.
+	TintChargeRule(ctx context.Context) (tint.ChargeRule, error)
+	// TintBaseTier reads the tier of the base a tint mixes in: "deep" for the
+	// deepest base of a system, "flat" otherwise, "" when it cannot be
+	// resolved.
+	TintBaseTier(ctx context.Context, formulaID, productID *uuid.UUID, baseCode string) (string, error)
+	// TintedNoReturn reads the dealer's tinted no return policy (row CP-16):
+	// off by default, because the rule is a dealer policy and not a law.
+	TintedNoReturn(ctx context.Context) (bool, error)
 	LockStock(ctx context.Context, productIDs []uuid.UUID, branchID uuid.UUID) error
 	LinkExchange(ctx context.Context, returnID, saleID uuid.UUID, method RefundMethod) error
 	InsertOverride(ctx context.Context, o *AccountOverride) error
@@ -258,10 +319,24 @@ type Repository interface {
 	ConsumeOverride(ctx context.Context, saleID uuid.UUID, kind string, need int64) (*AccountOverride, bool, error)
 	BranchLocalDate(ctx context.Context, branchID uuid.UUID, at time.Time) (time.Time, error)
 	BranchTaxRate(ctx context.Context, branchID *uuid.UUID) (string, bool, error)
+	// BranchCashRoundingMode reads the branch's cash rounding rule (CP-18).
+	// A branch that has never set it rounds nothing.
+	BranchCashRoundingMode(ctx context.Context, branchID uuid.UUID) (RoundingMode, error)
 
 	// Offline sync
 	SaleExists(ctx context.Context, id uuid.UUID) (bool, error)
 	LogSyncBatch(ctx context.Context, batch LogBatch) error
+
+	// The manager step up (CP-04 slice 3)
+	FindStepUpManager(ctx context.Context, manager string) (*StepUpManager, bool, error)
+	FindStepUpManagerForUpdate(ctx context.Context, manager string) (*StepUpManager, bool, error)
+	ListStepUpManagers(ctx context.Context, roles []string) ([]StepUpManagerSummary, error)
+	RecordStepUpFailure(ctx context.Context, id uuid.UUID, max int) error
+	ResetStepUpFailuresUnlocked(ctx context.Context, id uuid.UUID) (bool, error)
+	InsertStepUpApproval(ctx context.Context, act, kind string, target uuid.UUID, amountCents *int64,
+		tokenHash string, managerID uuid.UUID, managerName string, expires time.Time) error
+	ConsumeStepUpApproval(ctx context.Context, act, kind string, target uuid.UUID, amountCents *int64,
+		tokenHash string) (StepUpManagerRef, bool, error)
 }
 
 // CustomerFacts is what the counter reads about the sale's customer: the
@@ -272,6 +347,10 @@ type CustomerFacts struct {
 	Name             string
 	Currency         string
 	PORequired       bool
+	JobRequired      bool
+	// JobsOnFile says the customer holds at least one open job, so the
+	// requirement can be met at the counter.
+	JobsOnFile bool
 	// TermsKind is the terms master's kind of the customer's payment terms
 	// (NET_DAYS, DAY_OF_MONTH, DUE_ON_RECEIPT), read from the master and never
 	// from a text.
@@ -281,6 +360,9 @@ type CustomerFacts struct {
 	// CheckLimitCents is the customer's own check limit; null defers to the
 	// database wide setting.
 	CheckLimitCents *int64
+	// Hold is the account's standing hold record (credit_holds, the meaning
+	// the AR core gives it), nil when the account holds none.
+	Hold *standingHold
 }
 
 // TillAggregate is a session's raw sums, taken from the payments its sales
@@ -299,11 +381,20 @@ type TillAggregate struct {
 }
 
 // SaleFilter is the sale list's filters. Date is a YYYY-MM-DD string, so
-// the day boundary is the caller's and never the session's timezone.
+// the day boundary is the caller's and never the session's timezone; an
+// empty Date names no day bound (a search ranges over every day). Query is
+// the search text: a sale matches when its number (the receipt's barcode
+// text), its invoice's number or its customer's name contains it.
 type SaleFilter struct {
 	RegisterID string
 	Date       string
 	Status     string
+	Query      string
+	// Today is the plain list's own day (no search text): the bound is the
+	// branch's today, computed in the branch's zone, never the server's
+	// clock. A search names no day bound unless Date is set, and leaves
+	// both empty.
+	Today bool
 }
 
 // ReturnFilter is the return list's filters.
@@ -353,8 +444,13 @@ func dayBounds(day string) (time.Time, time.Time) {
 	return start, start.Add(24 * time.Hour)
 }
 
-// posLineCols is the shared line projection over pos_line_items.
-var posLineCols = salesdoc.LineColumns(`false, NULL::uuid, NULL::bigint`)
+// posLineCols is the shared line projection over pos_line_items, with the
+// counter's own weight block (CP-19) the other document tables pass NULLs
+// for.
+var posLineCols = salesdoc.LineColumns(`false, NULL::uuid, NULL::bigint`,
+	`l.weight_source, ROUND(l.weight_gross_lb * 10000)::bigint, ROUND(l.weight_tare_lb * 10000)::bigint,
+	ROUND(l.weight_net_lb * 10000)::bigint, l.weight_net_basis, l.scale_device_id, l.scale_ticket_id,
+	l.scale_ticket_number, l.manual_weight_reason, l.weight_captured_by, l.weight_captured_at`)
 
 func mapWriteError(err error) error {
 	var pgErr *pgconn.PgError
@@ -399,10 +495,11 @@ func (r *PostgresRepository) CreateSale(ctx context.Context, s *Sale) error {
 		var created time.Time
 		err := r.ex(ctx).QueryRow(ctx, `
 		INSERT INTO pos_transactions (id, number, register_id, cashier_id, customer_id, currency, subtotal, tax_amount,
-			total, change_due, status, till_session_id, branch_id, created_at, updated_at, revision)
-		VALUES ($1, $2, $3, $4, $5, $6, 0, 0, 0, 0, $7, $8, $9, NOW(), NOW(), 1)
+			total, change_due, status, till_session_id, branch_id, ship_to_id, delivery_type, created_at, updated_at, revision)
+		VALUES ($1, $2, $3, $4, $5, $6, 0, 0, 0, 0, $7, $8, $9, $10, $11, NOW(), NOW(), 1)
 		RETURNING created_at, revision`,
 			s.ID, s.Number, s.RegisterID, s.CashierID, s.CustomerID, s.Currency, StatusOpen, s.TillSessionID, s.BranchID,
+			s.ShipToID, deliveryTypeArg(s.DeliveryType),
 		).Scan(&created, &s.Revision)
 		if err != nil {
 			return fmt.Errorf("failed to create the sale: %w", mapWriteError(err))
@@ -448,20 +545,121 @@ const saleHeadCols = `t.id, t.number, t.revision, t.branch_id, t.register_id, t.
 	ROUND(t.subtotal * 100)::bigint, ROUND(t.tax_amount * 100)::bigint, ROUND(t.total * 100)::bigint,
 	ROUND(t.change_due * 100)::bigint, t.till_session_id, t.status, t.invoice_id, t.completed_at, t.created_at`
 
-// saleCols is the full sale's columns: the list item's head and the purchase
-// order and job a charge sale names.
-const saleCols = saleHeadCols + `, t.customer_po, t.job_id, t.buyer_contact_id, t.print_count, t.exchange_return_id`
+// saleZoneSQL is the zone of a sale row's branch, UTC when it has none: the
+// rule the branch day uses everywhere (the Z report list's own idiom).
+const saleZoneSQL = `COALESCE((SELECT l.timezone FROM locations l WHERE l.id = t.branch_id), 'UTC')`
+
+// saleDaySQL is a sale's business day: the day it was made on in its
+// branch's own zone, never a UTC day and never the server's clock.
+const saleDaySQL = `(t.created_at AT TIME ZONE ` + saleZoneSQL + `)::date`
+
+// saleCols is the full sale's columns: the list item's head, the purchase
+// order and job a charge sale names, and the delivery answer a delivered
+// sale carries (CP-10).
+const saleCols = saleHeadCols + `, t.customer_po, t.job_id, t.buyer_contact_id, t.print_count, t.exchange_return_id,
+	t.delivery_type, t.ship_to_id`
 
 func scanSale(row pgx.Row, s *Sale) error {
 	var completed *time.Time
 	var created time.Time
 	if err := row.Scan(&s.ID, &s.Number, &s.Revision, &s.BranchID, &s.RegisterID, &s.CashierID, &s.CustomerID, &s.Currency,
 		&s.SubtotalCents, &s.TaxCents, &s.TotalCents, &s.ChangeCents, &s.TillSessionID, &s.Status, &s.InvoiceID,
-		&completed, &created, &s.CustomerPO, &s.JobID, &s.BuyerContactID, &s.PrintCount, &s.ExchangeReturnID); err != nil {
+		&completed, &created, &s.CustomerPO, &s.JobID, &s.BuyerContactID, &s.PrintCount, &s.ExchangeReturnID,
+		&s.DeliveryType, &s.ShipToID); err != nil {
 		return err
+	}
+	// the wire's spelling is lowercase, like every enum on the wire
+	s.DeliveryType = strings.ToLower(s.DeliveryType)
+	if s.DeliveryType == "" {
+		s.DeliveryType = "pickup"
 	}
 	s.CompletedAt = httpx.PtrTimestamp(completed)
 	s.CreatedAt = httpx.TimestampOf(created)
+	return nil
+}
+
+// deliveryTypeArg carries the sale's delivery type, PICKUP when unset: the
+// wire's lowercase is accepted beside the column's own case.
+func deliveryTypeArg(t string) any {
+	if t == "delivery" || t == "DELIVERY" {
+		return "DELIVERY"
+	}
+	return "PICKUP"
+}
+
+// ShipToBelongsTo checks the ship to a delivered sale names is its
+// customer's own (CP-10).
+func (r *PostgresRepository) ShipToBelongsTo(ctx context.Context, shipToID, customerID uuid.UUID) (bool, error) {
+	var one int
+	err := r.ex(ctx).QueryRow(ctx,
+		`SELECT 1 FROM customer_ship_tos WHERE id = $1 AND customer_id = $2 AND is_active`, shipToID, customerID).Scan(&one)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("failed to check the ship to: %w", err)
+	}
+	return true, nil
+}
+
+// ShipTo reads the ship to's snapshot and its typed rate (CP-10).
+func (r *PostgresRepository) ShipTo(ctx context.Context, shipToID uuid.UUID) (*salesdoc.ShipToSnapshot, *string, error) {
+	var (
+		snap salesdoc.ShipToSnapshot
+		rate *string
+	)
+	err := r.ex(ctx).QueryRow(ctx, `
+		SELECT id, code, COALESCE(name, ''), COALESCE(line1, ''), line2, COALESCE(city, ''),
+		       COALESCE(region, ''), COALESCE(postal_code, ''), country, phone, delivery_instructions,
+		       tax_rate::text
+		FROM customer_ship_tos WHERE id = $1`, shipToID).
+		Scan(&snap.ID, &snap.Code, &snap.Name, &snap.Line1, &snap.Line2, &snap.City,
+			&snap.Region, &snap.PostalCode, &snap.Country, &snap.Phone, &snap.DeliveryInstructions, &rate)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil, httpx.BadRequest("a referenced record does not exist",
+			httpx.FieldError{Field: "ship_to_id", Message: "no such ship-to"})
+	}
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to read ship-to: %w", err)
+	}
+	return &snap, rate, nil
+}
+
+// TaxZone resolves a place of receipt through the zone tables (CP-10); no
+// zone is not an error, it answers nil.
+func (r *PostgresRepository) TaxZone(ctx context.Context, country, postal, region string, on time.Time) (*taxzone.Snapshot, error) {
+	zone, err := taxzone.Lookup(ctx, r.db, taxzone.LookupInput{Country: country, Postal: postal, Region: region, On: on})
+	if errors.Is(err, taxzone.ErrZoneNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return zone, nil
+}
+
+// SetSaleDelivery names a delivered sale's ship to and delivery type
+// (CP-10), moving the revision as the other attach writes do.
+func (r *PostgresRepository) SetSaleDelivery(ctx context.Context, saleID uuid.UUID, shipToID *uuid.UUID, deliveryType string) error {
+	// A write that changes nothing is not a write: the revision moves only
+	// when the delivery answer actually changes, so a plain naming does not
+	// spend a revision (the naming tests pin one move per act).
+	_, err := r.ex(ctx).Exec(ctx, `
+		UPDATE pos_transactions SET ship_to_id = $2, delivery_type = $3, updated_at = NOW(), revision = revision + 1
+		WHERE id = $1
+		  AND NOT (ship_to_id IS NOT DISTINCT FROM $2 AND delivery_type = $3)`, saleID, shipToID, deliveryTypeArg(deliveryType))
+	if err != nil {
+		return fmt.Errorf("failed to name the sale's delivery: %w", mapWriteError(err))
+	}
+	return nil
+}
+
+// SaveSaleShipTo freezes the ship to onto the sale row at completion.
+func (r *PostgresRepository) SaveSaleShipTo(ctx context.Context, saleID uuid.UUID, snapshot []byte) error {
+	if _, err := r.ex(ctx).Exec(ctx,
+		`UPDATE pos_transactions SET ship_to_snapshot = $2, updated_at = NOW() WHERE id = $1`, saleID, snapshot); err != nil {
+		return fmt.Errorf("failed to save the sale's ship to: %w", err)
+	}
 	return nil
 }
 
@@ -539,21 +737,37 @@ func (r *PostgresRepository) NextReturnNumber(ctx context.Context) (string, erro
 }
 
 func (r *PostgresRepository) ListSales(ctx context.Context, f SaleFilter, limit int) ([]SaleSummary, error) {
-	// The day's bounds are absolute timestamps computed from the date
-	// string in the server's zone: a timestamptz never meets a date cast,
-	// whose midnight belongs to the session's zone, not the caller's.
-	start, end := dayBounds(f.Date)
+	args := []any{f.RegisterID, nil, middleware.BranchIDForQuery(ctx), middleware.GrantsSubForQuery(ctx)}
 	predicate := `WHERE ($1 = '' OR t.register_id = $1)
 		AND ($2::text IS NULL OR t.status = $2)
-		AND t.created_at >= $3 AND t.created_at < $4
-		AND ` + middleware.Wall("t", 5, 6)
-	args := []any{f.RegisterID, nil, start, end, middleware.BranchIDForQuery(ctx), middleware.GrantsSubForQuery(ctx)}
+		AND ` + middleware.Wall("t", 3, 4)
 	if f.Status != "" {
 		args[1] = f.Status
 	}
+	// The day bound names the sale's business day in its branch's own zone
+	// (UTC when it has none): a timestamptz never meets a date cast, whose
+	// midnight belongs to the branch, not the session or the server's
+	// clock. A date the caller gave bounds by that date; the plain list's
+	// own day (Today, no search text) is the branch's today, computed in
+	// the same zone in SQL. A search leaves both empty and ranges over
+	// every day.
+	if f.Date != "" || f.Today {
+		args = append(args, f.Date)
+		predicate += fmt.Sprintf(` AND `+saleDaySQL+` = COALESCE(NULLIF($%d::text, '')::date, (NOW() AT TIME ZONE `+saleZoneSQL+`)::date)`, len(args))
+	}
+	if f.Query != "" {
+		args = append(args, "%"+likeEscape.Replace(f.Query)+"%")
+		predicate += fmt.Sprintf(` AND (t.number ILIKE $%[1]d ESCAPE '\'
+			OR i.number ILIKE $%[1]d ESCAPE '\' OR c.name ILIKE $%[1]d ESCAPE '\')`, len(args))
+	}
+	args = append(args, limit)
 	rows, err := r.ex(ctx).Query(ctx, `SELECT `+saleHeadCols+`,
-		(SELECT count(*) FROM pos_line_items l WHERE l.transaction_id = t.id AND l.line_type <> 'TEXT')
-		FROM pos_transactions t `+predicate+` ORDER BY t.created_at DESC, t.id DESC LIMIT $7`, append(args, limit)...)
+		(SELECT count(*) FROM pos_line_items l WHERE l.transaction_id = t.id AND l.line_type <> 'TEXT'),
+		c.name, i.number, `+saleDaySQL+` AS business_day
+		FROM pos_transactions t
+		LEFT JOIN customers c ON c.id = t.customer_id
+		LEFT JOIN invoices i ON i.id = t.invoice_id `+predicate+
+		fmt.Sprintf(` ORDER BY t.created_at DESC, t.id DESC LIMIT $%d`, len(args)), args...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list sales: %w", err)
 	}
@@ -564,9 +778,11 @@ func (r *PostgresRepository) ListSales(ctx context.Context, f SaleFilter, limit 
 		var count int
 		var completed *time.Time
 		var created time.Time
+		var customerName, invoiceNumber *string
+		var businessDay time.Time
 		if err := rows.Scan(&s.ID, &s.Number, &s.Revision, &s.BranchID, &s.RegisterID, &s.CashierID, &s.CustomerID,
 			&s.Currency, &s.SubtotalCents, &s.TaxCents, &s.TotalCents, &s.ChangeCents, &s.TillSessionID, &s.Status,
-			&s.InvoiceID, &completed, &created, &count); err != nil {
+			&s.InvoiceID, &completed, &created, &count, &customerName, &invoiceNumber, &businessDay); err != nil {
 			return nil, err
 		}
 		s.CompletedAt = httpx.PtrTimestamp(completed)
@@ -574,10 +790,15 @@ func (r *PostgresRepository) ListSales(ctx context.Context, f SaleFilter, limit 
 		out = append(out, SaleSummary{ID: s.ID, Number: s.Number, Revision: s.Revision, BranchID: s.BranchID,
 			RegisterID: s.RegisterID, CashierID: s.CashierID, CustomerID: s.CustomerID, Currency: s.Currency,
 			TotalCents: s.TotalCents, Status: s.Status, InvoiceID: s.InvoiceID, CompletedAt: s.CompletedAt,
-			CreatedAt: s.CreatedAt, ItemCount: count})
+			CreatedAt: s.CreatedAt, ItemCount: count, CustomerName: customerName, InvoiceNumber: invoiceNumber,
+			BusinessDay: businessDay.Format("2006-01-02")})
 	}
 	return out, rows.Err()
 }
+
+// likeEscape escapes the ILIKE wildcards a search text could carry, so a
+// percent or an underscore the clerk typed matches itself alone.
+var likeEscape = strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
 
 func (r *PostgresRepository) AddLines(ctx context.Context, saleID uuid.UUID, lines []salesdoc.Line) error {
 	for i := range lines {
@@ -607,6 +828,39 @@ func (r *PostgresRepository) AddLines(ctx context.Context, saleID uuid.UUID, lin
 		}
 		if err := r.insertTallyRows(ctx, l.ID, l.Tally); err != nil {
 			return err
+		}
+		if err := r.insertLineTint(ctx, l.ID, l.Tint); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// insertLineTint writes one counter line's tint record (row CP-16): the
+// colour and base text, the formula it came from, and the amounts actually
+// sold frozen as child rows, in the same transaction as the line itself.
+func (r *PostgresRepository) insertLineTint(ctx context.Context, lineID uuid.UUID, t *salesdoc.LineTint) error {
+	if t == nil {
+		return nil
+	}
+	var id uuid.UUID
+	if err := r.ex(ctx).QueryRow(ctx, `
+		INSERT INTO paint_line_tints (counter_line_id, formula_id, color_code, color_name, base_code,
+			container_size_code, rescaled, tint_charge_cents)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+		RETURNING id`,
+		lineID, t.FormulaID, t.ColorCode, t.ColorName, t.BaseCode, t.ContainerSizeCode,
+		t.Rescaled, tintCentsOrZero(t.TintChargeCents)).Scan(&id); err != nil {
+		return fmt.Errorf("failed to add the line's tint: %w", mapWriteError(err))
+	}
+	for i, c := range t.Components {
+		if _, err := r.ex(ctx).Exec(ctx, `
+			INSERT INTO paint_line_tint_components (line_tint_id, position, colorant_code, colorant_name,
+				whole_oz, increments_coarse, increments_fine, unit_denominator)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+			id, i, c.ColorantCode, c.ColorantName, c.Amount.WholeOZ, c.Amount.Coarse,
+			c.Amount.Fine, c.Amount.Denominator); err != nil {
+			return fmt.Errorf("failed to add the tint's colorant: %w", mapWriteError(err))
 		}
 	}
 	return nil
@@ -692,7 +946,88 @@ func (r *PostgresRepository) GetLines(ctx context.Context, saleID uuid.UUID) ([]
 	if err := r.attachTallyRows(ctx, out); err != nil {
 		return nil, err
 	}
+	if err := r.attachLineTints(ctx, out); err != nil {
+		return nil, err
+	}
 	return out, nil
+}
+
+// attachLineTints reads every line's tint record (row CP-16) with its frozen
+// components, so the sale's lines read back exactly what was mixed.
+func (r *PostgresRepository) attachLineTints(ctx context.Context, lines []salesdoc.Line) error {
+	ids := make([]uuid.UUID, 0, len(lines))
+	for i := range lines {
+		ids = append(ids, lines[i].ID)
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	rows, err := r.ex(ctx).Query(ctx, `
+		SELECT counter_line_id, id, formula_id, color_code, color_name, base_code,
+			container_size_code, rescaled, tint_charge_cents
+		FROM paint_line_tints WHERE counter_line_id = ANY($1)`, ids)
+	if err != nil {
+		return fmt.Errorf("failed to read the lines' tints: %w", err)
+	}
+	defer rows.Close()
+	byTint := map[uuid.UUID]*salesdoc.LineTint{}
+	lineOf := map[uuid.UUID]uuid.UUID{}
+	var tintIDs []uuid.UUID
+	for rows.Next() {
+		var lineID, tintID uuid.UUID
+		t := &salesdoc.LineTint{Components: []salesdoc.TintComponent{}}
+		var charge int64
+		if err := rows.Scan(&lineID, &tintID, &t.FormulaID, &t.ColorCode, &t.ColorName, &t.BaseCode,
+			&t.ContainerSizeCode, &t.Rescaled, &charge); err != nil {
+			return fmt.Errorf("failed to scan a line tint: %w", err)
+		}
+		// The charge is the one the price carried, zero included: the frozen
+		// record states the charge, it does not leave it out.
+		c := httpx.Cents(charge)
+		t.TintChargeCents = &c
+		byTint[tintID] = t
+		lineOf[tintID] = lineID
+		tintIDs = append(tintIDs, tintID)
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	if len(tintIDs) == 0 {
+		return nil
+	}
+	compRows, err := r.ex(ctx).Query(ctx, `
+		SELECT line_tint_id, colorant_code, colorant_name, whole_oz, increments_coarse,
+			increments_fine, unit_denominator
+		FROM paint_line_tint_components WHERE line_tint_id = ANY($1)
+		ORDER BY line_tint_id, position`, tintIDs)
+	if err != nil {
+		return fmt.Errorf("failed to read the tints' colorants: %w", err)
+	}
+	defer compRows.Close()
+	for compRows.Next() {
+		var tintID uuid.UUID
+		var comp salesdoc.TintComponent
+		if err := compRows.Scan(&tintID, &comp.ColorantCode, &comp.ColorantName, &comp.Amount.WholeOZ,
+			&comp.Amount.Coarse, &comp.Amount.Fine, &comp.Amount.Denominator); err != nil {
+			return fmt.Errorf("failed to scan a tint colorant: %w", err)
+		}
+		if t, ok := byTint[tintID]; ok {
+			t.Components = append(t.Components, comp)
+		}
+	}
+	if err := compRows.Err(); err != nil {
+		return fmt.Errorf("failed to walk the tints' colorants: %w", err)
+	}
+	idxOf := map[uuid.UUID]int{}
+	for i := range lines {
+		idxOf[lines[i].ID] = i
+	}
+	for tintID, t := range byTint {
+		if i, ok := idxOf[lineOf[tintID]]; ok {
+			lines[i].Tint = t
+		}
+	}
+	return nil
 }
 
 // attachTallyRows reads every line's tally rows (ADR 0006 section 4.2) into
@@ -819,11 +1154,13 @@ func (r *PostgresRepository) CreateReturn(ctx context.Context, ret *Return, line
 		}
 		_, err := r.ex(ctx).Exec(ctx, `
 			INSERT INTO pos_return_lines (id, return_id, position, line_type, product_id, description, quantity, uom,
-				stock_uom, stock_quantity, unit_price, line_total, restock, sale_line_id, reason_code, restocking_fee, created_at)
+				stock_uom, stock_quantity, unit_price, line_total, restock, sale_line_id, reason_code, restocking_fee,
+				mis_tint, tinted_return, created_at)
 			VALUES ($1, $2, $3, $12, $4, $5, -($6::numeric / 10000), $7, $13, -($14::numeric / 10000), $8::numeric / 10000, $9::numeric / 100, $10, $11,
-				$15, $16::numeric / 100, NOW())`,
+				$15, $16::numeric / 100, $17, $18, NOW())`,
 			l.ID, ret.ID, l.Position, l.ProductID, l.Description, qtyArg(l.Quantity), l.UOM, priceArg(l.UnitPrice),
-			centsArg(l.LineTotal), l.Restock, l.SaleLineID, lineType, l.StockUOM, qtyArg(l.StockQuantity), reasonOf(l.ReasonCode), int64(l.RestockingFeeCents))
+			centsArg(l.LineTotal), l.Restock, l.SaleLineID, lineType, l.StockUOM, qtyArg(l.StockQuantity), reasonOf(l.ReasonCode), int64(l.RestockingFeeCents),
+			l.MisTint, l.TintedReturn)
 		if err != nil {
 			return fmt.Errorf("failed to record the return line: %w", mapWriteError(err))
 		}
@@ -1330,6 +1667,42 @@ func (r *PostgresRepository) SaleHasPendingRefundIntent(ctx context.Context, sal
 	return pending, nil
 }
 
+// ListOpenRefundIntents is the manager list's read (CP-06): every claim still
+// waiting on a person, oldest first. A PENDING claim waits on the terminal's
+// answer or the resolve route; a void's FAILED claim waits on the pay back
+// route while its tender's posted payment still holds the credit unapplied.
+// The sale join carries the branch wall, so the list never crosses the
+// caller's branch.
+func (r *PostgresRepository) ListOpenRefundIntents(ctx context.Context, limit int) ([]RefundIntentSummary, error) {
+	rows, err := r.ex(ctx).Query(ctx, `SELECT i.id, i.sale_id, t.number, i.tender_id, d.method,
+		ROUND(ABS(i.amount) * 100)::bigint, i.act, i.state,
+		COALESCE(ROUND(p.amount_unapplied * 100)::bigint, 0), i.created_at
+		FROM pos_refund_intents i
+		JOIN pos_transactions t ON t.id = i.sale_id
+		JOIN pos_tenders d ON d.id = i.tender_id
+		LEFT JOIN payments p ON p.id = d.payment_id AND p.status = 'POSTED'
+		WHERE (i.state = 'PENDING' OR (i.state = 'FAILED' AND i.act = 'void' AND p.amount_unapplied > 0))
+		AND `+middleware.Wall("t", 2, 3)+`
+		ORDER BY i.created_at, i.id LIMIT $1`,
+		limit, middleware.BranchIDForQuery(ctx), middleware.GrantsSubForQuery(ctx))
+	if err != nil {
+		return nil, fmt.Errorf("failed to list the open refund intents: %w", err)
+	}
+	defer rows.Close()
+	out := make([]RefundIntentSummary, 0)
+	for rows.Next() {
+		var it RefundIntentSummary
+		var created time.Time
+		if err := rows.Scan(&it.ID, &it.SaleID, &it.SaleNumber, &it.TenderID, &it.TenderMethod,
+			&it.AmountCents, &it.Act, &it.State, &it.HeldCreditCents, &created); err != nil {
+			return nil, err
+		}
+		it.CreatedAt = httpx.TimestampOf(created)
+		out = append(out, it)
+	}
+	return out, rows.Err()
+}
+
 // TenderCreditFacts is the declined void tender credit one payment still
 // holds: the origin names the void's sale and the claim the void released,
 // and Cents is what the payment still carries unapplied of it. RefundTxID,
@@ -1688,7 +2061,8 @@ func (r *PostgresRepository) LookupProducts(ctx context.Context, ids []uuid.UUID
 	rows, err := r.ex(ctx).Query(ctx, `
 		SELECT id, COALESCE(sku, ''), COALESCE(description, ''), COALESCE(uom_primary::text, 'EA'),
 			COALESCE(ROUND(base_price * 10000)::bigint, 0), COALESCE(ROUND(average_unit_cost * 10000)::bigint, 0),
-			COALESCE(is_kit, FALSE), COALESCE(taxable, TRUE)
+			COALESCE(is_kit, FALSE), COALESCE(taxable, TRUE),
+			ROUND(density_lb_per_cy * 10000)::bigint, density_volume_state
 		FROM products WHERE id = ANY($1)`, ids)
 	if err != nil {
 		return nil, err
@@ -1696,10 +2070,12 @@ func (r *PostgresRepository) LookupProducts(ctx context.Context, ids []uuid.UUID
 	defer rows.Close()
 	for rows.Next() {
 		var ref salesdoc.ProductRef
+		var density *int64
 		if err := rows.Scan(&ref.ID, &ref.SKU, &ref.Description, &ref.UOMPrimary, &ref.BasePrice, &ref.AverageCost,
-			&ref.IsKit, &ref.Taxable); err != nil {
+			&ref.IsKit, &ref.Taxable, &density, &ref.DensityVolumeState); err != nil {
 			return nil, err
 		}
+		ref.DensityLbPerCY = salesdoc.PtrQuantity(density)
 		out[ref.ID.String()] = ref
 	}
 	return out, rows.Err()
@@ -2009,14 +2385,27 @@ func (r *PostgresRepository) WalkInCustomer(ctx context.Context) (uuid.UUID, str
 func (r *PostgresRepository) CustomerFacts(ctx context.Context, customerID uuid.UUID) (CustomerFacts, error) {
 	var f CustomerFacts
 	var limit *int64
+	var holdStatus, holdReason *string
+	var holdUntil *time.Time
+	var holdMax *int64
+	// the standing hold record rides the same read, with the meaning the AR
+	// core gives it (the ACTIVE and OVERRIDDEN statuses, the override window
+	// and its cap), so the verdict the counter states and enforces is a fact
+	// of the same row under the same lock
 	err := r.ex(ctx).QueryRow(ctx, `
 		SELECT c.name, ROUND(c.credit_limit * 100)::bigint,
 			COALESCE(c.currency, (SELECT value FROM system_settings WHERE key = 'currency.default'), 'USD'),
-			COALESCE(c.po_required, FALSE), COALESCE(pt.kind, 'NET_DAYS'), c.named_buyer_required,
-			CASE WHEN c.check_limit IS NULL THEN NULL ELSE ROUND(c.check_limit * 100)::bigint END
+			COALESCE(c.po_required, FALSE), COALESCE(c.job_required, FALSE), COALESCE(pt.kind, 'NET_DAYS'), c.named_buyer_required,
+			CASE WHEN c.check_limit IS NULL THEN NULL ELSE ROUND(c.check_limit * 100)::bigint END,
+			EXISTS(SELECT 1 FROM projects p WHERE p.customer_id = c.id AND lower(p.status) = 'active'),
+			h.status, h.reason, h.override_until, h.max_order_cents
 		FROM customers c LEFT JOIN payment_terms pt ON pt.id = c.payment_terms_id
-		WHERE c.id = $1`, customerID).Scan(&f.Name, &limit, &f.Currency, &f.PORequired, &f.TermsKind,
-		&f.NamedBuyerRequired, &f.CheckLimitCents)
+		LEFT JOIN LATERAL (
+			SELECT status, reason, override_until, max_order_cents FROM credit_holds
+			WHERE customer_id = c.id AND status IN ('ACTIVE', 'OVERRIDDEN')
+			ORDER BY placed_at DESC LIMIT 1) h ON TRUE
+		WHERE c.id = $1`, customerID).Scan(&f.Name, &limit, &f.Currency, &f.PORequired, &f.JobRequired, &f.TermsKind,
+		&f.NamedBuyerRequired, &f.CheckLimitCents, &f.JobsOnFile, &holdStatus, &holdReason, &holdUntil, &holdMax)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return f, httpx.NotFound("no such customer")
 	}
@@ -2024,6 +2413,13 @@ func (r *PostgresRepository) CustomerFacts(ctx context.Context, customerID uuid.
 		return f, err
 	}
 	f.CreditLimitCents = limit
+	if holdReason != nil {
+		var st string
+		if holdStatus != nil {
+			st = *holdStatus
+		}
+		f.Hold = &standingHold{status: st, reason: *holdReason, overrideUntil: holdUntil, maxOrderCents: holdMax}
+	}
 	return f, nil
 }
 
@@ -2069,6 +2465,21 @@ func (r *PostgresRepository) BranchTaxRate(ctx context.Context, branchID *uuid.U
 	return *rate, true, nil
 }
 
+// BranchCashRoundingMode reads the branch's own cash rounding rule (CP-18):
+// off, or the nearest five cents. The branch is the unit that answers the
+// question, and a branch that has never set it takes the money exactly.
+func (r *PostgresRepository) BranchCashRoundingMode(ctx context.Context, branchID uuid.UUID) (RoundingMode, error) {
+	var mode string
+	err := r.ex(ctx).QueryRow(ctx, `SELECT cash_rounding_mode FROM locations WHERE id = $1`, branchID).Scan(&mode)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return RoundingOff, nil
+	}
+	if err != nil {
+		return RoundingOff, err
+	}
+	return ParseRoundingMode(mode), nil
+}
+
 func (r *PostgresRepository) SaleExists(ctx context.Context, id uuid.UUID) (bool, error) {
 	var exists bool
 	err := r.ex(ctx).QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM pos_transactions WHERE id = $1)`, id).Scan(&exists)
@@ -2101,6 +2512,7 @@ type CounterCustomer struct {
 	AccountNumber        string       `json:"account_number"`
 	Name                 string       `json:"name"`
 	POrequired           bool         `json:"po_required"`
+	JobRequired          bool         `json:"job_required"`
 	CreditLimitCents     *httpx.Cents `json:"credit_limit_cents"`
 	OpenReceivableCents  httpx.Cents  `json:"open_receivable_cents"`
 	AvailableCreditCents *httpx.Cents `json:"available_credit_cents"`
@@ -2117,7 +2529,7 @@ type CounterJob struct {
 	Name string    `json:"name"`
 }
 
-const counterCustomerCols = `c.id, c.account_number, c.name, COALESCE(c.po_required, FALSE),
+const counterCustomerCols = `c.id, c.account_number, c.name, COALESCE(c.po_required, FALSE), COALESCE(c.job_required, FALSE),
 	CASE WHEN c.credit_limit IS NULL THEN NULL ELSE ROUND(c.credit_limit * 100)::bigint END`
 
 // counterCustomerReach is the customer wall's two parameters at the counter
@@ -2149,7 +2561,7 @@ func (r *PostgresRepository) FindCounterCustomers(ctx context.Context, q string,
 	out := []CounterCustomer{}
 	for rows.Next() {
 		var c CounterCustomer
-		if err := rows.Scan(&c.ID, &c.AccountNumber, &c.Name, &c.POrequired, &c.CreditLimitCents); err != nil {
+		if err := rows.Scan(&c.ID, &c.AccountNumber, &c.Name, &c.POrequired, &c.JobRequired, &c.CreditLimitCents); err != nil {
 			return nil, err
 		}
 		out = append(out, c)
@@ -2172,7 +2584,7 @@ func (r *PostgresRepository) CounterCustomerByID(ctx context.Context, id uuid.UU
 	err := r.ex(ctx).QueryRow(ctx, `SELECT `+counterCustomerCols+` FROM customers c
 		WHERE c.id = $1 AND COALESCE(c.is_active, TRUE) AND `+customer.Wall("c", 2, 3),
 		id, branch, grants).
-		Scan(&c.ID, &c.AccountNumber, &c.Name, &c.POrequired, &c.CreditLimitCents)
+		Scan(&c.ID, &c.AccountNumber, &c.Name, &c.POrequired, &c.JobRequired, &c.CreditLimitCents)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, false, nil
 	}
@@ -2247,4 +2659,11 @@ func (r *PostgresRepository) ListRegisters(ctx context.Context) ([]CounterRegist
 		out = append(out, g)
 	}
 	return out, rows.Err()
+}
+
+func tintCentsOrZero(c *httpx.Cents) int64 {
+	if c == nil {
+		return 0
+	}
+	return int64(*c)
 }

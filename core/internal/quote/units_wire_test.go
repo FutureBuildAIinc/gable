@@ -495,3 +495,19 @@ func TestNonProductLineStandardPair(t *testing.T) {
 		t.Fatalf("a pair that disagrees with the standard sizes = %d, want 400: %s", r.status, r.raw)
 	}
 }
+
+// RULE (row CP-16): a quote line does not carry a tint in v1; a request that
+// sends tint on a line is refused with a 400 naming lines[0].tint.
+func TestQuoteRefusesTintOnALine(t *testing.T) {
+	f := newUnitsFixture(t)
+	line := f.nonStockLine("1", "GAL")
+	line["tint"] = map[string]any{
+		"color_code": "HC-188", "color_name": "Essex Green",
+		"base_code": "DEEP", "container_size_code": "GAL",
+	}
+	r := f.do("POST", "/api/v1/quotes", f.createBody(line))
+	if r.status != http.StatusBadRequest || !strings.Contains(string(r.raw), "lines[0].tint") {
+		t.Errorf("a quote line with tint = %d, want 400 naming lines[0].tint: %s", r.status, r.raw)
+	}
+}
+
