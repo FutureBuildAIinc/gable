@@ -187,11 +187,13 @@ func (r *PostgresRepository) OptionsByCategories(ctx context.Context, categories
 	}
 	// The catalog's own category is folded the same way the configuration's
 	// is, so a dealer whose catalog spells a category its own way still
-	// gets the price. The fold is lower(regexp_replace(category,
-	// '[^a-z0-9]+', '_', 'g')), the same shape CategoryName writes.
+	// gets the price. The fold is lower(regexp_replace(lower(category),
+	// '[^a-z0-9]+', '_', 'g')), the same shape CategoryName writes: the
+	// lower casing comes first, so an upper case letter is a letter and
+	// not a separator.
 	rows, err := r.db.GetExecutor(ctx).Query(ctx,
 		`SELECT `+columns+` FROM millwork_options
-		WHERE lower(regexp_replace(category, '[^a-z0-9]+', '_', 'g')) = ANY($1)
+		WHERE lower(regexp_replace(lower(category), '[^a-z0-9]+', '_', 'g')) = ANY($1)
 		ORDER BY category, name, created_at DESC, id DESC`, categories)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read the option catalog: %w", err)
