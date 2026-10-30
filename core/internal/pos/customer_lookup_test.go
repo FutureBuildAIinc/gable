@@ -63,7 +63,9 @@ func TestTheCounterLookupStatesTheAccountsStanding(t *testing.T) {
 	f := newFixture(t, testutil.RequireDB(t))
 	acct := f.scalar(`SELECT account_number FROM customers WHERE id = $1`, f.customerID).(string)
 
-	for _, q := range []string{"Counter Co", "counter", acct} {
+	// the name and its lowercase prove the case-insensitive match on a name
+	// only this run's customer carries
+	for _, q := range []string{f.customerName, strings.ToLower(f.customerName), acct} {
 		c := standingOf(t, f.findCustomers(q))
 		if c["id"] != f.customerID.String() || c["standing"] != "no_limit" || c["available_credit_cents"] != nil {
 			t.Errorf("lookup %q = %v, want the customer with no limit", q, c)
@@ -122,7 +124,7 @@ func TestTheSaleTakesItsCustomerBeforeTheFirstLine(t *testing.T) {
 		mustExec(t, f.db, `DELETE FROM customers WHERE id = $1`, other)
 	})
 
-	if c := standingOf(t, f.findCustomers("Counter Co")); len(c["jobs"].([]any)) != 1 {
+	if c := standingOf(t, f.findCustomers(f.customerName)); len(c["jobs"].([]any)) != 1 {
 		t.Errorf("the lookup carries %v jobs, want the customer's one open job", c["jobs"])
 	}
 

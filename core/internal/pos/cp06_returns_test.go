@@ -11,6 +11,7 @@ package pos_test
 import (
 	"context"
 	"net/http"
+	"net/url"
 	"testing"
 	"time"
 
@@ -77,8 +78,8 @@ func TestCP06_ReturnPastSaleFromSearch(t *testing.T) {
 	if got := str(t, item, "number"); got != number {
 		t.Errorf("number = %q, want %q", got, number)
 	}
-	if got := str(t, item, "customer_name"); got != "Counter Co" {
-		t.Errorf("customer_name = %q, want Counter Co", got)
+	if got := str(t, item, "customer_name"); got != f.customerName {
+		t.Errorf("customer_name = %q, want %q", got, f.customerName)
 	}
 	if got := str(t, item, "invoice_number"); got != invoiceNumber {
 		t.Errorf("invoice_number = %q, want %q", got, invoiceNumber)
@@ -86,9 +87,10 @@ func TestCP06_ReturnPastSaleFromSearch(t *testing.T) {
 	if got := str(t, item, "status"); got != "completed" {
 		t.Errorf("status = %q, want completed", got)
 	}
-	// by the invoice number and by the customer's name
+	// by the invoice number and by the customer's name, the whole unique
+	// name so only this run's sale can answer
 	findSale(t, f.listSales(t, "q="+invoiceNumber), saleID)
-	findSale(t, f.listSales(t, "q=Counter"), saleID)
+	findSale(t, f.listSales(t, "q="+url.QueryEscape(f.customerName)), saleID)
 	// the date still bounds a search that names it
 	old := time.Now().AddDate(0, 0, -30).Format("2006-01-02")
 	if items := f.listSales(t, "q="+number+"&date="+old); len(items) != 0 {
