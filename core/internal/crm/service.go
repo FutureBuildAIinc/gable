@@ -184,7 +184,7 @@ func (s *Service) Create(ctx context.Context, customerID uuid.UUID, d *Draft) (*
 		}
 		now := httpx.TimestampOf(s.now().UTC())
 		a := &Activity{
-			ID: uuid.New(), CustomerID: customerID, ContactID: d.ContactID,
+			ID: uuid.New(), CustomerID: customerID, ContactID: d.ContactID, QuoteID: d.QuoteID,
 			ActivityType: d.ActivityType, Description: d.Description, LoggedBy: d.LoggedBy,
 			ActivityDate: now, CreatedAt: now, UpdatedAt: now,
 		}

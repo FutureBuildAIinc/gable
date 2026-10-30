@@ -606,6 +606,73 @@ func (s *Service) GetQuote(ctx context.Context, id uuid.UUID) (*Quote, error) {
 	return q, nil
 }
 
+// FollowUpDraft is a validated follow up write: when to chase the quote and
+// the salesperson who owns the chase. A nil At clears both fields.
+type FollowUpDraft struct {
+	At    *httpx.Timestamp
+	Owner *uuid.UUID
+}
+
+// SetFollowUp sets or clears the quote's follow up on the client's revision:
+// one transaction that locks the quote row, checks the revision after the
+// lock, writes the date and owner, and writes its audit row (ADR 0003
+// section 3: the audit rides the act's transaction). A nil date clears both
+// fields, which is what completing a follow up is: what happened is logged
+// as an activity on the quote, not kept as a state on it. Like the quote's
+// own update, the write carries no outbox event.
+func (s *Service) SetFollowUp(ctx context.Context, id uuid.UUID, d *FollowUpDraft, pre Precondition) (*Quote, error) {
+	if pre.missing() {
+		return nil, httpx.PreconditionRequired("this write needs If-Match or a body revision")
+	}
+	var out *Quote
+	err := s.inTx(ctx, func(ctx context.Context) error {
+		if err := s.repo.LockQuote(ctx, id); err != nil {
+			return notFound(err)
+		}
+		cur, err := s.repo.GetQuote(ctx, id)
+		if err != nil {
+			return notFound(err)
+		}
+		if err := s.checkQuoteBranch(ctx, cur); err != nil {
+			return err
+		}
+		if err := pre.check(cur.Revision); err != nil {
+			return err
+		}
+		if err := s.repo.SetFollowUp(ctx, id, d.At, d.Owner); err != nil {
+			return err
+		}
+		if out, err = s.repo.GetQuote(ctx, id); err != nil {
+			return err
+		}
+		if s.auditor != nil {
+			action := "quote.follow_up_cleared"
+			if d.At != nil {
+				action = "quote.follow_up_set"
+			}
+			return s.auditor.Log(ctx, audit.Entry{
+				Action:     action,
+				EntityType: "quote",
+				EntityID:   id,
+				Changes: map[string]any{
+					"follow_up_at": d.At, "follow_up_owner_id": d.Owner, "revision": out.Revision,
+				},
+			})
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// SalespersonByEmail resolves a signed in email to its salesperson row for
+// the list's follow_up=mine page.
+func (s *Service) SalespersonByEmail(ctx context.Context, email string) (*uuid.UUID, error) {
+	return s.repo.SalespersonByEmail(ctx, email)
+}
+
 // NumberPattern is the quote's document number pattern, from the entity's
 // prefix and pad (ADR 0007 section 7): reads accept it in the {id} slot.
 var NumberPattern = regexp.MustCompile(`^Q-[0-9]{6,}$`)

@@ -17,6 +17,25 @@ import (
 // section 2).
 const activitiesScope = "crm_activities.created_at_id_desc"
 
+// ActivitiesScope is the list's ordering scope for the in process caller that
+// mounts its own activities route (the quote module's): the same scope, so
+// the cursors are interchangeable.
+const ActivitiesScope = activitiesScope
+
+// ParseActivitiesQuery reads the activities list's query (the platform three
+// plus activity_type and contact_id) for an in process caller that adds its
+// own row filter: the quote module's activity list reuses the same
+// validation, the same strictness, on its own path.
+func ParseActivitiesQuery(r *http.Request) (ListFilter, bool, error) {
+	return parseListFilter(r)
+}
+
+// NextActivitiesCursor mints the list's next page cursor for an in process
+// caller that mounts its own activities route.
+func NextActivitiesCursor(hasMore bool, created httpx.Timestamp, id uuid.UUID) (string, error) {
+	return nextCursor(hasMore, created, id)
+}
+
 type Handler struct {
 	service *Service
 }

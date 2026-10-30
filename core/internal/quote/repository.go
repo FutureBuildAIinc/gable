@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/gablelbm/gable/internal/customer/customerlink"
@@ -23,12 +24,40 @@ import (
 // is outside the caller's branch wall. The service maps it to 404.
 var ErrNotFound = errors.New("quote not found")
 
+// FollowUpKind names the follow up queue a list asks for: due (today in the
+// quote's branch's calendar or earlier), overdue (before today) or mine (the
+// caller's own book).
+type FollowUpKind string
+
+const (
+	FollowUpDue     FollowUpKind = "due"
+	FollowUpOverdue FollowUpKind = "overdue"
+	FollowUpMine    FollowUpKind = "mine"
+)
+
+// followUpNames is the queue vocabulary on the wire, for error messages.
+var followUpNames = []string{"due", "overdue", "mine"}
+
+// ParseFollowUpKind maps the wire name to its kind.
+func ParseFollowUpKind(s string) (FollowUpKind, bool) {
+	for _, n := range followUpNames {
+		if s == n {
+			return FollowUpKind(s), true
+		}
+	}
+	return "", false
+}
+
 // ListFilter is a list route's filters and keyset position. After is the
 // last row of the previous page; the list resumes strictly past it in
-// (created_at, id) descending order.
+// (created_at, id) descending order. FollowUp narrows the page to the follow
+// up queue it names, and MineOwner is the salesperson the caller's mine
+// resolved to.
 type ListFilter struct {
 	Statuses   []QuoteState
 	CustomerID *uuid.UUID
+	FollowUp   *FollowUpKind
+	MineOwner  *uuid.UUID
 	AfterTime  *time.Time
 	AfterID    uuid.UUID
 	Limit      int
@@ -96,6 +125,9 @@ type Repository interface {
 	LockQuote(ctx context.Context, id uuid.UUID) error
 	ReplaceDraft(ctx context.Context, q *Quote) error
 	SetStatus(ctx context.Context, q *Quote) error
+	// SetFollowUp writes the follow up date and owner and moves the revision.
+	// The caller holds the row lock; a nil date clears both fields.
+	SetFollowUp(ctx context.Context, id uuid.UUID, at *httpx.Timestamp, owner *uuid.UUID) error
 	ListQuotes(ctx context.Context, f ListFilter) ([]QuoteSummary, error)
 	CountQuotes(ctx context.Context, f ListFilter) (int64, error)
 	ListQuotesByCustomer(ctx context.Context, customerID uuid.UUID) ([]QuoteSummary, error)
@@ -103,6 +135,10 @@ type Repository interface {
 	GetOriginalFile(ctx context.Context, id uuid.UUID) ([]byte, string, string, error)
 	GetQuoteByNumber(ctx context.Context, number string) (*Quote, error)
 	StoreOriginalFile(ctx context.Context, id uuid.UUID, data []byte, filename, contentType string) error
+	// SalespersonByEmail resolves a signed in email to its salesperson row,
+	// the owner a follow_up=mine page filters on. No row owns nothing: the
+	// answer is nil, not an error.
+	SalespersonByEmail(ctx context.Context, email string) (*uuid.UUID, error)
 }
 
 type PostgresRepository struct {
@@ -299,11 +335,12 @@ func lineProductID(l *QuoteLine) any {
 // request field that named the missing record, so a bad reference is a 400
 // naming it and not a 500 from the database.
 var referenceFields = map[string]string{
-	"quotes_customer_id_fkey":     "customer_id",
-	"quotes_project_id_fkey":      "job_id",
-	"quotes_vehicle_id_fkey":      "vehicle_id",
-	"quotes_branch_id_fkey":       "branch_id",
-	"quote_lines_product_id_fkey": "lines.product_id",
+	"quotes_customer_id_fkey":          "customer_id",
+	"quotes_project_id_fkey":           "job_id",
+	"quotes_vehicle_id_fkey":           "vehicle_id",
+	"quotes_branch_id_fkey":            "branch_id",
+	"quotes_follow_up_owner_id_fkey":   "follow_up_owner_id",
+	"quote_lines_product_id_fkey":      "lines.product_id",
 }
 
 func validationFailed(msg string, details ...httpx.FieldError) *httpx.Error {
@@ -435,18 +472,21 @@ const summaryColumns = `
 	ROUND(q.total_amount * 100)::bigint, ROUND(COALESCE(q.freight_amount, 0) * 100)::bigint,
 	ROUND(COALESCE(q.margin_total, 0) * 100)::bigint,
 	COALESCE(q.delivery_type, 'PICKUP'), q.vehicle_id, v.name, COALESCE(q.source, 'manual'),
+	q.follow_up_at, q.follow_up_owner_id, st.name,
 	q.expires_at, q.sent_at, q.accepted_at, q.rejected_at, q.created_at, COALESCE(q.updated_at, q.created_at)`
 
 const summaryFrom = `
 	FROM quotes q
 	LEFT JOIN customers c ON c.id = q.customer_id
-	LEFT JOIN vehicles v ON v.id = q.vehicle_id`
+	LEFT JOIN vehicles v ON v.id = q.vehicle_id
+	LEFT JOIN sales_team st ON st.id = q.follow_up_owner_id`
 
 // scanSummary scans summaryColumns, then any extra destinations, from one row.
 func scanSummary(row pgx.Row, s *QuoteSummary, extra ...any) error {
 	var (
 		status, delivery                  string
 		total, freight, margin            int64
+		followUp                          *time.Time
 		expires, sent, accepted, rejected *time.Time
 		created, updated                  time.Time
 	)
@@ -454,6 +494,7 @@ func scanSummary(row pgx.Row, s *QuoteSummary, extra ...any) error {
 		&s.ID, &s.Number, &s.BranchID, &s.CustomerID, &s.CustomerName, &s.JobID, &status, &s.Revision,
 		&total, &freight, &margin,
 		&delivery, &s.VehicleID, &s.VehicleName, &s.Source,
+		&followUp, &s.FollowUpOwnerID, &s.FollowUpOwnerName,
 		&expires, &sent, &accepted, &rejected, &created, &updated,
 	}, extra...)
 	if err := row.Scan(dest...); err != nil {
@@ -462,6 +503,7 @@ func scanSummary(row pgx.Row, s *QuoteSummary, extra ...any) error {
 	s.Status = QuoteState(status)
 	s.DeliveryType = DeliveryType(delivery)
 	s.TotalCents, s.FreightCents, s.MarginTotalCents = httpx.Cents(total), httpx.Cents(freight), httpx.Cents(margin)
+	s.FollowUpAt = httpx.PtrTimestamp(followUp)
 	s.ExpiresAt, s.SentAt, s.AcceptedAt, s.RejectedAt = httpx.PtrTimestamp(expires), httpx.PtrTimestamp(sent), httpx.PtrTimestamp(accepted), httpx.PtrTimestamp(rejected)
 	s.CreatedAt, s.UpdatedAt = httpx.TimestampOf(created), httpx.TimestampOf(updated)
 	return nil
@@ -652,6 +694,22 @@ func (r *PostgresRepository) SetStatus(ctx context.Context, q *Quote) error {
 	return nil
 }
 
+// SetFollowUp writes the follow up date and owner and moves the revision.
+// The caller holds the row lock (LockQuote); a nil date clears both fields,
+// which is what a completed follow up is.
+func (r *PostgresRepository) SetFollowUp(ctx context.Context, id uuid.UUID, at *httpx.Timestamp, owner *uuid.UUID) error {
+	_, err := r.db.GetExecutor(ctx).Exec(ctx, `
+		UPDATE quotes
+		SET follow_up_at = $2, follow_up_owner_id = $3,
+			revision = revision + 1, updated_at = NOW()
+		WHERE id = $1`,
+		id, tsArg(at), owner)
+	if err != nil {
+		return mapWriteError(err, "failed to set the follow up")
+	}
+	return nil
+}
+
 // ReplaceDraft replaces the header and all lines and moves the revision. A
 // line whose id survives keeps the customer note the edit did not resend.
 func (r *PostgresRepository) ReplaceDraft(ctx context.Context, q *Quote) error {
@@ -698,23 +756,46 @@ func (r *PostgresRepository) ReplaceDraft(ctx context.Context, q *Quote) error {
 	return r.insertLines(ctx, q, priorNotes)
 }
 
-// listFilters is the shared predicate of the list and its count. The count
-// ignores the keyset position: it is the size of the filtered set. The
+// branchTZ is the quote's branch's calendar: the time zone the follow up
+// queue's "today" is read in, the quote's own branch's, UTC when the branch
+// row carries none.
+const branchTZ = `COALESCE((SELECT timezone FROM locations WHERE id = q.branch_id), 'UTC')`
+
+// listPredicate builds the WHERE clause the list and its count share: the
+// branch wall, the status and customer filters, and the follow up queue. The
+// count ignores the keyset position: it is the size of the filtered set. The
 // grants sub trails each query's own parameters, so its placeholder is
 // filled per query (ADR 0007 section 2.3, the list form of the record rule):
 // a context branch lists its own rows; with no context branch a bound
 // non-admin user lists the branches granted to the user, none granted
 // listing none; an administrator without a header, an unbound key, the
 // single-branch switch and dev mode list every branch's.
-const listFilters = `
+//
+// The follow up queue ($4, null for none): a quote sits in it while it is
+// still open (draft or sent) and carries a follow up date. due is today in
+// the quote's branch's calendar or earlier, overdue the day before today,
+// mine the book of the salesperson the caller resolved to ($5).
+func listPredicate(grantsArg int) string {
+	return fmt.Sprintf(`
 	WHERE (
 	    ($1::uuid IS NOT NULL AND q.branch_id = $1)
-	    OR ($1::uuid IS NULL AND $%d::text IS NOT NULL AND q.branch_id IN
-	        (SELECT branch_id FROM user_locations WHERE user_sub = $%d))
-	    OR ($1::uuid IS NULL AND $%d::text IS NULL)
+	    OR ($1::uuid IS NULL AND $%[1]d::text IS NOT NULL AND q.branch_id IN
+	        (SELECT branch_id FROM user_locations WHERE user_sub = $%[1]d))
+	    OR ($1::uuid IS NULL AND $%[1]d::text IS NULL)
 	  )
 	  AND (cardinality($2::text[]) = 0 OR q.state::text = ANY($2))
-	  AND ($3::uuid IS NULL OR q.customer_id = $3)`
+	  AND ($3::uuid IS NULL OR q.customer_id = $3)
+	  AND ($4::text IS NULL OR (
+	    q.follow_up_at IS NOT NULL AND q.state IN ('DRAFT', 'SENT')
+	    AND CASE $4::text
+	      WHEN 'due' THEN (q.follow_up_at AT TIME ZONE %[2]s)::date
+	           <= (NOW() AT TIME ZONE %[2]s)::date
+	      WHEN 'overdue' THEN (q.follow_up_at AT TIME ZONE %[2]s)::date
+	           < (NOW() AT TIME ZONE %[2]s)::date
+	      ELSE q.follow_up_owner_id = $5::uuid
+	    END
+	  ))`, grantsArg, branchTZ)
+}
 
 func statusStrings(states []QuoteState) []string {
 	out := make([]string, len(states))
@@ -724,13 +805,25 @@ func statusStrings(states []QuoteState) []string {
 	return out
 }
 
+// followUpArgs renders the queue parameters a list or count binds: the
+// queue's name, null when the page is not the queue, and the salesperson
+// mine resolved to.
+func followUpArgs(f ListFilter) (any, any) {
+	if f.FollowUp == nil {
+		return nil, nil
+	}
+	return string(*f.FollowUp), f.MineOwner
+}
+
 func (r *PostgresRepository) ListQuotes(ctx context.Context, f ListFilter) ([]QuoteSummary, error) {
+	queue, owner := followUpArgs(f)
 	rows, err := r.db.GetExecutor(ctx).Query(ctx, `
-		SELECT `+summaryColumns+summaryFrom+fmt.Sprintf(listFilters, 7, 7, 7)+`
-		  AND ($4::timestamptz IS NULL OR (q.created_at, q.id) < ($4, $5::uuid))
+		SELECT `+summaryColumns+summaryFrom+listPredicate(9)+`
+		  AND ($6::timestamptz IS NULL OR (q.created_at, q.id) < ($6, $7::uuid))
 		ORDER BY q.created_at DESC, q.id DESC
-		LIMIT $6`,
-		middleware.BranchIDForQuery(ctx), statusStrings(f.Statuses), f.CustomerID, f.AfterTime, f.AfterID, f.Limit,
+		LIMIT $8`,
+		middleware.BranchIDForQuery(ctx), statusStrings(f.Statuses), f.CustomerID, queue, owner,
+		f.AfterTime, f.AfterID, f.Limit,
 		middleware.GrantsSubForQuery(ctx))
 	if err != nil {
 		return nil, fmt.Errorf("failed to list quotes: %w", err)
@@ -752,10 +845,11 @@ func scanSummaries(rows pgx.Rows) ([]QuoteSummary, error) {
 }
 
 func (r *PostgresRepository) CountQuotes(ctx context.Context, f ListFilter) (int64, error) {
+	queue, owner := followUpArgs(f)
 	var n int64
 	err := r.db.GetExecutor(ctx).QueryRow(ctx,
-		`SELECT count(*) FROM quotes q`+fmt.Sprintf(listFilters, 4, 4, 4),
-		middleware.BranchIDForQuery(ctx), statusStrings(f.Statuses), f.CustomerID,
+		`SELECT count(*) FROM quotes q`+listPredicate(6),
+		middleware.BranchIDForQuery(ctx), statusStrings(f.Statuses), f.CustomerID, queue, owner,
 		middleware.GrantsSubForQuery(ctx)).Scan(&n)
 	if err != nil {
 		return 0, fmt.Errorf("failed to count quotes: %w", err)
@@ -890,6 +984,25 @@ func (r *PostgresRepository) RecomputeQuoteTotal(ctx context.Context, quoteID uu
 		return fmt.Errorf("failed to recompute quote total: %w", err)
 	}
 	return nil
+}
+
+// SalespersonByEmail resolves a signed in email to its active salesperson
+// row, case insensitively. An empty email, or one no row carries, owns
+// nothing: the answer is nil.
+func (r *PostgresRepository) SalespersonByEmail(ctx context.Context, email string) (*uuid.UUID, error) {
+	if strings.TrimSpace(email) == "" {
+		return nil, nil
+	}
+	var id uuid.UUID
+	err := r.db.GetExecutor(ctx).QueryRow(ctx,
+		`SELECT id FROM sales_team WHERE lower(email) = lower($1) AND is_active`, email).Scan(&id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to resolve the salesperson: %w", err)
+	}
+	return &id, nil
 }
 
 // GetOriginalFile retrieves the original uploaded file for a quote.
