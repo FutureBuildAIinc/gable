@@ -58,9 +58,9 @@ paths:
       description: >-
         The manager's record of the Form 8300 they filed for this crossing:
         the day they filed it, the BSA E-Filing acknowledgement number they
-        typed and who recorded it. A voluntary filing (a Form 8300 the dealer
-        filed of its own accord) carries no acknowledgement number, because a
-        voluntary filing below the threshold is filed on paper.
+        typed and who recorded it. Every reportable crossing is over the threshold,
+        so its filing is required: a request for a voluntary filing (a below
+        threshold report) is answered 409.
         The crossing's filing row is taken in place: two managers recording a
         filing on one crossing at the same time cannot both land, and the one
         that loses is answered 409 (the crossing is already filed). A
@@ -180,13 +180,14 @@ paths:
       summary: Issue the customer statement for a crossing's payer
       description: >-
         The customer statement for the crossing's payer and the year the cash
-        was received, issued once. The generator refuses two things, and they
-        are rules in the code rather than a training note: it refuses to carry
-        the dealer's suspicion of the transaction on the customer's statement,
-        and it refuses to produce a statement for a voluntarily filed Form
-        8300, because the statement says the information was furnished to the
-        IRS and a voluntary filing was not. The act is a manager's, so a
-        machine key is refused 403.
+        was received, issued once. A statement says the information was furnished
+        to the IRS, so it is issued only for a reportable crossing whose Form
+        8300 is recorded as filed (409 otherwise). The generator also refuses
+        to carry the dealer's suspicion of the transaction on the customer's
+        statement and refuses a voluntary filing; these are rules in the code
+        rather than a training note. Of several managers issuing one statement
+        exactly one is answered 200 and the rest 409. The act is a manager's,
+        so a machine key is refused 403.
       parameters:
         - name: id
           in: path
@@ -295,12 +296,12 @@ components:
           maxLength: 64
           description: >-
             The BSA E-Filing acknowledgement number the manager typed. Required
-            for a filing, and never carried by a voluntary one.
+            for a filing.
         voluntary:
           type: boolean
           description: >-
-            True when the dealer filed the Form 8300 of its own accord. A
-            voluntary filing is never stated to the customer.
+            Always refused with 409 on a reportable crossing: every reportable
+            crossing is over the threshold, so its filing is required.
     LargeCashFiling:
       type: object
       required: [event_id, state, recorded_by, recorded_at, past_deadline]
@@ -370,19 +371,23 @@ components:
         count: {type: integer}
     LargeCashStatement:
       type: object
-      required: [payer_key, year, payer_name, business_address, contact_name, telephone, aggregate_cents, currency,
-                 crossing_count, state, due_date, note, adviser_note]
+      required: [payer_key, year, payer_name, payer_address, business_name, business_address, contact_name, telephone,
+                 aggregate_cents, currency, crossing_count, state, due_date, note, adviser_note]
       properties:
         payer_key: {type: string, description:"The aggregation key: the payer the statement is for."}
         year: {type: integer}
-        payer_name: {type: string}
-        business_address: {type: string}
-        contact_name: {type: string}
-        telephone: {type: string}
+        payer_name: {type: string, description: The addressee.}
+        payer_address: {type: string, description: The addressee's address.}
+        business_name: {type: string, description: The dealer's name, from the dealer profile or the receiving branch.}
+        business_address: {type: string, description: The dealer's information contact address, the receiving branch's.}
+        contact_name: {type: string, description: The dealer's information contact, the receiving branch.}
+        telephone: {type: string, description: The dealer's information contact telephone.}
         aggregate_cents:
           type: integer
           format: int64
-          description: The reportable cash received from this payer in the year.
+          description: >-
+            The payer's counted cash received in the calendar year in the
+            receiving branch's own zone, summed from the counted tenders.
         currency: {type: string}
         crossing_count: {type: integer}
         first_date: {type: [string, "null"], format: date-time}

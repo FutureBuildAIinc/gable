@@ -39,6 +39,14 @@ var ErrFilingIdentityDeclined = &httpx.Error{Status: http.StatusConflict, Code: 
 	Details: []httpx.FieldError{httpx.Blocker("filing_identity_declined",
 		"the walk-in declined to identify: a manager reviews this crossing, there is no filing to make")}}
 
+// A reportable crossing is over the threshold, so its Form 8300 is required.
+// A voluntary filing is a below threshold report and no crossing here is below
+// the threshold, so a voluntary filing on a reportable crossing is refused.
+var ErrFilingVoluntaryRefused = &httpx.Error{Status: http.StatusConflict, Code: httpx.CodeConflict,
+	Message: "this crossing is over the threshold, so its Form 8300 is required: it cannot be recorded as voluntary",
+	Details: []httpx.FieldError{httpx.Blocker("filing_voluntary_refused",
+		"this crossing is over the threshold, so its Form 8300 is required: it cannot be recorded as voluntary")}}
+
 // The crossing already carries a filing. Two managers recording a filing on
 // one crossing at the same time is the race this answers: one wins and the
 // other is told the crossing is already filed.
@@ -49,9 +57,8 @@ var ErrFilingAlreadyRecorded = &httpx.Error{Status: http.StatusConflict, Code: h
 
 // RecordFilingIn is the manager's record of a filing: the day the Form 8300
 // was filed, the BSA E-Filing acknowledgement number the manager typed, and
-// who recorded it. A voluntary filing is a Form 8300 the dealer filed of its
-// own accord; it has no BSA E-Filing acknowledgement, because a voluntary
-// filing below the threshold is filed on paper.
+// who recorded it. Voluntary asks for a below threshold report; every
+// reportable crossing is over the threshold, so the ask is refused.
 type RecordFilingIn struct {
 	FiledDate         time.Time
 	AcknowledgementNo string
@@ -88,12 +95,14 @@ func (s *Service) RecordFiling(ctx context.Context, eventID uuid.UUID, in Record
 	if facts.FilingState == FilingRowFiled || facts.FilingState == FilingRowVoluntary {
 		return nil, ErrFilingAlreadyRecorded
 	}
+	// Every reportable crossing is over the threshold, so its filing is
+	// required; a voluntary filing is a below threshold report.
+	if in.Voluntary {
+		return nil, ErrFilingVoluntaryRefused
+	}
 	state := FilingRowFiled
 	ack := strings.TrimSpace(in.AcknowledgementNo)
-	if in.Voluntary {
-		state = FilingRowVoluntary
-		ack = ""
-	} else if ack == "" {
+	if ack == "" {
 		return nil, httpx.BadRequest("the BSA E-Filing acknowledgement number is required for a filing",
 			httpx.FieldError{Field: "acknowledgement_no", Message: "the BSA E-Filing acknowledgement number is required for a filing"})
 	}
@@ -199,6 +208,9 @@ func (s *Service) Form8300(ctx context.Context, eventID uuid.UUID, actor string)
 	if facts.State != EventStateReportable {
 		// A Canadian crossing has no IRS form and an identity declined one
 		// has no payer to put on it.
+		if facts.State == EventStateIdentityDeclined {
+			return nil, ErrFilingIdentityDeclined
+		}
 		return nil, ErrFilingNotReportable
 	}
 	tin := ""

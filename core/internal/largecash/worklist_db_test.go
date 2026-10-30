@@ -368,11 +368,11 @@ func TestTheForm8300ExportCarriesTheTinAndNothingElseDoes(t *testing.T) {
 	}
 }
 
-// TestTheStatementRefusesTheSuspicionAndAVoluntaryFiling: the two refusals
-// research 6.3 names. The statement must not say the dealer noted the
-// transaction was suspicious, and a voluntarily filed Form 8300 is never
-// stated.
-func TestTheStatementRefusesTheSuspicionAndAVoluntaryFiling(t *testing.T) {
+// TestTheStatementRefusesTheSuspicion: the first refusal research 6.3
+// names. The statement must not say the dealer noted the transaction was
+// suspicious. The second, a voluntary filing, is pinned in
+// statement_fix_test.go.
+func TestTheStatementRefusesTheSuspicion(t *testing.T) {
 	db := testutil.RequireDB(t)
 	ctx := context.Background()
 	svc := largecash.NewService(db, nil, "")
@@ -390,15 +390,7 @@ func TestTheStatementRefusesTheSuspicionAndAVoluntaryFiling(t *testing.T) {
 	} else if !strings.Contains(err.Error(), "suspicious") {
 		t.Fatalf("the suspicion refusal = %v, want the suspicion rule", err)
 	}
-	// The second refusal: a voluntary filing is never stated.
-	if _, err := svc.RecordFiling(ctx, eventID, largecash.RecordFilingIn{Voluntary: true, Actor: "manager-a"}); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := svc.IssueStatement(ctx, largecash.IssueStatementIn{EventID: eventID, Actor: "manager-a"}); err == nil {
-		t.Fatal("a voluntary filing was stated")
-	} else if !strings.Contains(err.Error(), "voluntary") {
-		t.Fatalf("the voluntary refusal = %v, want the voluntary filing rule", err)
-	}
+	// The second refusal is pinned in statement_fix_test.go.
 }
 
 // TestTheStatementCarriesTheContentAndItsState: the statement names the

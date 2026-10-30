@@ -39,6 +39,14 @@ var ErrStatementRefusesVoluntary = &httpx.Error{Status: http.StatusConflict, Cod
 	Details: []httpx.FieldError{httpx.Blocker("statement_refuses_voluntary",
 		"a voluntary filing is never stated: the customer statement says the information was furnished to the IRS")}}
 
+// ErrStatementNotFiled is the statement's gate: the statement says the
+// information was furnished to the IRS, so it goes out only for a reportable
+// crossing whose Form 8300 is recorded as filed.
+var ErrStatementNotFiled = &httpx.Error{Status: http.StatusConflict, Code: httpx.CodeConflict,
+	Message: "the customer statement goes out only after the crossing's Form 8300 is recorded as filed",
+	Details: []httpx.FieldError{httpx.Blocker("statement_not_filed",
+		"the customer statement goes out only after the crossing's Form 8300 is recorded as filed")}}
+
 // ErrStatementAlreadyIssued is the state conflict: the statement for a payer
 // and a year goes out once.
 var ErrStatementAlreadyIssued = &httpx.Error{Status: http.StatusConflict, Code: httpx.CodeConflict,
@@ -55,6 +63,8 @@ type Statement struct {
 	PayerKey        string     `json:"payer_key"`
 	Year            int        `json:"year"`
 	PayerName       string     `json:"payer_name"`
+	PayerAddress    string     `json:"payer_address"`
+	BusinessName    string     `json:"business_name"`
 	BusinessAddress string     `json:"business_address"`
 	ContactName     string     `json:"contact_name"`
 	Telephone       string     `json:"telephone"`
@@ -112,6 +122,8 @@ func statementOf(rec statementRecord, year int) Statement {
 		PayerKey:        rec.PayerKey,
 		Year:            year,
 		PayerName:       rec.PayerName,
+		PayerAddress:    rec.PayerAddress,
+		BusinessName:    rec.BusinessName,
 		BusinessAddress: rec.BusinessAddress,
 		ContactName:     rec.ContactName,
 		Telephone:       rec.Telephone,
@@ -141,34 +153,43 @@ type IssueStatementIn struct {
 }
 
 // IssueStatement issues the customer statement for the crossing's payer and
-// the year the cash was received. It refuses a voluntary filing, because the
-// statement says the information was furnished to the IRS and a voluntary
-// filing was not, and it refuses to carry the dealer's suspicion.
+// the year the cash was received. It refuses a crossing that is not a
+// recorded filing, and a voluntary one, because the statement says the
+// information was furnished to the IRS, and it refuses to carry the dealer's
+// suspicion. Everything runs in one transaction.
 func (s *Service) IssueStatement(ctx context.Context, in IssueStatementIn) (*Statement, error) {
 	if in.IncludeSuspicion {
 		return nil, ErrStatementRefusesSuspicion
 	}
-	facts, err := s.repo.StatementFacts(ctx, in.EventID)
-	if err != nil {
-		return nil, err
-	}
-	if facts.FilingState == FilingRowVoluntary {
-		return nil, ErrStatementRefusesVoluntary
-	}
-	if facts.StatementState == StatementRowIssued {
-		return nil, ErrStatementAlreadyIssued
-	}
 	actor := actorOrSystem(in.Actor)
 	issuedDate := s.now()
 	var statement *Statement
-	err = s.db.RunInTx(ctx, func(ctx context.Context) error {
-		if err := s.repo.IssueStatement(ctx, facts.PayerKey, facts.Year, issuedDate, actor); err != nil {
+	err := s.db.RunInTx(ctx, func(ctx context.Context) error {
+		facts, err := s.repo.StatementFacts(ctx, in.EventID)
+		if err != nil {
 			return err
+		}
+		if facts.FilingState == FilingRowVoluntary {
+			return ErrStatementRefusesVoluntary
+		}
+		if facts.EventState != EventStateReportable || facts.FilingState != FilingRowFiled {
+			return ErrStatementNotFiled
+		}
+		// The write names the state it may take the row from, so of several
+		// managers issuing one statement exactly one gets the row.
+		issued, err := s.repo.IssueStatement(ctx, facts.PayerKey, facts.Year, issuedDate, actor)
+		if err != nil {
+			return err
+		}
+		if !issued {
+			return ErrStatementAlreadyIssued
 		}
 		statement = &Statement{
 			PayerKey:        facts.PayerKey,
 			Year:            facts.Year,
 			PayerName:       facts.PayerName,
+			PayerAddress:    facts.PayerAddress,
+			BusinessName:    facts.BusinessName,
 			BusinessAddress: facts.BusinessAddress,
 			ContactName:     facts.ContactName,
 			Telephone:       facts.Telephone,

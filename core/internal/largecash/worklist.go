@@ -34,7 +34,8 @@ const (
 // The filing state of a worklist row. It is the crossing's own state and the
 // filing row's state read together: a row is not yet reportable (nothing is
 // owed to the IRS), reportable and not filed (the duty is live), filed (the
-// duty is done) or voluntary (the payer asked not to be reported).
+// duty is done) or voluntary (a below threshold report; no crossing is below
+// the threshold, so the service never writes one and the state only reads one).
 const (
 	FilingStateNotReportable = "not_reportable"
 	FilingStateReportable    = "reportable"

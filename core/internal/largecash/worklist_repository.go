@@ -73,7 +73,7 @@ func (r *Repository) WorklistRecords(ctx context.Context, branch *uuid.UUID) ([]
 		LEFT JOIN large_cash_filings f ON f.event_id = e.id
 		LEFT JOIN large_cash_statements st
 		       ON st.payer_key = e.payer_key
-		      AND st.year = EXTRACT(YEAR FROM e.created_at)::int
+		      AND st.year = EXTRACT(YEAR FROM (e.created_at AT TIME ZONE COALESCE(l.timezone, 'UTC')))::int
 		LEFT JOIN LATERAL (
 		    SELECT min(t.created_at) AS first_date, max(t.created_at) AS last_date,
 		           array_agg(DISTINCT t.branch_id) AS branch_ids,
