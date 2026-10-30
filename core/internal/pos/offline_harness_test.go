@@ -133,7 +133,7 @@ func (b *offlineBench) baseSnapshot(t *testing.T) pos.OfflineSnapshot {
 		Products: []pos.OfflineSnapshotProduct{{ID: f.productID.String(), SKU: f.sku, Description: "2x4x8 SPF", Taxable: true,
 			StockUOM: "PCS", SaleUOM: "PCS", PriceUOM: "PCS",
 			UnitSet: []pos.OfflineSnapshotUnitRow{{UOM: "PCS", UnitQty: "1", StockQty: "1", Sell: true, Price: true},
-				{UOM: "BDL", UnitQty: "1", StockQty: "24", Sell: true, Price: false}}},
+				{UOM: "BUNDLE", UnitQty: "1", StockQty: "24", Sell: true, Price: false}}},
 			{ID: f.kitID.String(), SKU: "KIT", Description: "bundle kit", Taxable: true, IsKit: true, StockUOM: "EA",
 				SaleUOM: "EA", PriceUOM: "EA", UnitSet: []pos.OfflineSnapshotUnitRow{{UOM: "EA", UnitQty: "1", StockQty: "1", Sell: true, Price: true}}}},
 		PriceSheet: []pos.OfflineSnapshotPrice{
