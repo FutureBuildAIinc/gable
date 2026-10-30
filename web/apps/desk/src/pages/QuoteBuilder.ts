@@ -135,9 +135,20 @@ export class GableQuoteBuilder extends LitElement {
         if (this.routeId) this.initialLoading = true;
         this.loadProducts();
         this.loadVehicles();
-        if (this.routeId) this.loadExistingQuote(this.routeId);
-        // A configured item the dealer made in the configurator and sent
-        // here waits for this page: it is taken once, so it is added once.
+        if (this.routeId) {
+            // On an edited quote the item waits for the quote's own lines:
+            // they are the quote's, and the item joins them.
+            this.loadExistingQuote(this.routeId).then(() => this.takePendingItem());
+        } else {
+            this.takePendingItem();
+        }
+    }
+
+    /**
+     * A configured item the dealer made in the configurator and sent here
+     * waits for this page: it is taken once, so it is added once.
+     */
+    private takePendingItem() {
         const pending = ConfiguredItemHandoff.take();
         if (pending) this.handleConfiguredItem(pending);
     }
@@ -891,10 +902,12 @@ export class GableQuoteBuilder extends LitElement {
                         <div class="p-4">
                             ${this.configuratorKind === 'door' ? html`
                                 <gable-door-configurator
+                                    inline
                                     @configured-item=${(e: CustomEvent<ConfiguredItem>) => this.handleConfiguredItem(e.detail)}
                                 ></gable-door-configurator>
                             ` : html`
                                 <gable-product-configurator
+                                    inline
                                     @configured-item=${(e: CustomEvent<ConfiguredItem>) => this.handleConfiguredItem(e.detail)}
                                 ></gable-product-configurator>
                             `}

@@ -6,6 +6,8 @@
 // conversion pair, the scaled unit price, and the five line types of the
 // shared sales line shape.
 
+import type { ConfiguredConfiguration } from './configurator';
+
 export type OrderStatus = 'draft' | 'on_hold' | 'confirmed' | 'backordered' | 'fulfilled' | 'cancelled';
 export type OrderStatusColor = 'default' | 'info' | 'success' | 'warning' | 'error';
 export type OrderDeliveryType = 'pickup' | 'delivery';
@@ -164,6 +166,8 @@ export interface CreateOrderLineRequest {
     is_special_order?: boolean;
     vendor_id?: string;
     special_order_unit_cost_ten_thousandths?: number;
+    /** A configured item's configuration, stored on the line. */
+    configuration_json?: ConfiguredConfiguration;
 }
 
 export interface CreateOrderRequest {

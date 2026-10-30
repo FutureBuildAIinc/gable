@@ -175,7 +175,8 @@ test.describe('The configured item is priced by the server', () => {
     await expect(page.getByTestId('estimate-price')).toHaveText('$250.00');
 
     // The dealer adds it: the server's price and the server's product row
-    // travel with it.
+    // travel with it. The configurator stands inside the quote, so the item
+    // goes straight onto the quote's line.
     await page.getByTestId('add-to-order').click();
     await expect(page.getByTestId('configurator-dialog')).toBeHidden();
     // The line the quote carries names the item: the short description the
@@ -192,5 +193,65 @@ test.describe('The configured item is priced by the server', () => {
     expect(quote.lines).toHaveLength(1);
     expect(quote.lines[0].unit_price_ten_thousandths).toBe(25000 * 100);
     expect(quote.lines[0].configuration_json).toBeTruthy();
+  });
+
+  test('the configurator hands the item to a new draft quote, and the convert raises the vendor order', async ({ page, request }) => {
+    await signIn(page, 'Playwright Configured');
+    const run = Date.now().toString(36).toUpperCase();
+    const names = await seedOption(request, run);
+
+    // The dealer configures the door on the door configurator's own page.
+    await page.goto('/millwork/configure');
+    await page.getByRole('button', { name: names.door }).click();
+    await expect(page.getByTestId('estimate-price')).toHaveText('$250.00');
+
+    // Add to Quote asks where the item goes: the dealer starts a new draft.
+    await page.getByTestId('add-to-quote').click();
+    await expect(page.getByTestId('configured-target-picker')).toBeVisible();
+    await page.getByTestId('new-draft').click();
+
+    // The quote builder takes the item: the line is at the server's price
+    // and carries the configuration.
+    await expect(page.getByRole('heading', { name: 'New Quote' })).toBeVisible();
+    await expect(page.getByText(names.door).first()).toBeVisible();
+
+    const customers = (await (await request.get('/api/v1/customers?limit=200')).json()) as {
+      items: { id: string; name: string; account_number: string }[];
+    };
+    const customer = customers.items.find((c) => !c.account_number.startsWith('E2E-'))!;
+    await page.getByPlaceholder('Select Customer...').click();
+    await page.getByText(customer.name, { exact: true }).first().click();
+
+    const created = page.waitForResponse(
+      (r) => new URL(r.url()).pathname === '/api/v1/quotes' && r.request().method() === 'POST',
+    );
+    await page.getByRole('button', { name: 'Save draft' }).click();
+    const res = await created;
+    expect(res.status(), await res.text()).toBe(201);
+    const quote = await res.json();
+    expect(quote.lines).toHaveLength(1);
+    expect(quote.lines[0].unit_price_ten_thousandths).toBe(25000 * 100);
+    expect(quote.lines[0].configuration_json).toBeTruthy();
+
+    // The convert makes the order, and the configured line is a special
+    // order line: the vendor purchase order is raised for it.
+    const converted = await request.post(`/api/v1/quotes/${quote.id}/convert`, {
+      headers: { 'If-Match': '"1"' },
+    });
+    expect(converted.status(), await converted.text()).toBe(201);
+    const order = await converted.json();
+    expect(order.lines).toHaveLength(1);
+    expect(order.lines[0].is_special_order).toBe(true);
+    expect(order.lines[0].configuration_json).toBeTruthy();
+
+    // The purchase order line names the item the way the vendor reads it.
+    const pos = (await (await request.get('/api/v1/purchase-orders?limit=50')).json()) as {
+      items: { id: string; lines: { description: string; linked_so_line_id: string }[] }[];
+    };
+    const orderLineId = order.lines[0].id;
+    const po = pos.items.find((p) => p.lines?.some((l) => l.linked_so_line_id === orderLineId));
+    expect(po, 'no purchase order line links to the order line').toBeTruthy();
+    const poLine = po!.lines.find((l) => l.linked_so_line_id === orderLineId)!;
+    expect(poLine.description).toContain(names.door);
   });
 });
