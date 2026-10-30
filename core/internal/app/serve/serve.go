@@ -82,6 +82,7 @@ import (
 	"github.com/gablelbm/gable/pkg/audit"
 	"github.com/gablelbm/gable/pkg/clientip"
 	"github.com/gablelbm/gable/pkg/database"
+	"github.com/gablelbm/gable/pkg/devauth"
 	"github.com/gablelbm/gable/pkg/httputil"
 	"github.com/gablelbm/gable/pkg/metrics"
 	"github.com/gablelbm/gable/pkg/middleware"
@@ -157,6 +158,13 @@ func Run() {
 		logLevel.Set(slog.LevelError)
 	default:
 		logLevel.Set(slog.LevelInfo)
+	}
+
+	// ADR 0012 section 7: AUTH_MODE=dev runs only in a binary built with the
+	// devauth tag, and never beside the Appwrite settings.
+	if err := devauth.Check(cfg.AuthMode, cfg.AppwriteEndpoint); err != nil {
+		logger.Error("Dev mode refused", "error", err)
+		os.Exit(1)
 	}
 
 	// Validate CORS_ORIGINS in production mode (fail-closed like JWKS_URL)
