@@ -23,7 +23,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/gablelbm/gable/internal/taxzone"
 	"net/http"
 	"sort"
 	"strconv"
@@ -33,6 +32,7 @@ import (
 	"github.com/gablelbm/gable/internal/customer"
 	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/gablelbm/gable/internal/salesdoc"
+	"github.com/gablelbm/gable/internal/taxzone"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 )

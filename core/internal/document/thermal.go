@@ -6,11 +6,11 @@ package document
 import (
 	"context"
 	"fmt"
-	"github.com/gablelbm/gable/internal/taxzone"
 	"strings"
 	"time"
 
 	"github.com/gablelbm/gable/internal/platform/httpx"
+	"github.com/gablelbm/gable/internal/taxzone"
 
 	"github.com/google/uuid"
 

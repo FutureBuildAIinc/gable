@@ -4,11 +4,11 @@
 package order
 
 import (
-	"github.com/gablelbm/gable/internal/taxzone"
 	"strings"
 
 	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/gablelbm/gable/internal/salesdoc"
+	"github.com/gablelbm/gable/internal/taxzone"
 	"github.com/google/uuid"
 )
 

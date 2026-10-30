@@ -5,13 +5,13 @@ package pos
 
 import (
 	"encoding/json"
-	"github.com/gablelbm/gable/internal/taxzone"
 	"strings"
 	"time"
 
 	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/gablelbm/gable/internal/salesdoc"
 	"github.com/gablelbm/gable/internal/tax"
+	"github.com/gablelbm/gable/internal/taxzone"
 	"github.com/google/uuid"
 )
 

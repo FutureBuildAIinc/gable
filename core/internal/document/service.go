@@ -6,7 +6,6 @@ package document
 import (
 	"context"
 	"fmt"
-	"github.com/gablelbm/gable/internal/taxzone"
 	"log/slog"
 	"strings"
 	"time"
@@ -19,6 +18,7 @@ import (
 	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/gablelbm/gable/internal/product"
 	"github.com/gablelbm/gable/internal/salesdoc"
+	"github.com/gablelbm/gable/internal/taxzone"
 	"github.com/gablelbm/gable/pkg/middleware"
 	"github.com/google/uuid"
 
