@@ -14,10 +14,25 @@ use std::sync::Arc;
 
 use url::Url;
 
-use crate::custody::{self, Custody, CustodyError};
+use crate::custody::{self, Address, Custody, CustodyError, OfflineSlot};
 use crate::fence::{BadOrigin, OriginFence};
+use crate::offline::EnrolmentRecord;
 use crate::profiles::Profile;
 use crate::tokens::{TokenSet, TokenStore};
+
+/// The permissions granted by the work shell's runtime capability to the
+/// configured Gable URL and `/pos` on the `main` window (ADR 0011 section 5.2):
+/// the two token commands and the four offline counter commands, and nothing
+/// else. No page enrols the register, supplies the snapshot or writes the
+/// sync outcomes: the core takes each from the server itself (O2).
+pub const WORK_REMOTE_PERMISSIONS: [&str; 6] = [
+    "allow-core-token",
+    "allow-clear-tokens",
+    "allow-offline-enrolment-status",
+    "allow-load-offline-snapshot",
+    "allow-sign-and-queue-offline-sale",
+    "allow-offline-queue-status",
+];
 
 /// The origins the app's own commands always answer to: the bundled shell's
 /// Tauri origins. The URL override's origin joins them at startup.
@@ -52,6 +67,67 @@ pub fn configured_url(url_var: &str) -> Option<Url> {
         eprintln!("{url_var} is not an http or https URL; loading the bundle");
     }
     parsed
+}
+
+/// Resolves the Gable URL the work shell loads (ADR 0011 section 5.2): the
+/// enrolled device's own `gable_url` setting in the OS keychain takes
+/// precedence, falling back to `configured_url(url_var)` only before the
+/// register is enrolled.
+pub fn enrolled_or_configured_url(
+    custody: &dyn Custody,
+    profile: &Profile,
+    url_var: &str,
+) -> Option<Url> {
+    if let Ok(addr) = Address::offline(profile.identifier, OfflineSlot::Enrolment) {
+        if let Ok(Some(raw)) = custody.get(&addr) {
+            if let Ok(rec) = serde_json::from_str::<EnrolmentRecord>(&raw) {
+                if let Some(url) = parse_shell_url(&rec.gable_url) {
+                    return Some(url);
+                }
+            }
+        }
+    }
+    configured_url(url_var)
+}
+
+/// Builds the runtime capability JSON for the Gable URL the work shell loaded
+/// (ADR 0011 section 5.2): `windows: ["main"]`, `local: false`, `remote.urls`
+/// naming the loaded URL and `/pos` on that Gable's origin, and `permissions`
+/// listing the offline queue commands and the two token commands only.
+pub fn work_remote_capability_json(gable_url: &Url) -> String {
+    let origin = match gable_url.port() {
+        Some(port) => format!(
+            "{}://{}:{}",
+            gable_url.scheme(),
+            gable_url.host_str().unwrap_or_default(),
+            port
+        ),
+        None => format!(
+            "{}://{}",
+            gable_url.scheme(),
+            gable_url.host_str().unwrap_or_default()
+        ),
+    };
+    let pos_url = format!("{origin}/pos");
+    let pos_glob = format!("{origin}/pos/*");
+    let mut urls = vec![gable_url.as_str().to_string()];
+    if !urls.contains(&pos_url) {
+        urls.push(pos_url);
+    }
+    if !urls.contains(&pos_glob) {
+        urls.push(pos_glob);
+    }
+    let capability = serde_json::json!({
+        "identifier": "work-remote",
+        "description": "Runtime capability for the enrolled Gable origin and /pos on the work shell main window.",
+        "local": false,
+        "windows": ["main"],
+        "remote": {
+            "urls": urls,
+        },
+        "permissions": WORK_REMOTE_PERMISSIONS,
+    });
+    serde_json::to_string(&capability).expect("serialize runtime capability")
 }
 
 /// The managed state behind a profile's two token commands.

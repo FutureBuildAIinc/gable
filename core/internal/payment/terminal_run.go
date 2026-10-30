@@ -13,6 +13,8 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 )
@@ -34,11 +36,16 @@ import (
 //                   GET .../charge-card/{interaction_id} until the
 //                   interaction stands succeeded, failed or cancelled, and
 //                   lands the verdict through the answer sink:
-//                   result A authorized, C declined (a decline is a
+//                   result A authorized when the card was charged exactly
+//                   the leg's amount with no fee, C declined (a decline is a
 //                   succeeded interaction), B declined too (a transient
 //                   processor retry: no money moved, the cashier starts a
-//                   new leg), a failed or cancelled interaction declined (no
-//                   charge stage ran). The answer carries Run's trans_id as
+//                   new leg), a failed or cancelled interaction declined
+//                   only when its error is at the card read. Any other end
+//                   with no verdict asks the transaction lookup, and without
+//                   one lands nothing; a surcharged or partial approval lands
+//                   nothing either: the sweep files the manager item. The
+//                   answer carries Run's trans_id as
 //                   its provider reference, so a refund or void leg can name
 //                   it as its reference.
 //
@@ -248,12 +255,100 @@ type runChargeCardStatus struct {
 }
 
 type runChargeCardRes struct {
-	Result   string `json:"result"` // A approved, B retry, C declined
-	TransID  string `json:"trans_id"`
-	RespCode string `json:"resp_code"`
-	RespText string `json:"resp_text"`
-	CardType string `json:"card_type"`
-	Amount   string `json:"amount"`
+	Result   string     `json:"result"` // A approved, B retry, C declined
+	TransID  string     `json:"trans_id"`
+	RespCode string     `json:"resp_code"`
+	RespText string     `json:"resp_text"`
+	CardType string     `json:"card_type"`
+	Amount   runDollars `json:"amount"` // what the card was charged, fee included
+	// FeeAmount is the surcharge the gateway added (a merchant enrolled in
+	// surcharging, no request field): the card is charged the subtotal plus
+	// this fee.
+	FeeAmount runDollars `json:"fee_amount"`
+	// StageErrors names the stage of the workflow that failed (read,
+	// signature, charge, print, other). A read stage error means the card
+	// was never read, so no charge ran.
+	StageErrors map[string]json.RawMessage `json:"stage_errors"`
+}
+
+// runDollars is a dollars figure Run answers as a string ("25.00") or a
+// JSON number; it keeps the text as sent.
+type runDollars string
+
+func (d *runDollars) UnmarshalJSON(b []byte) error {
+	if string(b) == "null" {
+		*d = ""
+		return nil
+	}
+	if len(b) > 0 && b[0] == '"' {
+		var s string
+		if err := json.Unmarshal(b, &s); err != nil {
+			return err
+		}
+		*d = runDollars(s)
+		return nil
+	}
+	*d = runDollars(b)
+	return nil
+}
+
+// cents reads the dollars figure as integer cents, never through a float:
+// "25", "25.5", "25.50" and "25.500" are 2500, 2550, 2550 and 2550. ok is
+// false for an empty, negative or malformed figure, or one finer than a cent.
+func (d runDollars) cents() (int64, bool) {
+	s := string(d)
+	if s == "" || s[0] == '-' {
+		return 0, false
+	}
+	whole, frac, _ := strings.Cut(s, ".")
+	if whole == "" {
+		whole = "0"
+	}
+	for len(frac) > 2 && frac[len(frac)-1] == '0' {
+		frac = frac[:len(frac)-1]
+	}
+	if len(frac) > 2 {
+		return 0, false
+	}
+	for len(frac) < 2 {
+		frac += "0"
+	}
+	if !allDigits(whole) || !allDigits(frac) {
+		return 0, false
+	}
+	w, err := strconv.ParseInt(whole, 10, 64)
+	if err != nil {
+		return 0, false
+	}
+	f, err := strconv.ParseInt(frac, 10, 64)
+	if err != nil {
+		return 0, false
+	}
+	return w*100 + f, true
+}
+
+// allDigits says whether s is ASCII digits only: ParseInt takes a sign, a
+// dollars figure has none in either part.
+func allDigits(s string) bool {
+	for _, r := range s {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+// stageFailed says whether the named stage carries an error.
+func (r *runChargeCardRes) stageFailed(stage string) bool {
+	raw, ok := r.StageErrors[stage]
+	if !ok {
+		return false
+	}
+	switch strings.TrimSpace(string(raw)) {
+	case "", "null", `""`, "false", "{}", "[]":
+		return false
+	}
+	return true
 }
 
 type runVoidOrRefundTerminalRequest struct {
@@ -335,7 +430,7 @@ func (t *RunTerminal) dispatchSale(ctx context.Context, d TerminalDispatch) (Ter
 		if found != nil {
 			t.logger.Info("the Run charge already exists: recovered from the transaction lookup, the device is not prompted again",
 				"order_id", d.IdempotencyKey, "trans_id", found.TransID)
-			t.deliver(d, answerOfTransaction(d, found))
+			t.land(d, answerOfTransaction(d, found))
 			return TerminalReceipt{ProviderRef: found.TransID, DeviceID: d.DeviceID}, nil
 		}
 	}
@@ -387,29 +482,38 @@ func (t *RunTerminal) poll(ctx context.Context, cfg GatewayConfig, d TerminalDis
 		case err == nil && status == http.StatusOK:
 			var st runChargeCardStatus
 			if jerr := json.Unmarshal(raw, &st); jerr == nil {
-				if answer, done, uncertain := answerOfInteraction(d, interaction, &st); done {
+				switch v := answerOfInteraction(d, interaction, &st); v.end {
+				case runEndFinal, runEndHeld:
+					t.land(d, v)
+					return
+				case runEndUncertain:
 					// An uncertain end (no verdict the interaction can speak
 					// for) consults the transaction lookup before it declines:
-					// a charge the report shows is authorized by its own trans
-					// id, never booked declined with the money moved.
-					if uncertain {
-						found, lerr := t.lookupByOrder(pctx, d.IdempotencyKey)
-						switch {
-						case lerr != nil && !errors.Is(lerr, errRunReportingUnset):
-							// the report could not answer: the leg is left for
-							// reconciliation, never booked declined with the
-							// money moved
-							t.logger.Error("the Run transaction lookup could not answer: the leg is left for reconciliation",
-								"order_id", d.IdempotencyKey, "error", lerr)
-							return
-						case found != nil:
-							t.logger.Info("the Run interaction ended with no verdict and the transaction lookup found the charge",
-								"order_id", d.IdempotencyKey, "trans_id", found.TransID)
-							t.deliver(d, answerOfTransaction(d, found))
-							return
-						}
+					// a charge the report shows is booked by its own trans id,
+					// never declined with the money moved.
+					found, lerr := t.lookupByOrder(pctx, d.IdempotencyKey)
+					switch {
+					case errors.Is(lerr, errRunReportingUnset):
+						// no lookup can run, and the charge may have moved: the
+						// leg stays at the device and the sweep files the
+						// manager item, never a decline the cashier would take
+						// the card again on
+						t.logger.Warn("the Run interaction ended with no verdict and no transaction lookup is configured: the sweep files the manager item",
+							"order_id", d.IdempotencyKey, "interaction_id", interaction, "status", st.Status)
+					case lerr != nil:
+						// the report could not answer: the leg is left for
+						// reconciliation, never booked declined with the
+						// money moved
+						t.logger.Error("the Run transaction lookup could not answer: the leg is left for reconciliation",
+							"order_id", d.IdempotencyKey, "error", lerr)
+					case found != nil:
+						t.logger.Info("the Run interaction ended with no verdict and the transaction lookup found the charge",
+							"order_id", d.IdempotencyKey, "trans_id", found.TransID)
+						t.land(d, answerOfTransaction(d, found))
+					default:
+						// the report answered and holds no charge for the order
+						t.land(d, v)
 					}
-					t.deliver(d, answer)
 					return
 				}
 			}
@@ -423,7 +527,7 @@ func (t *RunTerminal) poll(ctx context.Context, cfg GatewayConfig, d TerminalDis
 			case found != nil:
 				t.logger.Info("the Run interaction expired and the transaction lookup resolved the leg",
 					"order_id", d.IdempotencyKey, "trans_id", found.TransID)
-				t.deliver(d, answerOfTransaction(d, found))
+				t.land(d, answerOfTransaction(d, found))
 			default:
 				t.logger.Warn("the Run interaction expired and the transaction lookup found no charge: the sweep files the manager item",
 					"order_id", d.IdempotencyKey, "interaction_id", interaction)
@@ -433,7 +537,7 @@ func (t *RunTerminal) poll(ctx context.Context, cfg GatewayConfig, d TerminalDis
 		if time.Now().After(deadline) {
 			found, lerr := t.lookupByOrder(pctx, d.IdempotencyKey)
 			if lerr == nil && found != nil {
-				t.deliver(d, answerOfTransaction(d, found))
+				t.land(d, answerOfTransaction(d, found))
 				return
 			}
 			if lerr != nil && !errors.Is(lerr, errRunReportingUnset) {
@@ -453,49 +557,109 @@ func (t *RunTerminal) poll(ctx context.Context, cfg GatewayConfig, d TerminalDis
 	}
 }
 
-// answerOfInteraction maps one interaction status to the answer the sink
-// takes, with done=false while it stays pending. A succeeded interaction is
-// the workflow's end, not the card's: result A authorized, C declined, B
-// declined too (no money moved; the cashier starts a new leg). A failed or
-// cancelled interaction, or a succeeded one that carries no result object,
-// ran no charge the answer can speak for: uncertain=true, and the caller
-// consults the transaction lookup before it lands that decline, because a
-// gateway fault is not a decline and the charge may have moved.
-func answerOfInteraction(d TerminalDispatch, interaction string, st *runChargeCardStatus) (answer TerminalAnswer, done, uncertain bool) {
-	answer = TerminalAnswer{IntentID: d.IntentID, ProviderRef: interaction, Verdict: "declined"}
-	switch st.Status {
-	case "pending":
-		return answer, false, false
-	case "succeeded":
-		if st.Result != nil {
-			answer.Brand = st.Result.CardType
-			answer.AuthCode = st.Result.RespCode
-			if st.Result.TransID != "" {
-				answer.ProviderRef = st.Result.TransID
-			}
-			if st.Result.Result != "A" {
-				return answer, true, false
-			}
-			answer.Verdict = "authorized"
-			return answer, true, false
-		}
-		return answer, true, true
-	case "failed", "cancelled":
-		return answer, true, true
-	}
-	return answer, false, false
+// runEnd says what one interaction status or report row lets the driver do.
+type runEnd int
+
+const (
+	// runEndPending: the interaction is still at the device.
+	runEndPending runEnd = iota
+	// runEndFinal: a verdict the driver books.
+	runEndFinal
+	// runEndUncertain: no verdict the interaction can speak for, and the
+	// charge may have moved; the transaction lookup decides.
+	runEndUncertain
+	// runEndHeld: an approval the driver may not book as the leg (the card
+	// was charged another figure): nothing is landed, the leg stays at the
+	// device and the sweep carries it to a person.
+	runEndHeld
+)
+
+// runVerdict is one mapped answer with what the driver may do with it.
+type runVerdict struct {
+	TerminalAnswer
+	end runEnd
+	// held says why an approval is not booked, with both figures.
+	held string
 }
 
-// answerOfTransaction maps one reporting transaction row to the answer the
-// sink takes: the masked card number's last four are the only card shape
-// the report carries, and the result code is the same A/B/C envelope.
-func answerOfTransaction(d TerminalDispatch, tx *runReportingTransaction) TerminalAnswer {
-	answer := TerminalAnswer{IntentID: d.IntentID, ProviderRef: tx.TransID, Verdict: "declined",
-		AuthCode: tx.AuthCode, Last4: lastFourOf(tx.CardNumber)}
-	if tx.Result == "A" {
-		answer.Verdict = "authorized"
+// answerOfInteraction maps one interaction status. A succeeded interaction
+// is the workflow's end, not the card's: result A authorized, C declined, B
+// declined too (no money moved; the cashier starts a new leg), unless the
+// result names a charge stage error, which is uncertain; an empty or unknown
+// result code is uncertain too. An approval is
+// booked only when the card was charged exactly the leg's amount with no
+// fee: a surcharge (the card charged the subtotal plus a fee) or a partial
+// approval is held for a person until surcharge booking is built. A failed or
+// cancelled interaction whose error is at the card read ran no charge and
+// declines. Any other failed or cancelled interaction, or a succeeded one
+// that carries no result object, is uncertain: a gateway fault is not a
+// decline and the charge may have moved.
+func answerOfInteraction(d TerminalDispatch, interaction string, st *runChargeCardStatus) runVerdict {
+	v := runVerdict{TerminalAnswer: TerminalAnswer{IntentID: d.IntentID, ProviderRef: interaction, Verdict: "declined"}}
+	switch st.Status {
+	case "succeeded":
+		if st.Result == nil {
+			v.end = runEndUncertain
+			return v
+		}
+		v.Brand = st.Result.CardType
+		v.AuthCode = st.Result.RespCode
+		if st.Result.TransID != "" {
+			v.ProviderRef = st.Result.TransID
+		}
+		switch st.Result.Result {
+		case "A":
+		case "B", "C":
+			// no money moved, unless the charge stage itself failed: a
+			// gateway fault is not a decline
+			v.end = runEndFinal
+			if st.Result.stageFailed("charge") {
+				v.end = runEndUncertain
+			}
+			return v
+		default:
+			// an empty or unknown code is no verdict the driver can book
+			v.end = runEndUncertain
+			return v
+		}
+		v.end = runEndFinal
+		v.Verdict = "authorized"
+		if st.Result.FeeAmount != "" {
+			if fee, ok := st.Result.FeeAmount.cents(); !ok || fee != 0 {
+				v.end, v.held = runEndHeld, fmt.Sprintf("the card was surcharged %q on a leg of %d cents", st.Result.FeeAmount, d.AmountCents)
+				return v
+			}
+		}
+		if charged, ok := st.Result.Amount.cents(); !ok || charged != d.AmountCents {
+			v.end, v.held = runEndHeld, fmt.Sprintf("the card was charged %q on a leg of %d cents", st.Result.Amount, d.AmountCents)
+		}
+		return v
+	case "failed", "cancelled":
+		if st.Result != nil && st.Result.stageFailed("read") && !st.Result.stageFailed("charge") {
+			v.end = runEndFinal
+			return v
+		}
+		v.end = runEndUncertain
+		return v
 	}
-	return answer
+	v.end = runEndPending
+	return v
+}
+
+// answerOfTransaction maps one reporting transaction row: the masked card
+// number's last four are the only card shape the report carries, and the
+// result code is the same A/B/C envelope. An approval for a figure other than
+// the leg's is held, as on the interaction.
+func answerOfTransaction(d TerminalDispatch, tx *runReportingTransaction) runVerdict {
+	v := runVerdict{end: runEndFinal, TerminalAnswer: TerminalAnswer{IntentID: d.IntentID, ProviderRef: tx.TransID,
+		Verdict: "declined", AuthCode: tx.AuthCode, Last4: lastFourOf(tx.CardNumber)}}
+	if tx.Result == "A" {
+		v.Verdict = "authorized"
+		if tx.Amount != float64(d.AmountCents) {
+			v.end, v.held = runEndHeld, fmt.Sprintf("the report shows %v cents charged on a leg of %d cents", tx.Amount, d.AmountCents)
+		}
+	}
+	return v
 }
 
 // lastFourOf reads the trailing four digits of a masked card number.
@@ -563,6 +727,18 @@ func (t *RunTerminal) dispatchReversal(ctx context.Context, d TerminalDispatch) 
 	}
 	t.deliver(d, answer)
 	return TerminalReceipt{ProviderRef: ref, DeviceID: d.DeviceID}, nil
+}
+
+// land delivers a final verdict, and lands nothing for a held one: the leg
+// stays pending at the device, the sweep files the manager item, and the
+// log names both figures for the person who resolves it.
+func (t *RunTerminal) land(d TerminalDispatch, v runVerdict) {
+	if v.end == runEndHeld {
+		t.logger.Warn("the Run approval is not booked: "+v.held+"; the sweep files the manager item",
+			"order_id", d.IdempotencyKey, "trans_id", v.ProviderRef)
+		return
+	}
+	t.deliver(d, v.TerminalAnswer)
 }
 
 // deliver lands one answer in the sink on the driver's own time: never
