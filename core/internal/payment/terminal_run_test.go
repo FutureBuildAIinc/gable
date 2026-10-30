@@ -1068,7 +1068,7 @@ func raceOnce(t *testing.T, db *database.DB, ctx context.Context, branch uuid.UU
 	}
 	term := newRunDriver(t, fs, ledger)
 	in := &payment.TerminalIntent{ID: uuid.New(), TransactionID: sale, LegKey: "card-0",
-		RegisterID: "REG-" + sale.String()[:12], BranchID: branch, AmountCents: 100,
+		RegisterID: "REG-" + sale.String()[:12], BranchID: branch, AmountCents: 2500,
 		Kind: payment.TerminalKindSale, IdempotencyKey: "sale-" + sale.String() + "-card-0",
 		LeaseUntil: time.Now().Add(40 * time.Millisecond)}
 	if !claimRunLegIntent(t, ledger, in) {
