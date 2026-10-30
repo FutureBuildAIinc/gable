@@ -67,13 +67,14 @@ func TestUserRolePrefersClaims(t *testing.T) {
 	}
 }
 
-// The "roles" array is the fallback when the single-valued "role" claim is
-// absent; an empty array must not fall through to the dev-mode default.
+// The audit role comes from the roles array in the fixed role order (ADR 0012
+// section 2), not from its first entry; an empty array must not fall through
+// to the dev-mode default.
 func TestUserRoleFromRolesArrayAndEmpty(t *testing.T) {
 	t.Setenv("AUTH_MODE", "dev")
 
-	if got := userRole(requestWithClaims(t, &middleware.UserClaims{Roles: []string{"warehouse", "sales"}})); got != "warehouse" {
-		t.Errorf("userRole from roles array = %q, want %q", got, "warehouse")
+	if got := userRole(requestWithClaims(t, &middleware.UserClaims{Roles: []string{"warehouse", "sales"}})); got != "sales" {
+		t.Errorf("userRole from roles array = %q, want %q", got, "sales")
 	}
 	if got := userRole(requestWithClaims(t, &middleware.UserClaims{})); got != "" {
 		t.Errorf("userRole with present-but-roleless claims = %q, want %q — a real token "+

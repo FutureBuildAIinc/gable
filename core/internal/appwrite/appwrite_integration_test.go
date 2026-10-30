@@ -280,6 +280,9 @@ func TestProof(t *testing.T) {
 		t.Fatalf("client sign up with the switch off = %d, want a refusal: %s", code, body)
 	}
 	t.Logf("client sign up refused (%d)", code)
+
+	// ADR 0012 slice 4: the redirect sign in methods.
+	proveRedirects(ctx, t, seed, client)
 }
 
 // rawRequest performs one plain HTTP call and returns the status and body.

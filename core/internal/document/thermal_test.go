@@ -280,6 +280,31 @@ func TestThermalReceiptRoundingLine(t *testing.T) {
 	mustNotContain(t, plainDoc, "Cash rounding")
 }
 
+// The card fee line (CP-15): a surcharged card tender prints its fee on its
+// own line under the tender, outside the total; a tender with none prints no
+// such line.
+func TestThermalReceiptCardFeeLine(t *testing.T) {
+	svc := brandedReceiptService(t)
+
+	fee := sampleReceipt()
+	fee.Tenders = []ThermalTender{{Method: "card", AmountCents: fee.TotalCents, LastFour: "4242", SurchargeCents: httpx.Cents(3221)}}
+	doc, err := svc.GenerateThermalReceiptPDF(context.Background(), yardNorth, fee)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertPDF(t, doc)
+	mustContain(t, doc, "Card fee: $32.21")
+	mustContain(t, doc, "Total: $1,073.50")
+
+	plain := sampleReceipt()
+	plainDoc, err := svc.GenerateThermalReceiptPDF(context.Background(), yardNorth, plain)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertPDF(t, plainDoc)
+	mustNotContain(t, plainDoc, "Card fee")
+}
+
 // The receipt renders even without a profile or a yard, the way every other
 // form does.
 func TestThermalReceiptWithoutBrandingStillRenders(t *testing.T) {
@@ -296,4 +321,17 @@ func TestThermalReceiptWithoutBrandingStillRenders(t *testing.T) {
 	mustContain(t, doc, "SO-000099")
 	mustContain(t, doc, "Walk-in")
 	mustNotContain(t, doc, "Test Yard")
+}
+
+// A card tender names its brand and last four on the paper; the number itself
+// is never on the receipt.
+func TestThermalReceiptNamesTheCardBrandAndLastFour(t *testing.T) {
+	svc := brandedReceiptService(t)
+	r := sampleReceipt()
+	r.Tenders = []ThermalTender{{Method: "CARD", Brand: "VISA", AmountCents: httpx.Cents(107350), LastFour: "4242"}}
+	doc, err := svc.GenerateThermalReceiptPDF(context.Background(), yardNorth, r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mustContain(t, doc, "CARD VISA  ****4242")
 }

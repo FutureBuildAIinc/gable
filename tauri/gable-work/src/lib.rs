@@ -24,12 +24,13 @@
 use std::sync::Arc;
 
 use gable_shell_core::custody;
-use gable_shell_core::fence::OriginFence;
+use gable_shell_core::fence::{BadOrigin, OriginFence};
 use gable_shell_core::offline::OfflineCounter;
 use gable_shell_core::profiles;
 use gable_shell_core::shell::{self, TokenState};
+use gable_shell_core::signin::UreqTransport;
 use gable_shell_core::tokens::TokenStore;
-use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
+use tauri::{Manager, Url, WebviewUrl, WebviewWindowBuilder};
 
 /// Fallback environment variable naming the Gable to load before the register
 /// is enrolled; once enrolled, the keychain's enrolled `gable_url` replaces it
@@ -43,8 +44,9 @@ pub mod commands {
     use std::sync::Arc;
 
     use gable_shell_core::offline::{
-        EnrolmentPublic, OfflineCounter, OfflineError, OfflineSnapshot, QueueStatusView,
-        SignSaleRequest, SignedOfflineSale,
+        CartPreview, EnrolmentPublic, HttpOfflineServer, OfflineCounter, OfflineError,
+        OfflineSnapshot, QueueStatusView, SignSaleRequest, SignedOfflineSale, SnapshotRefresh,
+        SyncReport,
     };
     use gable_shell_core::shell::{self, TokenState};
 
@@ -137,28 +139,155 @@ pub mod commands {
             .await
             .map_err(|_| OfflineError::keychain_unavailable())?
     }
+
+    /// The enrolled Gable as the core's server: its origin and the keychain's
+    /// token, never anything the page names.
+    fn enrolled_server(
+        counter: &OfflineCounter,
+        tokens: &TokenState,
+    ) -> Result<HttpOfflineServer, OfflineError> {
+        let url = counter
+            .enrolled_gable_url()?
+            .and_then(|u| tauri::Url::parse(&u).ok())
+            .ok_or_else(OfflineError::re_enrol_required)?;
+        Ok(HttpOfflineServer::new(&url, Arc::new(tokens.clone())))
+    }
+
+    /// The core fetches the register's snapshot from the enrolled Gable
+    /// (ADR 0011 5.4), once its queue has drained.
+    #[tauri::command]
+    pub async fn refresh_offline_snapshot(
+        window: tauri::WebviewWindow,
+        counter: tauri::State<'_, Arc<OfflineCounter>>,
+        tokens: tauri::State<'_, TokenState>,
+    ) -> Result<SnapshotRefresh, OfflineError> {
+        let url = window.url().map_err(|_| OfflineError::origin_denied())?;
+        let counter = counter.inner().clone();
+        let tokens = tokens.inner().clone();
+        tauri::async_runtime::spawn_blocking(move || {
+            let server = enrolled_server(&counter, &tokens)?;
+            counter.refresh_snapshot(Some(url.as_str()), &server)
+        })
+        .await
+        .map_err(|_| OfflineError::keychain_unavailable())?
+    }
+
+    /// The core prices the clerk's cart from its own snapshot copy (ADR 0011
+    /// 5.3); nothing is written or signed.
+    #[tauri::command]
+    pub async fn price_offline_cart(
+        window: tauri::WebviewWindow,
+        counter: tauri::State<'_, Arc<OfflineCounter>>,
+        request: SignSaleRequest,
+    ) -> Result<CartPreview, OfflineError> {
+        let url = window.url().map_err(|_| OfflineError::origin_denied())?;
+        let counter = counter.inner().clone();
+        tauri::async_runtime::spawn_blocking(move || {
+            counter.price_cart(Some(url.as_str()), request)
+        })
+        .await
+        .map_err(|_| OfflineError::keychain_unavailable())?
+    }
+
+    /// The core sends its queue to the enrolled Gable's sync and records the
+    /// server's answer (ADR 0011 section 3).
+    #[tauri::command]
+    pub async fn sync_offline_queue(
+        window: tauri::WebviewWindow,
+        counter: tauri::State<'_, Arc<OfflineCounter>>,
+        tokens: tauri::State<'_, TokenState>,
+    ) -> Result<SyncReport, OfflineError> {
+        let url = window.url().map_err(|_| OfflineError::origin_denied())?;
+        let counter = counter.inner().clone();
+        let tokens = tokens.inner().clone();
+        tauri::async_runtime::spawn_blocking(move || {
+            let server = enrolled_server(&counter, &tokens)?;
+            counter.sync_queue(Some(url.as_str()), &server)
+        })
+        .await
+        .map_err(|_| OfflineError::keychain_unavailable())?
+    }
+
+    /// Starts a redirect sign in (google, microsoft or oidc): the system
+    /// browser opens on the core's start route with a PKCE challenge and a
+    /// loopback return target, and this call answers once the person has come
+    /// back and the tokens are in the keychain. The wait is on a blocking
+    /// thread, and the command answers only to the app's own origins.
+    #[tauri::command]
+    pub async fn begin_sign_in(
+        window: tauri::WebviewWindow,
+        state: tauri::State<'_, TokenState>,
+        method: String,
+    ) -> Result<(), String> {
+        let url = window.url().map_err(|_| shell::ERR_ORIGIN.to_string())?;
+        let state = state.inner().clone();
+        tauri::async_runtime::spawn_blocking(move || {
+            shell::begin_sign_in_answer(
+                &state,
+                url.as_str(),
+                &method,
+                &gable_shell_core::signin::open_in_browser,
+                std::time::Duration::from_secs(300),
+            )
+        })
+        .await
+        .map_err(|_| shell::ERR_CUSTODY.to_string())?
+    }
+
+    /// Rotates the token pair and answers the new access token; the refresh
+    /// token stays in the keychain.
+    #[tauri::command]
+    pub async fn refresh_tokens(
+        window: tauri::WebviewWindow,
+        state: tauri::State<'_, TokenState>,
+    ) -> Result<AccessTokenAnswer, String> {
+        let url = window.url().map_err(|_| shell::ERR_ORIGIN.to_string())?;
+        let state = state.inner().clone();
+        tauri::async_runtime::spawn_blocking(move || {
+            shell::refresh_tokens_answer(&state, url.as_str())
+                .map(|access_token| AccessTokenAnswer { access_token })
+        })
+        .await
+        .map_err(|_| shell::ERR_CUSTODY.to_string())?
+    }
+}
+
+/// The work shell's token state over the shared `custody` (the offline
+/// counter reads the same keychain entry). Names the Gable server when a URL
+/// is set, so the shell can sign in and rotate the token it holds.
+fn token_state(
+    custody: Arc<dyn custody::Custody>,
+    profile: &'static profiles::Profile,
+    override_url: Option<&Url>,
+) -> Result<TokenState, BadOrigin> {
+    let state = TokenState::build(TokenStore::new(custody), profile, override_url)?;
+    Ok(match override_url {
+        Some(url) => state.with_server(url, Arc::new(UreqTransport::new())),
+        None => state,
+    })
 }
 
 pub fn run() {
     let profile = profiles::work();
     let custody: Arc<dyn custody::Custody> = Arc::from(custody::platform_custody());
     let override_url = shell::enrolled_or_configured_url(&*custody, profile, URL_VAR);
-    let state = TokenState::build(
-        TokenStore::new(custody.clone()),
-        profile,
-        override_url.as_ref(),
-    )
-    .expect("the app's own origins build a fence");
+    let state = token_state(custody.clone(), profile, override_url.as_ref())
+        .expect("the app's own origins build a fence");
 
     tauri::Builder::default()
         .manage(state)
         .invoke_handler(tauri::generate_handler![
             commands::core_token,
             commands::clear_tokens,
+            commands::begin_sign_in,
+            commands::refresh_tokens,
             commands::offline_enrolment_status,
             commands::load_offline_snapshot,
             commands::sign_and_queue_offline_sale,
-            commands::offline_queue_status
+            commands::offline_queue_status,
+            commands::refresh_offline_snapshot,
+            commands::price_offline_cart,
+            commands::sync_offline_queue
         ])
         .setup(move |app| {
             let data_dir = app
@@ -226,6 +355,21 @@ mod tests {
         (state, store, custody)
     }
 
+    // RULE (PR 246 read, finding P1): the work shell's state holds a sign in
+    // client whenever a Gable URL is set, so the token it holds can be
+    // rotated and the page can start the shell's sign in; with no URL there is
+    // no server to name and no client.
+    #[test]
+    fn the_work_shell_state_has_a_client_exactly_when_a_url_is_set() {
+        let url = super::Url::parse("https://gable.yard.internal:8443/").unwrap();
+        let with = super::token_state(Arc::new(MemoryCustody::new()), profiles::work(), Some(&url))
+            .expect("a fence over the bundled origins and the url");
+        assert!(with.client().is_some(), "a url names the server");
+        let without = super::token_state(Arc::new(MemoryCustody::new()), profiles::work(), None)
+            .expect("a fence over the bundled origins");
+        assert!(without.client().is_none(), "no url, no server");
+    }
+
     fn profile_id() -> &'static str {
         profiles::work().identifier
     }
@@ -240,7 +384,15 @@ mod tests {
             .iter()
             .map(|p| p.as_str().expect("permission names are strings"))
             .collect();
-        assert_eq!(perms, ["allow-core-token", "allow-clear-tokens"]);
+        assert_eq!(
+            perms,
+            [
+                "allow-core-token",
+                "allow-clear-tokens",
+                "allow-begin-sign-in",
+                "allow-refresh-tokens"
+            ]
+        );
         // Least privilege: no open core grant, no plugin, no device or shell
         // permission rides along. The device grants are the field profile's.
         for banned in [
@@ -411,6 +563,25 @@ mod tests {
         }
     }
 
+    // RULE (PR 246 read, finding P1): the page the window loads from the
+    // enrolled Gable can start the shell's sign in and rotate its token, so
+    // the runtime capability grants those two commands by name.
+    #[test]
+    fn the_runtime_capability_grants_begin_sign_in_and_refresh_tokens() {
+        let url = super::Url::parse("https://gable.yard.internal:8443/").unwrap();
+        let cap: serde_json::Value =
+            serde_json::from_str(&shell::work_remote_capability_json(&url)).unwrap();
+        let perms: Vec<&str> = cap["permissions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_str().unwrap())
+            .collect();
+        for wanted in ["allow-begin-sign-in", "allow-refresh-tokens"] {
+            assert!(perms.contains(&wanted), "{wanted} must be granted");
+        }
+    }
+
     // RULE (ADR 0011 section 5.2 and section 7): the Gable URL comes from the
     // enrolled device's keychain setting, and the queue commands answer that
     // Gable's origin and refuse every other origin and the embedded bundle.
@@ -489,5 +660,41 @@ mod tests {
         ] {
             assert!(!production.contains(banned), "lib.rs contains {banned}");
         }
+    }
+
+    #[test]
+    fn run_builds_its_token_state_only_through_token_state() {
+        // A state built straight from TokenState::build names no server, so
+        // the shell could neither sign in nor rotate its token (PR 247's read,
+        // P3). Only token_state() may build one, and run() must call it.
+        let src = include_str!("lib.rs");
+        let production = src.split("#[cfg(test)]").next().unwrap();
+        let helper_start = production
+            .find("fn token_state(")
+            .expect("lib.rs defines token_state()");
+        let helper_end = helper_start
+            + production[helper_start..]
+                .find("\n}\n")
+                .expect("token_state() closes");
+        let builds: Vec<usize> = production
+            .match_indices("TokenState::build(")
+            .map(|(at, _)| at)
+            .collect();
+        assert!(!builds.is_empty(), "token_state() builds the state");
+        for at in builds {
+            assert!(
+                (helper_start..helper_end).contains(&at),
+                "TokenState::build( outside token_state() in lib.rs"
+            );
+        }
+
+        let run_start = production
+            .find("pub fn run()")
+            .expect("lib.rs defines run()");
+        let run_end = run_start + production[run_start..].find("\n}\n").expect("run() closes");
+        assert!(
+            production[run_start..run_end].contains("token_state("),
+            "run() builds its state through token_state()"
+        );
     }
 }

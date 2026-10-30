@@ -88,14 +88,11 @@ test.describe('Front door', () => {
   });
 
   test('tiles are filtered by the roles in the session', async ({ page }) => {
-    // A token session for a sales user (unsigned: the client never verifies, and the
-    // catalog is stubbed, so no core call depends on it).
-    const b64 = (o: object) => Buffer.from(JSON.stringify(o)).toString('base64url');
-    const exp = Math.floor(Date.now() / 1000) + 3600;
-    const token = `${b64({ alg: 'none', typ: 'JWT' })}.${b64({ sub: 'sales-user', email: 'sales@example.test', roles: ['sales'], exp })}.sig`;
-    await page.addInitScript((t) => {
-      sessionStorage.setItem('gable.auth.session.v1', JSON.stringify({ v: 1, kind: 'token', token: t }));
-    }, token);
+    // A dev persona for a sales user (this build is a dev build, which holds no staff session in
+    // storage; the catalog is stubbed, so no core call depends on it).
+    await page.addInitScript(() => {
+      sessionStorage.setItem('gable.auth.session.v1', JSON.stringify({ v: 1, kind: 'dev', name: 'Sales User', role: 'sales' }));
+    });
     await page.route('**/api/v1/apps', (route) =>
       route.fulfill({
         json: {
@@ -114,15 +111,11 @@ test.describe('Front door', () => {
     await expect(page.getByRole('button', { name: 'Open Tech Admin' })).toHaveCount(0);
   });
 
-  test('a token with only the single role claim gets the tiles that role admits', async ({ page }) => {
-    // Core's RequireRole admits the single `role` claim too: an owner token without a roles list
-    // opens every app, so the door must not fall back to the desk tile alone.
-    const b64 = (o: object) => Buffer.from(JSON.stringify(o)).toString('base64url');
-    const exp = Math.floor(Date.now() / 1000) + 3600;
-    const token = `${b64({ alg: 'none', typ: 'JWT' })}.${b64({ sub: 'owner-user', email: 'owner@example.test', role: 'owner', exp })}.sig`;
-    await page.addInitScript((t) => {
-      sessionStorage.setItem('gable.auth.session.v1', JSON.stringify({ v: 1, kind: 'token', token: t }));
-    }, token);
+  test('an owner session gets every tile its roles admit', async ({ page }) => {
+    // An owner opens every app, so the door must not fall back to the desk tile alone.
+    await page.addInitScript(() => {
+      sessionStorage.setItem('gable.auth.session.v1', JSON.stringify({ v: 1, kind: 'dev', name: 'Owner User', role: 'owner' }));
+    });
     await page.route('**/api/v1/apps', (route) =>
       route.fulfill({
         json: {

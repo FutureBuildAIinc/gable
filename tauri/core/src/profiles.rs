@@ -33,6 +33,9 @@ pub enum Channel {
     Work,
     Field,
     Pro,
+    /// The desk shell, which is not one of the three profiles; it has an
+    /// identifier for its keychain entries and nothing else of a profile.
+    Desk,
 }
 
 impl Channel {
@@ -41,6 +44,7 @@ impl Channel {
             Channel::Work => "work",
             Channel::Field => "field",
             Channel::Pro => "pro",
+            Channel::Desk => "desk",
         }
     }
 }
@@ -153,6 +157,29 @@ pub fn pro() -> &'static Profile {
         start_app: "pro-shell",
         window: WindowDefaults {
             title: "Gable Pro",
+            width: 1280.0,
+            height: 800.0,
+        },
+        permissions: Permissions {
+            camera: false,
+            fine_location: false,
+        },
+    })
+}
+
+/// The desk shell's identity, for its keychain entries and its token
+/// commands. It is deliberately not in `all()`: it opens for no role, is not
+/// a launcher profile, and goes away when the work profile replaces it.
+pub fn desk() -> &'static Profile {
+    static DESK: OnceLock<Profile> = OnceLock::new();
+    DESK.get_or_init(|| Profile {
+        identifier: "ai.futurebuild.gable.desk",
+        product_name: "Gable Desk",
+        channel: Channel::Desk,
+        roles: &[],
+        start_app: "front-door",
+        window: WindowDefaults {
+            title: "Gable Desk",
             width: 1280.0,
             height: 800.0,
         },
@@ -308,6 +335,17 @@ mod tests {
         }
         assert!(work().roles.contains(&"cashier"));
         assert!(field().roles.contains(&"cashier"));
+    }
+
+    #[test]
+    fn the_desk_has_an_identity_but_is_not_a_launcher_profile() {
+        assert_eq!(desk().identifier, "ai.futurebuild.gable.desk");
+        assert!(all().iter().all(|p| p.identifier != desk().identifier));
+        assert!(desk().roles.is_empty());
+        assert!(!desk().permissions.camera && !desk().permissions.fine_location);
+        let conf: serde_json::Value =
+            serde_json::from_str(include_str!("../../gable-desk/tauri.conf.json")).unwrap();
+        assert_eq!(conf["identifier"].as_str(), Some(desk().identifier));
     }
 
     #[test]

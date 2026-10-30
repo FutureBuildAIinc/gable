@@ -23,6 +23,7 @@ const (
 	StatusHeld      SaleStatus = "HELD"
 	StatusCompleted SaleStatus = "COMPLETED"
 	StatusVoided    SaleStatus = "VOIDED"
+	StatusAbandoned SaleStatus = "ABANDONED"
 )
 
 // Status returns the wire spelling.
@@ -186,12 +187,16 @@ type Tender struct {
 	SaleID      uuid.UUID    `json:"sale_id"`
 	Method      TenderMethod `json:"method"`
 	AmountCents httpx.Cents  `json:"amount_cents"`
-	PaymentID   *uuid.UUID   `json:"payment_id"`
-	Reference   *string      `json:"reference"`
-	CardLast4   *string      `json:"card_last4"`
-	CardBrand   *string      `json:"card_brand"`
-	GatewayTxID *string      `json:"gateway_tx_id"`
-	AuthCode    *string      `json:"auth_code"`
+	// SurchargeCents is the card fee the processor added on top of the
+	// tender (CP-15): the device's figure, stored, never recomputed. The
+	// tender's amount and the sale's total do not include it.
+	SurchargeCents httpx.Cents `json:"surcharge_cents"`
+	PaymentID      *uuid.UUID  `json:"payment_id"`
+	Reference      *string     `json:"reference"`
+	CardLast4      *string     `json:"card_last4"`
+	CardBrand      *string     `json:"card_brand"`
+	GatewayTxID    *string     `json:"gateway_tx_id"`
+	AuthCode       *string     `json:"auth_code"`
 	// IDChecked and IDType record that the cashier looked at the payer's ID
 	// (a check or an account charge) and what kind it was; the number is
 	// never taken.
@@ -355,6 +360,11 @@ type TillReport struct {
 	TenderedByMethod  map[string]int64 `json:"tendered_by_method"`
 	ExpectedByMethod  map[string]int64 `json:"expected_by_method"`
 	OverShortByMethod map[string]int64 `json:"over_short_by_method,omitempty"`
+
+	// OfflineHeldByMethod is the money of the session's offline sales that
+	// wait on a manager (CP-13 OW), already inside ExpectedByMethod: the
+	// drawer holds it, nothing has posted it. Absent when none waits.
+	OfflineHeldByMethod map[string]int64 `json:"offline_held_by_method,omitempty"`
 
 	// RefundsByMethod is what the session refunded, per method (CASH out of
 	// the drawer, CARD back to the card), so the X report answers "refunds"

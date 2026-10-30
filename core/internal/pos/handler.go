@@ -120,6 +120,26 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux, roleGuard ...func(http.Hand
 		return guard(handler)
 	}
 
+	// The offline policy (CP-13 O1, ADR 0011 section 4): writing it is an
+	// admin act, so the write mounts on admin and owner; the read adds
+	// finance. Fourth and fifth guards, else the roles' own check stands.
+	policyWrite := func(handler http.HandlerFunc) http.HandlerFunc {
+		if len(roleGuard) > 3 && roleGuard[3] != nil {
+			return func(w http.ResponseWriter, r *http.Request) {
+				roleGuard[3](handler).ServeHTTP(w, r)
+			}
+		}
+		return middleware.RequireRole("admin", "owner")(handler).ServeHTTP
+	}
+	policyRead := func(handler http.HandlerFunc) http.HandlerFunc {
+		if len(roleGuard) > 4 && roleGuard[4] != nil {
+			return func(w http.ResponseWriter, r *http.Request) {
+				roleGuard[4](handler).ServeHTTP(w, r)
+			}
+		}
+		return middleware.RequireRole("admin", "owner", "finance")(handler).ServeHTTP
+	}
+
 	// The sale lifecycle
 	mux.HandleFunc("POST /api/v1/pos/transactions", guard(h.StartTransaction))
 	mux.HandleFunc("GET /api/v1/pos/transactions", guard(h.ListTransactions))
@@ -131,6 +151,9 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux, roleGuard ...func(http.Hand
 	mux.HandleFunc("POST /api/v1/pos/transactions/{id}/void", guard(h.VoidTransaction))
 	mux.HandleFunc("POST /api/v1/pos/transactions/{id}/overrides", guard(h.ApproveOverrideHandler))
 	mux.HandleFunc("POST /api/v1/pos/transactions/{id}/signature", guard(h.CaptureSignatureHandler))
+	// The clerk's answer for an offline sale that replaced a result unknown
+	// cart (CP-13 C2, ADR 0011 5.3).
+	mux.HandleFunc("POST /api/v1/pos/transactions/{id}/replaced-cart-answer", guard(h.AnswerReplacedCartHandler))
 
 	// History and search
 	mux.HandleFunc("GET /api/v1/pos/products/search", guard(h.SearchProducts))
@@ -169,6 +192,23 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux, roleGuard ...func(http.Hand
 	mux.HandleFunc("POST /api/v1/pos/till/{id}/signoff", signoffMount(h.SignOffTill))
 	mux.HandleFunc("GET /api/v1/pos/till/policy", resolveMount(h.GetVariancePolicy))
 	mux.HandleFunc("PUT /api/v1/pos/till/policy", resolveMount(h.PutVariancePolicy))
+	mux.HandleFunc("GET /api/v1/pos/offline/policy", policyRead(h.GetOfflinePolicy))
+	mux.HandleFunc("PUT /api/v1/pos/offline/policy", policyWrite(h.PutOfflinePolicy))
+	// The offline exception queue (CP-13 O4, ADR 0011 3.4): the managers read
+	// it on the branch day page; a resolution is an owner's or an admin's,
+	// on the policy write's mount, and never the sale's own cashier.
+	mux.HandleFunc("GET /api/v1/pos/offline/exceptions", policyRead(h.ListOfflineExceptions))
+	mux.HandleFunc("GET /api/v1/pos/offline/exceptions/{id}", policyRead(h.GetOfflineException))
+	mux.HandleFunc("POST /api/v1/pos/offline/exceptions/{id}/resolve", policyWrite(h.ResolveOfflineException))
+	// A register's device (CP-13 O2, ADR 0011 section 6.1): enrolment and
+	// revocation are owner or admin acts with the counter PIN, on the policy
+	// write's mount; the read adds finance, on the policy read's.
+	mux.HandleFunc("GET /api/v1/pos/offline/registers/{id}/device", policyRead(h.GetRegisterDevice))
+	mux.HandleFunc("POST /api/v1/pos/offline/registers/{id}/device", policyWrite(h.EnrolRegisterDevice))
+	mux.HandleFunc("POST /api/v1/pos/offline/registers/{id}/device/revoke", policyWrite(h.RevokeRegisterDevice))
+	// The register's offline snapshot (CP-13 O2, ADR 0011 section 5.4): the
+	// shell takes it as the person signed in at the counter.
+	mux.HandleFunc("GET /api/v1/pos/offline/snapshot", guard(h.GetOfflineSnapshot))
 
 	// The manager step up (CP-04 slice 3): the roster the picker shows, and
 	// the PIN verified approval one act spends. Any person at the counter may
@@ -542,10 +582,10 @@ func (h *Handler) ListTransactions(w http.ResponseWriter, r *http.Request) {
 	}
 	if s := q.Get("status"); s != "" {
 		switch s {
-		case "open", "held", "completed", "voided":
+		case "open", "held", "completed", "voided", "abandoned":
 			f.Status = uppercase(s)
 		default:
-			httpx.WriteError(w, r, httpx.BadRequest("one or more fields failed validation", httpx.FieldError{Field: "status", Message: "must be one of: open, held, completed, voided"}))
+			httpx.WriteError(w, r, httpx.BadRequest("one or more fields failed validation", httpx.FieldError{Field: "status", Message: "must be one of: open, held, completed, voided, abandoned"}))
 			return
 		}
 	}
@@ -722,23 +762,32 @@ func (h *Handler) AttachCustomer(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, sale)
 }
 
-// SyncOffline is POST /pos/sync: refused by rule. Money never queues
-// offline, so a batch that parses answers 409 money_never_queues and the
-// service never runs: no sale, invoice, payment or sync log row of it is
-// written. The malformed shapes keep their 400 and the branch and customer
-// wall middlewares ahead of this handler keep their refusals.
+// SyncOffline is POST /pos/sync: the register's shell sends its signed
+// offline sales (ADR 0011 section 3). The sync is a person's act, never a
+// machine key (6.3); a branch whose dealer has not opted in keeps 409
+// money_never_queues before anything of the batch is written (section 4).
+// The answer is every item's outcome, the mark the server confirms to the
+// device and the register's open exception count for the counter.
 func (h *Handler) SyncOffline(w http.ResponseWriter, r *http.Request) {
+	if refuseMachineKey(w, r, "the offline sync is a person's act at the register, never a machine key") {
+		return
+	}
 	var req offlineSyncRequest
 	if err := httpx.DecodeJSON(r, &req); err != nil {
 		httpx.WriteError(w, r, err)
 		return
 	}
-	if _, err := req.parse(); err != nil {
+	batch, err := req.parse()
+	if err != nil {
 		httpx.WriteError(w, r, err)
 		return
 	}
-	httpx.WriteError(w, r, &httpx.Error{Status: http.StatusConflict, Code: httpx.CodeMoneyNeverQueues,
-		Message: "money never queues offline: complete the sale online"})
+	res, err := h.service.SyncOffline(r.Context(), batch, h.actorFrom(r))
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, res)
 }
 
 // GetCatalog is GET /pos/catalog: the offline cache (a bare array, never

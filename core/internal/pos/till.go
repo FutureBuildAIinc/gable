@@ -42,6 +42,23 @@ func expectedFromPayments(openingFloat httpx.Cents, tendered map[string]int64, c
 	return expected
 }
 
+// withHeldOffline adds the money of the session's offline sales that wait on
+// a manager to the drawer's expected figures (CP-13 OW): the clerk took it,
+// so the count balances while the sale waits.
+func withHeldOffline(expected, held map[string]int64) map[string]int64 {
+	for m, v := range held {
+		expected[m] += v
+	}
+	return expected
+}
+
+func heldOrNil(held map[string]int64) map[string]int64 {
+	if len(held) == 0 {
+		return nil
+	}
+	return held
+}
+
 // overShortTotal is the drawer's variance: counted less expected over the
 // methods that are money in the drawer, CASH and CHECK, as the signed net the
 // per-method lines post on the ledger. CARD never joins the sum (cards are
@@ -229,7 +246,8 @@ func (s *Service) TillReport(ctx context.Context, sessionID uuid.UUID) (*TillRep
 		TaxTotalCents:        httpx.Cents(agg.TaxTotalCents),
 		ChangeCents:          httpx.Cents(agg.ChangeCents),
 		TenderedByMethod:     agg.TenderedByMethod,
-		ExpectedByMethod:     expectedFromPayments(session.OpeningFloat, agg.TenderedByMethod, agg.CashRefundsCents, agg.CardRefundsCents, movementNetCash(agg.MovementTotals)),
+		ExpectedByMethod:     withHeldOffline(expectedFromPayments(session.OpeningFloat, agg.TenderedByMethod, agg.CashRefundsCents, agg.CardRefundsCents, movementNetCash(agg.MovementTotals)), agg.OfflineHeldByMethod),
+		OfflineHeldByMethod:  heldOrNil(agg.OfflineHeldByMethod),
 		OverShortByMethod:    session.OverShortByMethod,
 		RefundsByMethod:      refundsByMethod(agg),
 		Movements:            movements,
@@ -276,6 +294,13 @@ func (s *Service) CloseTill(ctx context.Context, sessionID uuid.UUID, countedByM
 		}
 		if report.Session.Status != TillOpen {
 			return httpx.InvalidStateTransition("the till session is not open")
+		}
+		// An offline sale of the session still with a manager, or a device
+		// whose own mark is past what the server recorded, refuses the close
+		// (ADR 0011 3.4 and section 2): the look takes no row lock, after the
+		// session lock, so the close never waits for a resolution.
+		if err := s.offlineHoldsClose(ctx, sessionID, report.Session.RegisterID); err != nil {
+			return err
 		}
 		// A card refund claim of one of the session's sales still standing
 		// refuses the close (eighth review P2-2): its terminal call may still

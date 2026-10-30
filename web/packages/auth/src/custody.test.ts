@@ -2,10 +2,11 @@
 // SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
 
 /**
- * JWT custody: the token lives in memory, the only persistence is the
- * sessionStorage handoff (so the front door can hand a session to the desk
- * across a full page navigation), and every record is validated field by
- * field on adoption and dropped when it does not parse.
+ * Session custody: a staff session is display data only (the cookie is the
+ * credential and no script holds it) held in memory only, the one thing in
+ * sessionStorage is the dev handoff, a bearer token is memory only, and every
+ * record is validated field by field on adoption and dropped when it does
+ * not parse.
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import {
@@ -116,26 +117,40 @@ describe('custody — in-memory rule', () => {
 })
 
 describe('custody — the sessionStorage handoff', () => {
-  it('writes the handoff at sign-in (token included) and never localStorage', () => {
+  it('writes nothing at a staff sign in: display data lives in memory only', () => {
     const store = memoryStorage()
-    const localSpy = memoryStorage()
     const c = new AuthCustody(store)
-    c.signInWithToken(TOKEN)
+    c.signInStaff({ sub: 'sub-1', roles: ['owner'], name: 'dev@gable.test' })
 
-    const raw = store.written.get(SESSION_HANDOFF_KEY)
-    expect(raw).toBeDefined()
-    const rec = JSON.parse(raw as string)
-    expect(rec).toEqual({ v: 1, kind: 'token', token: TOKEN })
-    expect(localSpy.written.size).toBe(0)
+    expect(store.written.size).toBe(0)
+    expect(sessionStorage.length).toBe(0)
+    expect(localStorage.length).toBe(0)
+    expect(c.session?.kind).toBe('staff')
   })
 
-  it('a fresh custody (the desk booting after the door navigated) adopts the handoff', () => {
+  it('a bearer token is held in memory and written to no storage', () => {
     const store = memoryStorage()
-    new AuthCustody(store).signInWithToken(TOKEN)
+    const c = new AuthCustody(store)
+    c.signInWithToken(TOKEN)
+    expect(c.token).toBe(TOKEN)
+    expect(store.written.size).toBe(0)
+    expect(sessionStorage.length).toBe(0)
+  })
+
+  it('a fresh custody holds no staff session until the core is asked', () => {
+    const store = memoryStorage()
+    new AuthCustody(store).signInStaff({ sub: 'sub-1', roles: ['admin', 'sales'], name: 'dev@gable.test' })
 
     const desk = new AuthCustody(store)
-    expect(desk.token).toBe(TOKEN)
-    expect(desk.roles).toEqual(['admin', 'sales'])
+    expect(desk.session).toBeNull()
+  })
+
+  it('drops a staff record an older build left in storage', () => {
+    const store = memoryStorage({
+      [SESSION_HANDOFF_KEY]: JSON.stringify({ v: 1, kind: 'staff', sub: 'sub-1', roles: ['owner'] }),
+    })
+    expect(new AuthCustody(store).session).toBeNull()
+    expect(store.written.has(SESSION_HANDOFF_KEY)).toBe(false)
   })
 
   it('drops a handoff that does not parse, leaving nothing adopted', () => {
@@ -152,9 +167,8 @@ describe('custody — the sessionStorage handoff', () => {
     expect(store.written.has(SESSION_HANDOFF_KEY)).toBe(false)
   })
 
-  it('drops a handoff whose token has expired since it was written', () => {
-    const stale = jwt({ sub: 'u', exp: PAST })
-    const store = memoryStorage({ [SESSION_HANDOFF_KEY]: JSON.stringify({ v: 1, kind: 'token', token: stale }) })
+  it('drops an old token handoff outright: a token is never adopted from storage', () => {
+    const store = memoryStorage({ [SESSION_HANDOFF_KEY]: JSON.stringify({ v: 1, kind: 'token', token: TOKEN }) })
     const c = new AuthCustody(store)
     expect(c.session).toBeNull()
     expect(store.written.has(SESSION_HANDOFF_KEY)).toBe(false)
@@ -206,9 +220,10 @@ describe('custody — the handoff value is removed', () => {
   it('on sign out', () => {
     const store = memoryStorage()
     const c = new AuthCustody(store)
-    c.signInWithToken(TOKEN)
-    expect(store.written.has(SESSION_HANDOFF_KEY)).toBe(true)
+    c.signInStaff({ sub: 'sub-1', roles: ['owner'] })
+    expect(c.session).not.toBeNull()
     c.signOut()
+    expect(c.session).toBeNull()
     expect(store.written.has(SESSION_HANDOFF_KEY)).toBe(false)
   })
 
@@ -224,11 +239,13 @@ describe('custody — the handoff value is removed', () => {
   it('on a 401 through the real fetch client, from the real sessionStorage', async () => {
     const { fetchWithAuth } = await import('./fetchClient')
     const { authCustody } = await import('./custody')
-    authCustody.signInWithToken(TOKEN)
-    expect(sessionStorage.getItem(SESSION_HANDOFF_KEY)).not.toBeNull()
+    authCustody.signInStaff({ sub: 'sub-1', roles: ['owner'] })
+    expect(authCustody.session).not.toBeNull()
+    expect(sessionStorage.getItem(SESSION_HANDOFF_KEY)).toBeNull()
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('', { status: 401 })))
     await expect(fetchWithAuth('/api/v1/quotes')).rejects.toThrow()
     vi.unstubAllGlobals()
+    expect(authCustody.session).toBeNull()
     expect(sessionStorage.getItem(SESSION_HANDOFF_KEY)).toBeNull()
   })
 

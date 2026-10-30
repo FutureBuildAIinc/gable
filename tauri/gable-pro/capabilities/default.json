@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "The pro shell's main window only, and only the two token commands, allowed by name. No core plugin grant, no filesystem, no shell, no device permission (the device grants are the field profile's alone). Once sign in writes it, the core's keychain store keeps the refresh token in the OS keychain and hands only the access token to the app's own origins.",
+  "description": "The pro shell's main window only, and only the two token commands and the two sign in commands (begin_sign_in, refresh_tokens), allowed by name. No core plugin grant, no filesystem, no shell, no device permission (the device grants are the field profile's alone). Once sign in writes it, the core's keychain store keeps the refresh token in the OS keychain and hands only the access token to the app's own origins.",
   "windows": ["main"],
-  "permissions": ["allow-core-token", "allow-clear-tokens"]
+  "permissions": ["allow-core-token", "allow-clear-tokens", "allow-begin-sign-in", "allow-refresh-tokens"]
 }

@@ -10,6 +10,13 @@
 #   BASE_URL=http://127.0.0.1:18080 npx playwright test      (from web/)
 #   web/scripts/e2e-stack.sh down
 #
+# Appwrite mode (ADR 0012 slice 3): with APPWRITE_SEED_JSON naming the file
+# scripts/appwrite/setup.sh wrote, the core starts WITHOUT AUTH_MODE=dev, with
+# the Appwrite settings read from that file into its environment (never
+# printed; the portal signing secret a non dev core requires is an obvious
+# test pattern), for the staff sign in specs (APPWRITE_E2E=1). The bundles must
+# then be built without VITE_AUTH_DEV_MODE.
+#
 # State (pid, binary, log, snippet) lives in $E2E_DIR. `down` stops exactly the
 # pid and container this script started.
 set -euo pipefail
@@ -36,9 +43,29 @@ up)
   sed "s/__CORE_PORT__/$CORE_PORT/" "$HERE/e2e/gable-api.conf" > "$E2E_DIR/gable-api.conf"
 
   (cd "$HERE/../core" && go build -tags devauth -o "$E2E_DIR/core" ./cmd/core)
-  AUTH_MODE=dev PORT="$CORE_PORT" DATABASE_URL="$DATABASE_URL" RATE_LIMIT_PER_MINUTE=5000 \
-    POS_SCALE_SIMULATOR=1 \
-    setsid "$E2E_DIR/core" serve >"$E2E_DIR/core.log" 2>&1 &
+  # The large cash payer capture refuses to store a taxpayer id without a
+  # vault key, so the stack runs with an obvious test pattern unless the
+  # caller gives one.
+  if [ -n "${APPWRITE_SEED_JSON:-}" ]; then
+    command -v jq >/dev/null || { echo "e2e-stack.sh: jq not found" >&2; exit 69; }
+    PROBE_PATH=/
+    env -u AUTH_MODE \
+      APPWRITE_ENDPOINT="$(jq -r .endpoint "$APPWRITE_SEED_JSON")" \
+      APPWRITE_PROJECT_ID="$(jq -r .projectId "$APPWRITE_SEED_JSON")" \
+      APPWRITE_TEAM_ID="$(jq -r .teamId "$APPWRITE_SEED_JSON")" \
+      APPWRITE_API_KEY="$(jq -r .apiKey "$APPWRITE_SEED_JSON")" \
+      GABLE_PUBLIC_URL="http://127.0.0.1:$WEB_PORT" CORS_ORIGINS="http://127.0.0.1:$WEB_PORT" \
+      PORT="$CORE_PORT" DATABASE_URL="$DATABASE_URL" RATE_LIMIT_PER_MINUTE=5000 \
+      PORTAL_JWT_SECRET="${PORTAL_JWT_SECRET:-$(openssl rand -hex 32)}" \
+      PAYMENT_VAULT_KEY="${PAYMENT_VAULT_KEY:-$(openssl rand -hex 32)}" \
+      setsid "$E2E_DIR/core" serve >"$E2E_DIR/core.log" 2>&1 &
+  else
+    PROBE_PATH=/api/v1/apps
+    AUTH_MODE=dev PORT="$CORE_PORT" DATABASE_URL="$DATABASE_URL" RATE_LIMIT_PER_MINUTE=5000 \
+      POS_SCALE_SIMULATOR=1 \
+      PAYMENT_VAULT_KEY="${PAYMENT_VAULT_KEY:-$(openssl rand -hex 32)}" \
+      setsid "$E2E_DIR/core" serve >"$E2E_DIR/core.log" 2>&1 &
+  fi
   echo $! > "$E2E_DIR/core.pid"
   for _ in $(seq 1 60); do
     curl -fsS "http://127.0.0.1:$CORE_PORT/health" >/dev/null 2>&1 && break
@@ -58,10 +85,10 @@ up)
     -v "$HERE/apps/field-shell/dist:/usr/share/nginx/html/field-shell:ro" \
     nginx:1.27-alpine >/dev/null
   for _ in $(seq 1 30); do
-    curl -fsS "http://127.0.0.1:$WEB_PORT/api/v1/apps" >/dev/null 2>&1 && break
+    curl -fsS "http://127.0.0.1:$WEB_PORT$PROBE_PATH" >/dev/null 2>&1 && break
     sleep 1
   done
-  curl -fsS "http://127.0.0.1:$WEB_PORT/api/v1/apps" >/dev/null
+  curl -fsS "http://127.0.0.1:$WEB_PORT$PROBE_PATH" >/dev/null
   echo "stack up: http://127.0.0.1:$WEB_PORT (core on $CORE_PORT, pid $(cat "$E2E_DIR/core.pid"))"
   ;;
 down)

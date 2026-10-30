@@ -289,3 +289,31 @@ func TestAMomentsDayIsTheYardsDay(t *testing.T) {
 		}
 	}
 }
+
+type fakeInvoiceTenders struct{ legs []ThermalTender }
+
+func (f fakeInvoiceTenders) InvoiceTenders(context.Context, uuid.UUID) ([]ThermalTender, error) {
+	return f.legs, nil
+}
+
+// The full page layout of a counter sale lists its tenders under the total:
+// the card by brand and last four, the cash with the change given.
+func TestInvoiceListsTheCounterSalesTenders(t *testing.T) {
+	legs := []ThermalTender{
+		{Method: "CARD", Brand: "VISA", AmountCents: 50000, LastFour: "4242"},
+		{Method: "CASH", AmountCents: 60000, ChangeCents: 10000},
+	}
+	svc := styledService("en-CA").WithInvoiceTenders(fakeInvoiceTenders{legs: legs})
+	doc, err := svc.GenerateInvoicePDF(context.Background(), mkInvoice(100000, nil), &customer.Customer{Name: "Acme"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"CARD VISA  ****4242: $500.00", "CASH: $600.00", "Change: $100.00"} {
+		mustContain(t, doc, want)
+	}
+	plain, err := styledService("en-CA").GenerateInvoicePDF(context.Background(), mkInvoice(100000, nil), &customer.Customer{Name: "Acme"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mustNotContain(t, plain, "CARD VISA")
+}

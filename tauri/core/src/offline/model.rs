@@ -232,6 +232,16 @@ pub struct SignSaleRequest {
     pub sold_at: String,
     pub lines: Vec<SignLineRequest>,
     pub tenders: Vec<SignTenderRequest>,
+    /// The open server cart this sale replaces, or the result unknown cart it
+    /// defaults to (ADR 0011 section 5.3). Signed when present.
+    #[serde(default)]
+    pub replaces_sale_id: Option<String>,
+    /// The clerk's declaration that the sale is for another customer than the
+    /// result unknown cart's; it then names that cart in `unknown_cart_id`.
+    #[serde(default)]
+    pub different_customer: bool,
+    #[serde(default)]
+    pub unknown_cart_id: Option<String>,
 
     #[serde(default)]
     pub device_seq: Option<i64>,
@@ -343,7 +353,20 @@ pub struct SignedOfflineSale {
     pub confirmed_mark: i64,
     pub lines: Vec<SignedSaleLine>,
     pub tenders: Vec<SignedSaleTender>,
+    /// The replaced cart and the declaration (ADR 0011 section 5.3), signed
+    /// fields when present: the server builds the canonical form from the
+    /// item as received, so absent ones are left out here too.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub replaces_sale_id: Option<String>,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub different_customer: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub unknown_cart_id: Option<String>,
     pub device_sig: String,
+}
+
+fn is_false(v: &bool) -> bool {
+    !*v
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -461,6 +484,56 @@ pub struct SyncOutcomeItem {
 pub struct SyncBatchOutcome {
     pub confirmed_seq: i64,
     pub items: Vec<SyncOutcomeItem>,
+}
+
+/// The core's price of a cart the clerk is building (ADR 0011 5.3): every
+/// figure the counter shows, derived from the core's own snapshot copy by the
+/// sign path's own code; nothing is written, nothing is signed.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CartPreview {
+    pub snapshot_id: String,
+    pub currency: String,
+    pub tax_rate: String,
+    pub tax_exempt: bool,
+    pub lines: Vec<SignedSaleLine>,
+    pub subtotal_cents: i64,
+    pub tax_cents: i64,
+    pub total_cents: i64,
+    /// The change the tenders leave, when tenders were named and they pass.
+    pub change_cents: Option<i64>,
+    /// Why the named tenders would be refused, when they would.
+    pub tender_refusal: Option<OfflineError>,
+    /// The room left on the named cached account on this register.
+    pub account_room_cents: Option<i64>,
+    /// What the queue caps still allow: sales and cents.
+    pub queue_room_count: i64,
+    pub queue_room_cents: i64,
+}
+
+/// What a snapshot refresh did.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SnapshotRefresh {
+    /// `updated` (a new copy is stored) or `unchanged` (the same one).
+    pub status: String,
+    pub snapshot_id: String,
+    pub issued_at: String,
+}
+
+/// What one sync of the queue did (ADR 0011 section 4: "Sent 12, 1 needs a
+/// manager").
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SyncReport {
+    pub sent: i64,
+    pub posted: i64,
+    pub refused: i64,
+    pub held: i64,
+    pub resolved: i64,
+    pub errors: i64,
+    pub confirmed_seq: i64,
+    /// The register's exception rows waiting on a manager, as the server
+    /// counts them.
+    pub open_exception_count: i64,
+    pub queue: QueueStatusView,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

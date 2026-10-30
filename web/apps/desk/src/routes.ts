@@ -87,6 +87,7 @@ export const routes: RouteConfig[] = [
   { path: '/admin/tax-zones', load: () => import('./pages/admin/taxzones/TaxZones.ts'), layout: 'erp' },
   { path: '/admin/market-indices', load: () => import('./pages/admin/MarketIndices.ts'), layout: 'erp' },
   { path: '/admin/counter-rules', load: () => import('./pages/admin/CounterRules.ts'), layout: 'erp' },
+  { path: '/admin/offline-counter', load: () => import('./pages/admin/OfflineCounter.ts'), layout: 'erp' },
   { path: '/admin', load: () => import('./pages/admin/tech_admin/TechAdminPage.ts'), layout: 'erp' },
   { path: '/pricing/market-check', load: () => import('./pages/admin/pricing/MarketCheck.ts'), layout: 'erp' },
   { path: '/pricing', load: () => import('./pages/admin/pricing/PricingMatrix.ts'), layout: 'erp' },

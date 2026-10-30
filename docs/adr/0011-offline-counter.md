@@ -220,7 +220,9 @@ repeat a used sequence by definition), `bad_signature` rows (whose
 sequence and `id` are not proven, so the true sale of that number and `id`
 can still be recorded) and `replay_mismatch` rows (whose sequence and `id`
 differ from the sale already on file, so the row cannot take the same
-keys; the unique `sale_id` is partial the same way), and the check above
+keys; the unique `sale_id` is partial the same way) and `sequence_gap` and
+unknown tail rows (which name a range and sit at a number a `late_after_gap` row
+may hold, and two of one epoch may share one), and the check above
 reads both before either insert. A `sequence_reused` item
 that a manager accepts posts with its device sequence left null on the sale
 row and kept on its exception row, so the posting never collides with the
@@ -290,14 +292,20 @@ unchanged and never taken here):
   by an exception resolution, first;
 - **0b. the exception row**, `FOR UPDATE`, taken only by a resolution of
   that exception (3.4), after 0a;
-- **1. the sale rows**, in id order: the offline sale's row, inserted with
-  its client `id` (a conflict on the primary key is the duplicate answer,
-  the transaction rolls back), its lines as recorded, the session it names,
-  `offline_ref`, epoch, sequence, snapshot id and signature digest; and,
-  when the sale names `replaces_sale_id` (5.3), that live sale's row `FOR
-  NO KEY UPDATE`;
+- **1. the sale rows**: when the sale names `replaces_sale_id` (5.3), that
+  live sale's row `FOR NO KEY UPDATE` first, whatever its id (the offline
+  sale's row is not yet inserted, so no other act can wait on it); then the
+  session `FOR SHARE` (1b) and, for a named customer, the credit advisory
+  lock (1a), both before the insert, because the sale row's customer foreign
+  key takes the customer row `FOR KEY SHARE` and a live completion of the
+  same customer holds 1a before it takes that row `FOR UPDATE` (step 7);
+  then the offline sale's row, inserted with its client `id` (a conflict on
+  the primary key is the duplicate answer, the transaction rolls back), its
+  lines as recorded, the session it names, `offline_ref`, epoch, sequence,
+  snapshot id and signature digest;
 - **then the body's own order, unchanged** (`complete.go`, read at source):
-  the session `FOR SHARE`; the credit advisory lock for an account tender;
+  the session `FOR SHARE` and the credit advisory lock for a named customer
+  (both taken again, already held);
   the open credit memos (never reached offline: store credit is refused);
   the inventory rows in product order (`IssueQty`); then
   `CreateCounterInvoice`, which takes the customer row, the gapless mint
@@ -1093,8 +1101,11 @@ gave it is refused, `queue_mark_unverified`), and checks that the queue
 count is at least the sale's sequence less that confirmed mark, because
 the sales after the confirmed mark were not yet answered when the item
 was made. It then checks the count against the count cap and the total
-against the total cap, and adds the register's open and held exception
-items to the count it holds. The bound the server can prove is the count
+against the total cap. The count checked is the larger of the signed
+count and the sale's sequence less the confirmed mark; the server does not
+add the register's open and held exception rows to it, because the device's
+queue count already counts every item not yet answered, those included,
+and adding them again would refuse honest sales near the cap. The bound the server can prove is the count
 times the per sale cap, since the count is what the sequence pins down;
 the total is the device's own figure, and it only has to be under the cap.
 A register that has synced more sales than the queue count cap keeps

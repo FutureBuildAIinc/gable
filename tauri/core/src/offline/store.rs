@@ -25,11 +25,13 @@ use crate::offline::arithmetic::{
     resolve_line_pair, settle_tenders, tax_at, OfflineTenderCalc, Pair, TallyRowCalc, ONE_QTY,
 };
 use crate::offline::model::{
-    EnrolmentPublic, EnrolmentRecord, HighWaterMark, OfflineError, OfflineSnapshot, PriorEpochMark,
-    QueueItemState, QueueStatusView, QueuedSaleEntry, SignSaleRequest, SignedOfflineSale,
-    SignedSaleLine, SignedSaleTender, SignedTally, SignedTallyRow, SnapshotPriceRow,
-    SnapshotProduct, StoreMeta, SyncBatchOutcome,
+    CartPreview, EnrolmentPublic, EnrolmentRecord, HighWaterMark, OfflineError, OfflineSnapshot,
+    PriorEpochMark, QueueItemState, QueueStatusView, QueuedSaleEntry, SignSaleRequest,
+    SignedOfflineSale, SignedSaleLine, SignedSaleTender, SignedTally, SignedTallyRow,
+    SnapshotPriceRow, SnapshotProduct, SnapshotRefresh, StoreMeta, SyncBatchOutcome,
+    SyncOutcomeItem, SyncReport,
 };
+use crate::offline::server::{refusal_of, OfflineServer};
 
 const VALID_ID_TYPES: [&str; 5] = [
     "drivers_license",
@@ -498,11 +500,9 @@ impl OfflineCounter {
         Ok((conn, enrolment, mark, aead_key))
     }
 
-    /// Test seam: stores the core's sealed copy of a register snapshot
-    /// (ADR 0011 section 5.4). The page never supplies the snapshot the core
-    /// prices and signs from: the core fetches it itself from the enrolled
-    /// origin with the keychain token (O2 and ADR 0012). Until that lands no
-    /// build but the tests can install one, so the shipped shell cannot sign.
+    /// Test seam: stores a register snapshot directly. The shipped shell's
+    /// only writer of the snapshot is `refresh_snapshot`, which takes it from
+    /// the enrolled server's own answer; the page never supplies one.
     #[cfg(test)]
     pub(crate) fn install_test_snapshot(
         &self,
@@ -510,34 +510,245 @@ impl OfflineCounter {
     ) -> Result<(), OfflineError> {
         let _ops = self.lock_ops();
         let (conn, enrolment, _, aead_key) = self.open_verified_store()?;
-        if snapshot.register_id != enrolment.register_id
-            || snapshot.device_epoch != enrolment.device_epoch
-        {
+        store_snapshot(&conn, &aead_key, &enrolment, &snapshot)
+    }
+
+    /// Fetches the register's snapshot from the enrolled server and keeps it
+    /// sealed beside the queue (ADR 0011 5.4). The core asks only once every
+    /// queued sale has been answered (6.2: the device drains before it
+    /// refreshes) and names its own high sequence; the copy must be the
+    /// register's, of its epoch, and issued since its till session opened.
+    pub fn refresh_snapshot(
+        &self,
+        caller_origin: Option<&str>,
+        server: &dyn OfflineServer,
+    ) -> Result<SnapshotRefresh, OfflineError> {
+        self.check_origin(caller_origin)?;
+        let (register, high_seq) = {
+            let _ops = self.lock_ops();
+            let (conn, enrolment, mark, aead_key) = self.open_verified_store()?;
+            let sales = read_all_sales(&conn, &aead_key, &enrolment)?;
+            if let Some(waiting) = sales.iter().find(|e| awaits_an_answer(e.state)) {
+                return Err(OfflineError::new(
+                    "queue_not_drained",
+                    format!(
+                        "Sale {} has not been answered by the server yet: the register sends it before it takes new prices, and keeps selling on the prices it holds.",
+                        waiting.sale.offline_ref
+                    ),
+                ));
+            }
+            (enrolment.register_id.clone(), mark.last_seq)
+        };
+        let answer = server.get_snapshot(&register, high_seq)?;
+        if answer.status != 200 {
+            return Err(refusal_of(&answer));
+        }
+        let snapshot: OfflineSnapshot = serde_json::from_str(&answer.body).map_err(|_| {
+            OfflineError::new(
+                "snapshot_unreadable",
+                "the server's snapshot could not be read by this register",
+            )
+        })?;
+        let _ops = self.lock_ops();
+        let (conn, enrolment, _, aead_key) = self.open_verified_store()?;
+        let previous = read_raw_snapshot(&conn, &aead_key, &enrolment)
+            .ok()
+            .map(|s| s.snapshot_id);
+        store_snapshot(&conn, &aead_key, &enrolment, &snapshot)?;
+        Ok(SnapshotRefresh {
+            status: if previous.as_deref() == Some(snapshot.snapshot_id.as_str()) {
+                "unchanged".to_string()
+            } else {
+                "updated".to_string()
+            },
+            snapshot_id: snapshot.snapshot_id,
+            issued_at: snapshot.issued_at,
+        })
+    }
+
+    /// Prices the clerk's cart from the core's own snapshot copy through the
+    /// sign path's own code (ADR 0011 5.3): the lines, the tax, the totals,
+    /// and, when tenders are named, the change or why they would be refused,
+    /// with the account's room and the queue's room. Nothing is written.
+    pub fn price_cart(
+        &self,
+        caller_origin: Option<&str>,
+        req: SignSaleRequest,
+    ) -> Result<CartPreview, OfflineError> {
+        self.check_origin(caller_origin)?;
+        let _ops = self.lock_ops();
+        let (conn, enrolment, _, aead_key) = self.open_verified_store()?;
+        let snapshot = read_raw_snapshot(&conn, &aead_key, &enrolment)?;
+        if !snapshot.policy.enabled {
             return Err(OfflineError::new(
-                "snapshot_unknown",
-                "snapshot does not match the enrolled register and device epoch",
+                "offline_disabled",
+                "offline selling is disabled for this branch",
             ));
         }
         if snapshot.issued_at < snapshot.till_session.opened_at {
             return Err(OfflineError::new(
                 "snapshot_stale",
-                "snapshot was issued before the current till session opened",
+                "the register snapshot predates the open till session",
             ));
         }
-        let bytes = serde_json::to_vec(&snapshot)
-            .map_err(|_| OfflineError::new("serialize_failed", "failed to serialize snapshot"))?;
-        let aad = format!(
-            "snapshot:{}:{}",
-            enrolment.register_id, enrolment.device_epoch
-        );
-        let sealed = seal_bytes(&aead_key, &aad, &bytes)?;
-        conn.execute(
-            "INSERT INTO offline_snapshot (id, sealed) VALUES (1, ?1)
-             ON CONFLICT(id) DO UPDATE SET sealed = excluded.sealed",
-            params![sealed],
-        )
-        .map_err(|_| OfflineError::new("store_io_error", "failed to write snapshot"))?;
-        Ok(())
+        check_declaration(&req)?;
+        let priced = price_cart_lines(&snapshot, &req)?;
+        let existing = read_all_sales(&conn, &aead_key, &enrolment)?;
+        let (waiting_count, waiting_total) = waiting_figures(&existing);
+        let account_room_cents = priced
+            .account
+            .map(|acc| account_room(&snapshot, acc, &existing).max(0));
+        let (change_cents, tender_refusal) = if req.tenders.is_empty() {
+            (None, None)
+        } else {
+            match check_tenders(&snapshot, &req, &priced, &existing) {
+                Ok(stage) => (Some(stage.change_cents), None),
+                Err(e) => (None, Some(e)),
+            }
+        };
+        Ok(CartPreview {
+            snapshot_id: snapshot.snapshot_id.clone(),
+            currency: priced.currency.clone(),
+            tax_rate: priced.tax_rate.clone(),
+            tax_exempt: priced.tax_exempt,
+            lines: priced.lines.clone(),
+            subtotal_cents: priced.subtotal_cents,
+            tax_cents: priced.tax_cents,
+            total_cents: priced.total_cents,
+            change_cents,
+            tender_refusal,
+            account_room_cents,
+            queue_room_count: (snapshot.policy.max_queue_count - waiting_count).max(0),
+            queue_room_cents: (snapshot.policy.max_queue_total_cents - waiting_total).max(0),
+        })
+    }
+
+    /// Sends every sale the server has not settled to the enrolled server's
+    /// sync, with the device's own mark, and records the server's answer
+    /// (ADR 0011 sections 3 and 6.2). Items with a manager are sent again
+    /// each time, so the register learns when one is resolved. The store's
+    /// lock is not held while the request runs, so the clerk keeps selling.
+    pub fn sync_queue(
+        &self,
+        caller_origin: Option<&str>,
+        server: &dyn OfflineServer,
+    ) -> Result<SyncReport, OfflineError> {
+        self.check_origin(caller_origin)?;
+        let (register, epoch, last_seq, items) = {
+            let _ops = self.lock_ops();
+            let (conn, enrolment, mark, aead_key) = self.open_verified_store()?;
+            let mut items: Vec<SignedOfflineSale> = read_all_sales(&conn, &aead_key, &enrolment)?
+                .into_iter()
+                .filter(|e| e.state.is_unsettled() && e.state != QueueItemState::Signing)
+                .map(|e| e.sale)
+                .collect();
+            items.sort_by_key(|s| s.device_seq);
+            (
+                enrolment.register_id.clone(),
+                enrolment.device_epoch,
+                mark.last_seq,
+                items,
+            )
+        };
+        if items.is_empty() {
+            let queue = self.queue_status(caller_origin)?;
+            return Ok(SyncReport {
+                sent: 0,
+                posted: 0,
+                refused: 0,
+                held: 0,
+                resolved: 0,
+                errors: 0,
+                confirmed_seq: queue.confirmed_seq,
+                open_exception_count: queue.review_count,
+                queue,
+            });
+        }
+        let batch_id = uuid::Uuid::new_v4().to_string();
+        let body = serde_json::json!({
+            "batch_id": batch_id,
+            "register_id": register,
+            "device_epoch": epoch,
+            "reported_seq": last_seq,
+            "items": items,
+        })
+        .to_string();
+        let answer = server.post_sync(&body, &batch_id)?;
+        if answer.status != 200 {
+            return Err(refusal_of(&answer));
+        }
+        let wire: WireSyncResult = serde_json::from_str(&answer.body).map_err(|_| {
+            OfflineError::new(
+                "sync_unreadable",
+                "the server's sync answer could not be read by this register",
+            )
+        })?;
+        let mut report = SyncReport {
+            sent: items.len() as i64,
+            posted: 0,
+            refused: 0,
+            held: 0,
+            resolved: 0,
+            errors: 0,
+            confirmed_seq: wire.confirmed_seq,
+            open_exception_count: wire.open_exception_count,
+            queue: QueueStatusView {
+                register_id: String::new(),
+                device_epoch: 0,
+                last_seq: 0,
+                confirmed_seq: 0,
+                chain_head: String::new(),
+                waiting_count: 0,
+                waiting_total_cents: 0,
+                pending_count: 0,
+                review_count: 0,
+                synced_count: 0,
+                items: vec![],
+            },
+        };
+        let mut outcomes = Vec::with_capacity(wire.items.len());
+        for item in wire.items {
+            if item.device_epoch != epoch {
+                continue;
+            }
+            let status = match item.outcome.as_str() {
+                "posted" | "duplicate" => {
+                    report.posted += 1;
+                    QueueItemState::Synced
+                }
+                "resolved" => {
+                    report.resolved += 1;
+                    QueueItemState::Synced
+                }
+                "refused" => {
+                    report.refused += 1;
+                    QueueItemState::Review
+                }
+                "held" => {
+                    report.held += 1;
+                    QueueItemState::Review
+                }
+                _ => {
+                    report.errors += 1;
+                    QueueItemState::Pending
+                }
+            };
+            outcomes.push(SyncOutcomeItem {
+                client_id: item.client_id,
+                device_seq: item.device_seq,
+                status,
+                invoice_id: item.invoice_id,
+                invoice_number: item.invoice_number,
+                reason_code: item.reason_code,
+                reason_message: item.reason_message,
+            });
+        }
+        let _ops = self.lock_ops();
+        report.queue = self.record_outcomes_held(SyncBatchOutcome {
+            confirmed_seq: wire.confirmed_seq,
+            items: outcomes,
+        })?;
+        Ok(report)
     }
 
     /// Loads the core's snapshot copy with each product's `in_stock` figure
@@ -634,559 +845,10 @@ impl OfflineCounter {
                 "sale business_date does not match the till session's business_date",
             ));
         }
-        if req.lines.is_empty() {
-            return Err(OfflineError::new(
-                "empty_lines",
-                "an offline sale requires at least one product line",
-            ));
-        }
-
-        let account = match req.customer_id.as_deref() {
-            None => None,
-            Some(cid) => {
-                if cid == snapshot.walk_in_customer.id {
-                    return Err(OfflineError::new(
-                        "customer_mismatch",
-                        "walk-in sales omit customer_id instead of naming the walk-in row",
-                    ));
-                }
-                let found = snapshot
-                    .accounts
-                    .iter()
-                    .find(|a| a.customer_id == cid)
-                    .ok_or_else(|| {
-                        OfflineError::new(
-                            "customer_not_in_snapshot",
-                            "the named customer is not in the register's snapshot",
-                        )
-                    })?;
-                Some(found)
-            }
-        };
-
-        let currency = match account {
-            Some(a) => a.currency.clone(),
-            None => snapshot.walk_in_customer.currency.clone(),
-        };
-        let tax_exempt = account.is_some_and(|a| a.tax_exempt);
-        let derived_tax_rate = if tax_exempt {
-            "0.000000".to_string()
-        } else {
-            snapshot.tax.branch_rate.clone()
-        };
-        let rate_scaled = parse_tax_rate(&derived_tax_rate)
-            .map_err(|m| OfflineError::new("invalid_tax_rate", m))?;
-
-        let mut signed_lines = Vec::with_capacity(req.lines.len());
-        let mut subtotal_cents: i64 = 0;
-        let mut taxable_cents: i64 = 0;
-
-        for (idx, line_req) in req.lines.iter().enumerate() {
-            if line_req
-                .line_type
-                .as_deref()
-                .is_some_and(|t| t != "product")
-                || line_req.charge_code.is_some()
-            {
-                return Err(OfflineError::new(
-                    "charge_not_offline",
-                    "only stocked product lines sell offline: charge lines require the live counter",
-                ));
-            }
-            if line_req.override_reason.is_some() {
-                return Err(OfflineError::new(
-                    "override_not_offline",
-                    "price overrides are not available offline",
-                ));
-            }
-            if line_req.discount_percent.is_some() || line_req.discount_cents.is_some() {
-                return Err(OfflineError::new(
-                    "discount_not_offline",
-                    "line discounts are not available offline",
-                ));
-            }
-
-            let product = snapshot
-                .products
-                .iter()
-                .find(|p| p.id == line_req.product_id)
-                .ok_or_else(|| {
-                    OfflineError::new(
-                        "product_not_in_snapshot",
-                        format!(
-                            "product {} is not in the register snapshot",
-                            line_req.product_id
-                        ),
-                    )
-                })?;
-
-            if product.is_kit {
-                return Err(OfflineError::new(
-                    "kit_not_offline",
-                    "Kits do not sell offline: remove the kit line or wait until the counter is online.",
-                ));
-            }
-
-            let sale_uom = line_req.uom.trim();
-            let u_row = product
-                .unit_set
-                .iter()
-                .find(|r| r.uom == sale_uom && r.sell)
-                .ok_or_else(|| {
-                    OfflineError::new(
-                        "invalid_sale_uom",
-                        format!("{sale_uom} is not a sale unit of product {}", product.sku),
-                    )
-                })?;
-            let u_unit_qty = parse_quantity(&u_row.unit_qty)
-                .map_err(|m| OfflineError::new("invalid_unit_set", m))?;
-            let u_stock_qty = parse_quantity(&u_row.stock_qty)
-                .map_err(|m| OfflineError::new("invalid_unit_set", m))?;
-
-            let (qty_scaled, signed_tally) = if let Some(tally_in) = &line_req.tally {
-                if !product.random_length {
-                    return Err(OfflineError::new(
-                        "tally_not_random_length",
-                        "a tally is allowed on a random length product line only",
-                    ));
-                }
-                if sale_uom != "LF" {
-                    return Err(OfflineError::new(
-                        "tally_uom_must_be_lf",
-                        "a tallied line's unit must be LF",
-                    ));
-                }
-                let mut calc_rows = Vec::with_capacity(tally_in.rows.len());
-                let mut wire_rows = Vec::with_capacity(tally_in.rows.len());
-                for r in &tally_in.rows {
-                    let len_scaled = parse_quantity(&r.length_ft)
-                        .map_err(|m| OfflineError::new("invalid_tally_length", m))?;
-                    calc_rows.push(TallyRowCalc {
-                        pieces: r.pieces,
-                        length_ft: len_scaled,
-                    });
-                    wire_rows.push(SignedTallyRow {
-                        pieces: r.pieces,
-                        length_ft: format_wire_quantity(len_scaled),
-                    });
-                }
-                let thick_scaled = match &product.board_thickness_in {
-                    Some(s) => Some(
-                        parse_quantity(s)
-                            .map_err(|m| OfflineError::new("invalid_cross_section", m))?,
-                    ),
-                    None => None,
-                };
-                let width_scaled = match &product.board_width_in {
-                    Some(s) => Some(
-                        parse_quantity(s)
-                            .map_err(|m| OfflineError::new("invalid_cross_section", m))?,
-                    ),
-                    None => None,
-                };
-                let completed = complete_tally(&calc_rows, thick_scaled, width_scaled)
-                    .map_err(|m| OfflineError::new("invalid_tally", m))?;
-                if let Some(sent_q) = &line_req.quantity {
-                    let parsed_sent = parse_quantity(sent_q)
-                        .map_err(|m| OfflineError::new("invalid_quantity", m))?;
-                    if parsed_sent != completed.linear_feet {
-                        return Err(OfflineError::new(
-                            "tally_quantity_mismatch",
-                            "line quantity must equal the tally's linear feet",
-                        ));
-                    }
-                }
-                (
-                    completed.linear_feet,
-                    Some(SignedTally {
-                        thickness_in: thick_scaled.map(format_wire_quantity),
-                        width_in: width_scaled.map(format_wire_quantity),
-                        rows: wire_rows,
-                        linear_feet: format_wire_quantity(completed.linear_feet),
-                        board_feet: completed.board_feet.map(format_wire_quantity),
-                    }),
-                )
-            } else {
-                let q_str = line_req.quantity.as_deref().ok_or_else(|| {
-                    OfflineError::new("missing_quantity", "line quantity is required")
-                })?;
-                let q =
-                    parse_quantity(q_str).map_err(|m| OfflineError::new("invalid_quantity", m))?;
-                if q <= 0 {
-                    return Err(OfflineError::new(
-                        "invalid_quantity",
-                        "line quantity must be positive",
-                    ));
-                }
-                (q, None)
-            };
-
-            let (price_row, level_fallback) = resolve_bound_price_row(&snapshot, product, account)?;
-            let (uom_qty_scaled, price_uom_qty_scaled) =
-                resolve_pair_for_line(product, sale_uom, u_unit_qty, u_stock_qty, price_row)?;
-
-            let stock_qty_scaled = convert_stock(
-                qty_scaled,
-                sale_uom,
-                &product.stock_uom,
-                u_unit_qty,
-                u_stock_qty,
-            )
-            .map_err(|inexact| OfflineError::new("inexact_stock_conversion", inexact.message()))?;
-
-            let line_total_cents = extend(
-                qty_scaled,
-                uom_qty_scaled,
-                price_uom_qty_scaled,
-                price_row.unit_price_ten_thousandths,
-            )
-            .map_err(|m| OfflineError::new("extension_failed", m))?;
-
-            let uom_qty_wire = format_wire_quantity(uom_qty_scaled);
-            let price_uom_qty_wire = format_wire_quantity(price_uom_qty_scaled);
-            let stock_qty_wire = format_wire_quantity(stock_qty_scaled);
-
-            // Verify any caller-supplied price, unit, stock, or tax fields
-            // against what the core derived from its own snapshot copy.
-            if let Some(sent_key) = &line_req.price_key {
-                if sent_key != &price_row.price_key {
-                    return Err(OfflineError::new(
-                        "price_key_mismatch",
-                        "line price_key differs from the customer's bound price key in the core snapshot",
-                    ));
-                }
-            }
-            if let Some(sent_puom) = &line_req.price_uom {
-                if sent_puom != &price_row.price_uom {
-                    return Err(OfflineError::new(
-                        "price_uom_mismatch",
-                        "line price_uom differs from the core snapshot's price row",
-                    ));
-                }
-            }
-            if let Some(sent_uq) = &line_req.uom_qty {
-                if sent_uq != &uom_qty_wire {
-                    return Err(OfflineError::new(
-                        "uom_qty_mismatch",
-                        "line uom_qty differs from the core snapshot's canonical pair",
-                    ));
-                }
-            }
-            if let Some(sent_pq) = &line_req.price_uom_qty {
-                if sent_pq != &price_uom_qty_wire {
-                    return Err(OfflineError::new(
-                        "price_uom_qty_mismatch",
-                        "line price_uom_qty differs from the core snapshot's canonical pair",
-                    ));
-                }
-            }
-            if let Some(sent_price) = line_req.unit_price_ten_thousandths {
-                if sent_price != price_row.unit_price_ten_thousandths {
-                    return Err(OfflineError::new(
-                        "price_mismatch",
-                        "line unit_price_ten_thousandths differs from the core snapshot's price sheet",
-                    ));
-                }
-            }
-            if let Some(sent_total) = line_req.line_total_cents {
-                if sent_total != line_total_cents {
-                    return Err(OfflineError::new(
-                        "line_total_mismatch",
-                        "line_total_cents differs from the core's extension",
-                    ));
-                }
-            }
-            if let Some(sent_taxable) = line_req.taxable {
-                if sent_taxable != product.taxable {
-                    return Err(OfflineError::new(
-                        "taxable_mismatch",
-                        "line taxable flag differs from the core snapshot",
-                    ));
-                }
-            }
-            if let Some(sent_suom) = &line_req.stock_uom {
-                if sent_suom != &product.stock_uom {
-                    return Err(OfflineError::new(
-                        "stock_uom_mismatch",
-                        "line stock_uom differs from the core snapshot",
-                    ));
-                }
-            }
-            if let Some(sent_sq) = &line_req.stock_quantity {
-                if sent_sq != &stock_qty_wire {
-                    return Err(OfflineError::new(
-                        "stock_quantity_mismatch",
-                        "line stock_quantity differs from the core's exact stock conversion",
-                    ));
-                }
-            }
-
-            subtotal_cents += line_total_cents;
-            if product.taxable {
-                taxable_cents += line_total_cents;
-            }
-
-            signed_lines.push(SignedSaleLine {
-                id: line_req.id.clone(),
-                position: idx,
-                product_id: product.id.clone(),
-                sku: product.sku.clone(),
-                description: product.description.clone(),
-                quantity: format_wire_quantity(qty_scaled),
-                uom: sale_uom.to_string(),
-                price_uom: price_row.price_uom.clone(),
-                uom_qty: uom_qty_wire,
-                price_uom_qty: price_uom_qty_wire,
-                stock_uom: product.stock_uom.clone(),
-                stock_quantity: stock_qty_wire,
-                price_key: price_row.price_key.clone(),
-                price_source: price_row.price_source.clone(),
-                price_basis: price_row.price_basis.clone(),
-                level_fallback,
-                unit_price_ten_thousandths: price_row.unit_price_ten_thousandths,
-                line_total_cents,
-                taxable: product.taxable,
-                tally: signed_tally,
-            });
-        }
-
-        let tax_cents = if tax_exempt {
-            0
-        } else {
-            tax_at(taxable_cents, rate_scaled)
-        };
-        let total_cents = subtotal_cents + tax_cents;
-
-        if let Some(sent_sub) = req.subtotal_cents {
-            if sent_sub != subtotal_cents {
-                return Err(OfflineError::new(
-                    "subtotal_mismatch",
-                    "subtotal_cents differs from the core's derived subtotal",
-                ));
-            }
-        }
-        if let Some(sent_tax) = req.tax_cents {
-            if sent_tax != tax_cents {
-                return Err(OfflineError::new(
-                    "tax_figure_mismatch",
-                    "tax_cents differs from the core's derived tax figure",
-                ));
-            }
-        }
-        if let Some(sent_tot) = req.total_cents {
-            if sent_tot != total_cents {
-                return Err(OfflineError::new(
-                    "total_mismatch",
-                    "total_cents differs from the core's derived total",
-                ));
-            }
-        }
-        if let Some(sent_rate) = &req.tax_rate {
-            if sent_rate != &derived_tax_rate {
-                return Err(OfflineError::new(
-                    "tax_figure_mismatch",
-                    "tax_rate differs from the core snapshot's tax rate",
-                ));
-            }
-        }
-        if let Some(sent_exempt) = req.tax_exempt {
-            if sent_exempt != tax_exempt {
-                return Err(OfflineError::new(
-                    "tax_figure_mismatch",
-                    "tax_exempt differs from the customer's exemption in the core snapshot",
-                ));
-            }
-        }
-
-        if total_cents > snapshot.policy.max_sale_cents {
-            return Err(OfflineError::new(
-                "sale_over_cap",
-                "sale total exceeds the branch's per-sale offline cap",
-            ));
-        }
-
-        let calc_tenders: Vec<OfflineTenderCalc> = req
-            .tenders
-            .iter()
-            .map(|t| OfflineTenderCalc {
-                method: t.method.clone(),
-                amount_cents: t.amount_cents,
-            })
-            .collect();
-        let settlement = settle_tenders(
-            total_cents,
-            &calc_tenders,
-            snapshot.policy.cash_rounding_mode,
-        )
-        .map_err(|r| OfflineError::new(r.code, r.message))?;
-
-        let mut signed_tenders = Vec::with_capacity(req.tenders.len());
-        let mut biggest_check: i64 = 0;
-        for t in &req.tenders {
-            let method = t.method.trim().to_ascii_lowercase();
-            if !snapshot
-                .policy
-                .allowed_tenders
-                .iter()
-                .any(|m| m.eq_ignore_ascii_case(&method))
-            {
-                return Err(OfflineError::new(
-                    "tender_not_offline",
-                    format!("tender method {method} is not allowed offline"),
-                ));
-            }
-            if snapshot
-                .policy
-                .require_id_for_tenders
-                .iter()
-                .any(|m| m.eq_ignore_ascii_case(&method))
-            {
-                let valid_id = t.id_checked
-                    && t.id_type
-                        .as_deref()
-                        .is_some_and(|kind| VALID_ID_TYPES.contains(&kind));
-                if !valid_id {
-                    return Err(OfflineError::new(
-                        "id_required",
-                        format!("a {method} tender requires checking a valid ID type"),
-                    ));
-                }
-            }
-            if method == "check" && t.amount_cents > biggest_check {
-                biggest_check = t.amount_cents;
-            }
-            signed_tenders.push(SignedSaleTender {
-                method,
-                amount_cents: t.amount_cents,
-                reference: t.reference.clone(),
-                id_checked: t.id_checked,
-                id_type: t.id_type.clone(),
-            });
-        }
-
-        if biggest_check > 0 {
-            if biggest_check > snapshot.policy.max_check_cents {
-                return Err(OfflineError::new(
-                    "check_over_cap",
-                    "check tender exceeds the branch's offline check cap",
-                ));
-            }
-            let check_limit = account
-                .and_then(|a| a.check_limit_cents)
-                .or(snapshot.policy.default_check_limit_cents);
-            if let Some(limit) = check_limit {
-                if biggest_check > limit {
-                    return Err(OfflineError::new(
-                        "check_over_limit",
-                        "check tender exceeds the customer's check limit",
-                    ));
-                }
-            }
-        }
-
+        let priced = price_cart_lines(&snapshot, &req)?;
         let existing_sales = read_all_sales(&conn, &aead_key, &enrolment)?;
-
-        if settlement.account_cents > 0 {
-            let acc = account.ok_or_else(|| {
-                OfflineError::new(
-                    "walk_in_account",
-                    "an ACCOUNT tender needs a named customer: the walk-in customer buys on the barrelhead",
-                )
-            })?;
-            if acc.credit_hold {
-                return Err(OfflineError::new(
-                    "credit_hold",
-                    "customer account is on credit hold",
-                ));
-            }
-            if acc.po_required
-                && req
-                    .customer_po
-                    .as_deref()
-                    .map(str::trim)
-                    .unwrap_or("")
-                    .is_empty()
-            {
-                return Err(OfflineError::new(
-                    "po_required",
-                    "the customer requires a purchase order number",
-                ));
-            }
-            if acc.buyer_roster_required && req.buyer_contact_id.is_none() {
-                return Err(OfflineError::new(
-                    "buyer_required",
-                    "the customer requires an authorized buyer from its roster",
-                ));
-            }
-            if let Some(buyer_id) = req.buyer_contact_id.as_deref() {
-                let buyer = acc
-                    .buyers
-                    .iter()
-                    .find(|b| b.contact_id == buyer_id)
-                    .ok_or_else(|| {
-                        OfflineError::new(
-                            "buyer_not_on_roster",
-                            "the selected buyer is not on the customer's roster",
-                        )
-                    })?;
-                if let Some(cap) = buyer.per_purchase_cap_cents {
-                    if settlement.account_cents > cap {
-                        return Err(OfflineError::new(
-                            "buyer_over_cap",
-                            "account tender exceeds the buyer's per-purchase cap",
-                        ));
-                    }
-                }
-            }
-            let credit_room = (acc.credit_limit_cents - acc.open_receivable_cents).max(0);
-            let snapshot_room = acc
-                .offline_room_cents
-                .min(credit_room)
-                .min(snapshot.policy.account_cap_cents)
-                .max(0);
-            // A sale posted since the snapshot is not in its open receivable,
-            // so it keeps counting against that snapshot's room once synced.
-            let queued_for_account: i64 = existing_sales
-                .iter()
-                .filter(|e| counts_against_snapshot(e, &snapshot.snapshot_id))
-                .filter(|e| e.sale.customer_id.as_deref() == Some(acc.customer_id.as_str()))
-                .flat_map(|e| e.sale.tenders.iter())
-                .filter(|t| t.method == "account")
-                .map(|t| t.amount_cents)
-                .sum();
-            let remaining_room = snapshot_room - queued_for_account;
-            if settlement.account_cents > remaining_room {
-                return Err(OfflineError::new(
-                    "account_over_offline_room",
-                    "account tender exceeds the customer's remaining offline credit room on this register",
-                ));
-            }
-        }
-
-        // Queue count and total caps count waiting (unsettled) items only;
-        // synced items never consume the register's offline queue cap.
-        let mut waiting_count: i64 = 0;
-        let mut waiting_total_cents: i64 = 0;
-        for entry in &existing_sales {
-            if entry.state.is_unsettled() {
-                waiting_count += 1;
-                waiting_total_cents += entry.sale.total_cents;
-            }
-        }
-        let next_queue_count = waiting_count + 1;
-        let next_queue_total = waiting_total_cents + total_cents;
-        if next_queue_count > snapshot.policy.max_queue_count {
-            return Err(OfflineError::new(
-                "queue_count_cap",
-                "offline queue has reached the branch's maximum sale count; connect and sync before ringing another sale",
-            ));
-        }
-        if next_queue_total > snapshot.policy.max_queue_total_cents {
-            return Err(OfflineError::new(
-                "queue_total_cap",
-                "offline queue has reached the branch's maximum dollar total; connect and sync before ringing another sale",
-            ));
-        }
+        let stage = check_tenders(&snapshot, &req, &priced, &existing_sales)?;
+        check_declaration(&req)?;
 
         let device_seq = mark.last_seq + 1;
         let prev_digest = mark.chain_head.clone();
@@ -1202,8 +864,8 @@ impl OfflineCounter {
             device_seq,
             prev_digest,
             offline_ref,
-            snapshot_id: snapshot.snapshot_id,
-            till_session_id: snapshot.till_session.id,
+            snapshot_id: snapshot.snapshot_id.clone(),
+            till_session_id: snapshot.till_session.id.clone(),
             cashier_id: req.cashier_id,
             customer_id: req.customer_id,
             buyer_contact_id: req.buyer_contact_id,
@@ -1212,18 +874,21 @@ impl OfflineCounter {
             picked_up_by: req.picked_up_by,
             business_date: req.business_date,
             sold_at: req.sold_at,
-            currency,
-            subtotal_cents,
-            tax_cents,
-            total_cents,
-            change_cents: settlement.change_cents,
-            tax_rate: derived_tax_rate,
-            tax_exempt,
-            queue_count: next_queue_count,
-            queue_total_cents: next_queue_total,
+            currency: priced.currency.clone(),
+            subtotal_cents: priced.subtotal_cents,
+            tax_cents: priced.tax_cents,
+            total_cents: priced.total_cents,
+            change_cents: stage.change_cents,
+            tax_rate: priced.tax_rate.clone(),
+            tax_exempt: priced.tax_exempt,
+            queue_count: stage.queue_count,
+            queue_total_cents: stage.queue_total_cents,
             confirmed_mark: mark.confirmed_seq,
-            lines: signed_lines,
-            tenders: signed_tenders,
+            lines: priced.lines.clone(),
+            tenders: stage.tenders,
+            replaces_sale_id: req.replaces_sale_id,
+            different_customer: req.different_customer,
+            unknown_cart_id: req.unknown_cart_id,
             device_sig: String::new(),
         };
 
@@ -1381,6 +1046,13 @@ impl OfflineCounter {
     ) -> Result<QueueStatusView, OfflineError> {
         self.check_origin(caller_origin)?;
         let _ops = self.lock_ops();
+        self.record_outcomes_held(outcome)
+    }
+
+    fn record_outcomes_held(
+        &self,
+        outcome: SyncBatchOutcome,
+    ) -> Result<QueueStatusView, OfflineError> {
         let (mut conn, enrolment, mut mark, aead_key) = self.open_verified_store()?;
         let mut meta = read_sealed_meta(
             &conn,
@@ -1435,6 +1107,735 @@ impl OfflineCounter {
         }
         self.queue_status_held()
     }
+}
+
+/// A cart priced from the core's snapshot copy.
+struct PricedCart<'a> {
+    account: Option<&'a crate::offline::model::SnapshotAccount>,
+    currency: String,
+    tax_exempt: bool,
+    tax_rate: String,
+    lines: Vec<SignedSaleLine>,
+    subtotal_cents: i64,
+    tax_cents: i64,
+    total_cents: i64,
+}
+
+/// What the tender check answers for a priced cart.
+struct TenderStage {
+    change_cents: i64,
+    tenders: Vec<SignedSaleTender>,
+    queue_count: i64,
+    queue_total_cents: i64,
+}
+
+/// The replaced cart and the "different customer" declaration (ADR 0011
+/// 5.3): a declared sale names the result unknown cart it is not, and then
+/// replaces nothing; an undeclared sale names no unknown cart.
+fn check_declaration(req: &SignSaleRequest) -> Result<(), OfflineError> {
+    let named = |v: &Option<String>| v.as_deref().map(str::trim).is_some_and(|s| !s.is_empty());
+    if req.different_customer {
+        if !named(&req.unknown_cart_id) || named(&req.replaces_sale_id) {
+            return Err(OfflineError::new(
+                "declaration_invalid",
+                "a sale declared for a different customer names the unknown cart and replaces nothing",
+            ));
+        }
+    } else if named(&req.unknown_cart_id) {
+        return Err(OfflineError::new(
+            "declaration_invalid",
+            "only a sale declared for a different customer names the unknown cart",
+        ));
+    }
+    for id in [&req.replaces_sale_id, &req.unknown_cart_id]
+        .into_iter()
+        .flatten()
+    {
+        if uuid::Uuid::parse_str(id.trim()).is_err() {
+            return Err(OfflineError::new(
+                "declaration_invalid",
+                "the replaced or unknown cart must be a sale id",
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// Prices a cart from the core's own snapshot copy: each line's bound price
+/// row, its unit pair, its stock figures, its extension and taxable flag, and
+/// the sale's subtotal, tax and total (ADR 0011 sections 5.3 and 5.4). Any
+/// figure the request asserts must equal what the core derives. Nothing is
+/// written: the preview and the sign path both price through here.
+fn price_cart_lines<'a>(
+    snapshot: &'a OfflineSnapshot,
+    req: &SignSaleRequest,
+) -> Result<PricedCart<'a>, OfflineError> {
+    if req.lines.is_empty() {
+        return Err(OfflineError::new(
+            "empty_lines",
+            "an offline sale requires at least one product line",
+        ));
+    }
+
+    let account = match req.customer_id.as_deref() {
+        None => None,
+        Some(cid) => {
+            if cid == snapshot.walk_in_customer.id {
+                return Err(OfflineError::new(
+                    "customer_mismatch",
+                    "walk-in sales omit customer_id instead of naming the walk-in row",
+                ));
+            }
+            let found = snapshot
+                .accounts
+                .iter()
+                .find(|a| a.customer_id == cid)
+                .ok_or_else(|| {
+                    OfflineError::new(
+                        "customer_not_in_snapshot",
+                        "the named customer is not in the register's snapshot",
+                    )
+                })?;
+            Some(found)
+        }
+    };
+
+    let currency = match account {
+        Some(a) => a.currency.clone(),
+        None => snapshot.walk_in_customer.currency.clone(),
+    };
+    let tax_exempt = account.is_some_and(|a| a.tax_exempt);
+    let derived_tax_rate = if tax_exempt {
+        "0.000000".to_string()
+    } else {
+        snapshot.tax.branch_rate.clone()
+    };
+    let rate_scaled =
+        parse_tax_rate(&derived_tax_rate).map_err(|m| OfflineError::new("invalid_tax_rate", m))?;
+
+    let mut signed_lines = Vec::with_capacity(req.lines.len());
+    let mut subtotal_cents: i64 = 0;
+    let mut taxable_cents: i64 = 0;
+
+    for (idx, line_req) in req.lines.iter().enumerate() {
+        if line_req
+            .line_type
+            .as_deref()
+            .is_some_and(|t| t != "product")
+            || line_req.charge_code.is_some()
+        {
+            return Err(OfflineError::new(
+                "charge_not_offline",
+                "only stocked product lines sell offline: charge lines require the live counter",
+            ));
+        }
+        if line_req.override_reason.is_some() {
+            return Err(OfflineError::new(
+                "override_not_offline",
+                "price overrides are not available offline",
+            ));
+        }
+        if line_req.discount_percent.is_some() || line_req.discount_cents.is_some() {
+            return Err(OfflineError::new(
+                "discount_not_offline",
+                "line discounts are not available offline",
+            ));
+        }
+
+        let product = snapshot
+            .products
+            .iter()
+            .find(|p| p.id == line_req.product_id)
+            .ok_or_else(|| {
+                OfflineError::new(
+                    "product_not_in_snapshot",
+                    format!(
+                        "product {} is not in the register snapshot",
+                        line_req.product_id
+                    ),
+                )
+            })?;
+
+        if product.is_kit {
+            return Err(OfflineError::new(
+                "kit_not_offline",
+                "Kits do not sell offline: remove the kit line or wait until the counter is online.",
+            ));
+        }
+
+        let sale_uom = line_req.uom.trim();
+        let u_row = product
+            .unit_set
+            .iter()
+            .find(|r| r.uom == sale_uom && r.sell)
+            .ok_or_else(|| {
+                OfflineError::new(
+                    "invalid_sale_uom",
+                    format!("{sale_uom} is not a sale unit of product {}", product.sku),
+                )
+            })?;
+        let u_unit_qty = parse_quantity(&u_row.unit_qty)
+            .map_err(|m| OfflineError::new("invalid_unit_set", m))?;
+        let u_stock_qty = parse_quantity(&u_row.stock_qty)
+            .map_err(|m| OfflineError::new("invalid_unit_set", m))?;
+
+        let (qty_scaled, signed_tally) = if let Some(tally_in) = &line_req.tally {
+            if !product.random_length {
+                return Err(OfflineError::new(
+                    "tally_not_random_length",
+                    "a tally is allowed on a random length product line only",
+                ));
+            }
+            if sale_uom != "LF" {
+                return Err(OfflineError::new(
+                    "tally_uom_must_be_lf",
+                    "a tallied line's unit must be LF",
+                ));
+            }
+            let mut calc_rows = Vec::with_capacity(tally_in.rows.len());
+            let mut wire_rows = Vec::with_capacity(tally_in.rows.len());
+            for r in &tally_in.rows {
+                let len_scaled = parse_quantity(&r.length_ft)
+                    .map_err(|m| OfflineError::new("invalid_tally_length", m))?;
+                calc_rows.push(TallyRowCalc {
+                    pieces: r.pieces,
+                    length_ft: len_scaled,
+                });
+                wire_rows.push(SignedTallyRow {
+                    pieces: r.pieces,
+                    length_ft: format_wire_quantity(len_scaled),
+                });
+            }
+            let thick_scaled = match &product.board_thickness_in {
+                Some(s) => Some(
+                    parse_quantity(s).map_err(|m| OfflineError::new("invalid_cross_section", m))?,
+                ),
+                None => None,
+            };
+            let width_scaled = match &product.board_width_in {
+                Some(s) => Some(
+                    parse_quantity(s).map_err(|m| OfflineError::new("invalid_cross_section", m))?,
+                ),
+                None => None,
+            };
+            let completed = complete_tally(&calc_rows, thick_scaled, width_scaled)
+                .map_err(|m| OfflineError::new("invalid_tally", m))?;
+            if let Some(sent_q) = &line_req.quantity {
+                let parsed_sent =
+                    parse_quantity(sent_q).map_err(|m| OfflineError::new("invalid_quantity", m))?;
+                if parsed_sent != completed.linear_feet {
+                    return Err(OfflineError::new(
+                        "tally_quantity_mismatch",
+                        "line quantity must equal the tally's linear feet",
+                    ));
+                }
+            }
+            (
+                completed.linear_feet,
+                Some(SignedTally {
+                    thickness_in: thick_scaled.map(format_wire_quantity),
+                    width_in: width_scaled.map(format_wire_quantity),
+                    rows: wire_rows,
+                    linear_feet: format_wire_quantity(completed.linear_feet),
+                    board_feet: completed.board_feet.map(format_wire_quantity),
+                }),
+            )
+        } else {
+            let q_str = line_req.quantity.as_deref().ok_or_else(|| {
+                OfflineError::new("missing_quantity", "line quantity is required")
+            })?;
+            let q = parse_quantity(q_str).map_err(|m| OfflineError::new("invalid_quantity", m))?;
+            if q <= 0 {
+                return Err(OfflineError::new(
+                    "invalid_quantity",
+                    "line quantity must be positive",
+                ));
+            }
+            (q, None)
+        };
+
+        let (price_row, level_fallback) = resolve_bound_price_row(&snapshot, product, account)?;
+        let (uom_qty_scaled, price_uom_qty_scaled) =
+            resolve_pair_for_line(product, sale_uom, u_unit_qty, u_stock_qty, price_row)?;
+
+        let stock_qty_scaled = convert_stock(
+            qty_scaled,
+            sale_uom,
+            &product.stock_uom,
+            u_unit_qty,
+            u_stock_qty,
+        )
+        .map_err(|inexact| OfflineError::new("inexact_stock_conversion", inexact.message()))?;
+
+        let line_total_cents = extend(
+            qty_scaled,
+            uom_qty_scaled,
+            price_uom_qty_scaled,
+            price_row.unit_price_ten_thousandths,
+        )
+        .map_err(|m| OfflineError::new("extension_failed", m))?;
+
+        let uom_qty_wire = format_wire_quantity(uom_qty_scaled);
+        let price_uom_qty_wire = format_wire_quantity(price_uom_qty_scaled);
+        let stock_qty_wire = format_wire_quantity(stock_qty_scaled);
+
+        // Verify any caller-supplied price, unit, stock, or tax fields
+        // against what the core derived from its own snapshot copy.
+        if let Some(sent_key) = &line_req.price_key {
+            if sent_key != &price_row.price_key {
+                return Err(OfflineError::new(
+                    "price_key_mismatch",
+                    "line price_key differs from the customer's bound price key in the core snapshot",
+                ));
+            }
+        }
+        if let Some(sent_puom) = &line_req.price_uom {
+            if sent_puom != &price_row.price_uom {
+                return Err(OfflineError::new(
+                    "price_uom_mismatch",
+                    "line price_uom differs from the core snapshot's price row",
+                ));
+            }
+        }
+        if let Some(sent_uq) = &line_req.uom_qty {
+            if sent_uq != &uom_qty_wire {
+                return Err(OfflineError::new(
+                    "uom_qty_mismatch",
+                    "line uom_qty differs from the core snapshot's canonical pair",
+                ));
+            }
+        }
+        if let Some(sent_pq) = &line_req.price_uom_qty {
+            if sent_pq != &price_uom_qty_wire {
+                return Err(OfflineError::new(
+                    "price_uom_qty_mismatch",
+                    "line price_uom_qty differs from the core snapshot's canonical pair",
+                ));
+            }
+        }
+        if let Some(sent_price) = line_req.unit_price_ten_thousandths {
+            if sent_price != price_row.unit_price_ten_thousandths {
+                return Err(OfflineError::new(
+                    "price_mismatch",
+                    "line unit_price_ten_thousandths differs from the core snapshot's price sheet",
+                ));
+            }
+        }
+        if let Some(sent_total) = line_req.line_total_cents {
+            if sent_total != line_total_cents {
+                return Err(OfflineError::new(
+                    "line_total_mismatch",
+                    "line_total_cents differs from the core's extension",
+                ));
+            }
+        }
+        if let Some(sent_taxable) = line_req.taxable {
+            if sent_taxable != product.taxable {
+                return Err(OfflineError::new(
+                    "taxable_mismatch",
+                    "line taxable flag differs from the core snapshot",
+                ));
+            }
+        }
+        if let Some(sent_suom) = &line_req.stock_uom {
+            if sent_suom != &product.stock_uom {
+                return Err(OfflineError::new(
+                    "stock_uom_mismatch",
+                    "line stock_uom differs from the core snapshot",
+                ));
+            }
+        }
+        if let Some(sent_sq) = &line_req.stock_quantity {
+            if sent_sq != &stock_qty_wire {
+                return Err(OfflineError::new(
+                    "stock_quantity_mismatch",
+                    "line stock_quantity differs from the core's exact stock conversion",
+                ));
+            }
+        }
+
+        subtotal_cents += line_total_cents;
+        if product.taxable {
+            taxable_cents += line_total_cents;
+        }
+
+        signed_lines.push(SignedSaleLine {
+            id: line_req.id.clone(),
+            position: idx,
+            product_id: product.id.clone(),
+            sku: product.sku.clone(),
+            description: product.description.clone(),
+            quantity: format_wire_quantity(qty_scaled),
+            uom: sale_uom.to_string(),
+            price_uom: price_row.price_uom.clone(),
+            uom_qty: uom_qty_wire,
+            price_uom_qty: price_uom_qty_wire,
+            stock_uom: product.stock_uom.clone(),
+            stock_quantity: stock_qty_wire,
+            price_key: price_row.price_key.clone(),
+            price_source: price_row.price_source.clone(),
+            price_basis: price_row.price_basis.clone(),
+            level_fallback,
+            unit_price_ten_thousandths: price_row.unit_price_ten_thousandths,
+            line_total_cents,
+            taxable: product.taxable,
+            tally: signed_tally,
+        });
+    }
+
+    let tax_cents = if tax_exempt {
+        0
+    } else {
+        tax_at(taxable_cents, rate_scaled)
+    };
+    let total_cents = subtotal_cents + tax_cents;
+
+    if let Some(sent_sub) = req.subtotal_cents {
+        if sent_sub != subtotal_cents {
+            return Err(OfflineError::new(
+                "subtotal_mismatch",
+                "subtotal_cents differs from the core's derived subtotal",
+            ));
+        }
+    }
+    if let Some(sent_tax) = req.tax_cents {
+        if sent_tax != tax_cents {
+            return Err(OfflineError::new(
+                "tax_figure_mismatch",
+                "tax_cents differs from the core's derived tax figure",
+            ));
+        }
+    }
+    if let Some(sent_tot) = req.total_cents {
+        if sent_tot != total_cents {
+            return Err(OfflineError::new(
+                "total_mismatch",
+                "total_cents differs from the core's derived total",
+            ));
+        }
+    }
+    if let Some(sent_rate) = &req.tax_rate {
+        if sent_rate != &derived_tax_rate {
+            return Err(OfflineError::new(
+                "tax_figure_mismatch",
+                "tax_rate differs from the core snapshot's tax rate",
+            ));
+        }
+    }
+    if let Some(sent_exempt) = req.tax_exempt {
+        if sent_exempt != tax_exempt {
+            return Err(OfflineError::new(
+                "tax_figure_mismatch",
+                "tax_exempt differs from the customer's exemption in the core snapshot",
+            ));
+        }
+    }
+
+    Ok(PricedCart {
+        account,
+        currency,
+        tax_exempt,
+        tax_rate: derived_tax_rate,
+        lines: signed_lines,
+        subtotal_cents,
+        tax_cents,
+        total_cents,
+    })
+}
+
+/// Checks a priced cart's tenders, caps, account room and queue figures
+/// against the core's snapshot copy and the queue it holds (ADR 0011 sections
+/// 1, 4 and 6.2), and answers the settlement and the queue figures the signed
+/// sale carries.
+fn check_tenders(
+    snapshot: &OfflineSnapshot,
+    req: &SignSaleRequest,
+    priced: &PricedCart<'_>,
+    existing_sales: &[QueuedSaleEntry],
+) -> Result<TenderStage, OfflineError> {
+    let account = priced.account;
+    let total_cents = priced.total_cents;
+    if total_cents > snapshot.policy.max_sale_cents {
+        return Err(OfflineError::new(
+            "sale_over_cap",
+            "sale total exceeds the branch's per-sale offline cap",
+        ));
+    }
+
+    let calc_tenders: Vec<OfflineTenderCalc> = req
+        .tenders
+        .iter()
+        .map(|t| OfflineTenderCalc {
+            method: t.method.clone(),
+            amount_cents: t.amount_cents,
+        })
+        .collect();
+    let settlement = settle_tenders(
+        total_cents,
+        &calc_tenders,
+        snapshot.policy.cash_rounding_mode,
+    )
+    .map_err(|r| OfflineError::new(r.code, r.message))?;
+
+    let mut signed_tenders = Vec::with_capacity(req.tenders.len());
+    let mut biggest_check: i64 = 0;
+    for t in &req.tenders {
+        let method = t.method.trim().to_ascii_lowercase();
+        if !snapshot
+            .policy
+            .allowed_tenders
+            .iter()
+            .any(|m| m.eq_ignore_ascii_case(&method))
+        {
+            return Err(OfflineError::new(
+                "tender_not_offline",
+                format!("tender method {method} is not allowed offline"),
+            ));
+        }
+        if snapshot
+            .policy
+            .require_id_for_tenders
+            .iter()
+            .any(|m| m.eq_ignore_ascii_case(&method))
+        {
+            let valid_id = t.id_checked
+                && t.id_type
+                    .as_deref()
+                    .is_some_and(|kind| VALID_ID_TYPES.contains(&kind));
+            if !valid_id {
+                return Err(OfflineError::new(
+                    "id_required",
+                    format!("a {method} tender requires checking a valid ID type"),
+                ));
+            }
+        }
+        if method == "check" && t.amount_cents > biggest_check {
+            biggest_check = t.amount_cents;
+        }
+        signed_tenders.push(SignedSaleTender {
+            method,
+            amount_cents: t.amount_cents,
+            reference: t.reference.clone(),
+            id_checked: t.id_checked,
+            id_type: t.id_type.clone(),
+        });
+    }
+
+    if biggest_check > 0 {
+        if biggest_check > snapshot.policy.max_check_cents {
+            return Err(OfflineError::new(
+                "check_over_cap",
+                "check tender exceeds the branch's offline check cap",
+            ));
+        }
+        let check_limit = account
+            .and_then(|a| a.check_limit_cents)
+            .or(snapshot.policy.default_check_limit_cents);
+        if let Some(limit) = check_limit {
+            if biggest_check > limit {
+                return Err(OfflineError::new(
+                    "check_over_limit",
+                    "check tender exceeds the customer's check limit",
+                ));
+            }
+        }
+    }
+
+    if settlement.account_cents > 0 {
+        let acc = account.ok_or_else(|| {
+            OfflineError::new(
+                "walk_in_account",
+                "an ACCOUNT tender needs a named customer: the walk-in customer buys on the barrelhead",
+            )
+        })?;
+        if acc.credit_hold {
+            return Err(OfflineError::new(
+                "credit_hold",
+                "customer account is on credit hold",
+            ));
+        }
+        if acc.po_required
+            && req
+                .customer_po
+                .as_deref()
+                .map(str::trim)
+                .unwrap_or("")
+                .is_empty()
+        {
+            return Err(OfflineError::new(
+                "po_required",
+                "the customer requires a purchase order number",
+            ));
+        }
+        if acc.buyer_roster_required && req.buyer_contact_id.is_none() {
+            return Err(OfflineError::new(
+                "buyer_required",
+                "the customer requires an authorized buyer from its roster",
+            ));
+        }
+        if let Some(buyer_id) = req.buyer_contact_id.as_deref() {
+            let buyer = acc
+                .buyers
+                .iter()
+                .find(|b| b.contact_id == buyer_id)
+                .ok_or_else(|| {
+                    OfflineError::new(
+                        "buyer_not_on_roster",
+                        "the selected buyer is not on the customer's roster",
+                    )
+                })?;
+            if let Some(cap) = buyer.per_purchase_cap_cents {
+                if settlement.account_cents > cap {
+                    return Err(OfflineError::new(
+                        "buyer_over_cap",
+                        "account tender exceeds the buyer's per-purchase cap",
+                    ));
+                }
+            }
+        }
+        let remaining_room = account_room(snapshot, acc, existing_sales);
+        if settlement.account_cents > remaining_room {
+            return Err(OfflineError::new(
+                "account_over_offline_room",
+                "account tender exceeds the customer's remaining offline credit room on this register",
+            ));
+        }
+    }
+
+    // Queue count and total caps count waiting (unsettled) items only;
+    // synced items never consume the register's offline queue cap.
+    let (waiting_count, waiting_total_cents) = waiting_figures(existing_sales);
+    let next_queue_count = waiting_count + 1;
+    let next_queue_total = waiting_total_cents + total_cents;
+    if next_queue_count > snapshot.policy.max_queue_count {
+        return Err(OfflineError::new(
+            "queue_count_cap",
+            "offline queue has reached the branch's maximum sale count; connect and sync before ringing another sale",
+        ));
+    }
+    if next_queue_total > snapshot.policy.max_queue_total_cents {
+        return Err(OfflineError::new(
+            "queue_total_cap",
+            "offline queue has reached the branch's maximum dollar total; connect and sync before ringing another sale",
+        ));
+    }
+
+    Ok(TenderStage {
+        change_cents: settlement.change_cents,
+        tenders: signed_tenders,
+        queue_count: next_queue_count,
+        queue_total_cents: next_queue_total,
+    })
+}
+
+/// Seals and stores the core's snapshot copy, after checking it is the
+/// enrolled register's, of its epoch, and issued since its session opened.
+fn store_snapshot(
+    conn: &Connection,
+    aead_key: &ZeroizingKey,
+    enrolment: &EnrolmentRecord,
+    snapshot: &OfflineSnapshot,
+) -> Result<(), OfflineError> {
+    if snapshot.register_id != enrolment.register_id
+        || snapshot.device_epoch != enrolment.device_epoch
+    {
+        return Err(OfflineError::new(
+            "snapshot_unknown",
+            "snapshot does not match the enrolled register and device epoch",
+        ));
+    }
+    if snapshot.issued_at < snapshot.till_session.opened_at {
+        return Err(OfflineError::new(
+            "snapshot_stale",
+            "snapshot was issued before the current till session opened",
+        ));
+    }
+    let bytes = serde_json::to_vec(snapshot)
+        .map_err(|_| OfflineError::new("serialize_failed", "failed to serialize snapshot"))?;
+    let aad = format!(
+        "snapshot:{}:{}",
+        enrolment.register_id, enrolment.device_epoch
+    );
+    let sealed = seal_bytes(aead_key, &aad, &bytes)?;
+    conn.execute(
+        "INSERT INTO offline_snapshot (id, sealed) VALUES (1, ?1)
+         ON CONFLICT(id) DO UPDATE SET sealed = excluded.sealed",
+        params![sealed],
+    )
+    .map_err(|_| OfflineError::new("store_io_error", "failed to write snapshot"))?;
+    Ok(())
+}
+
+/// A sale the server has not answered yet: signed and not sent, or sent and
+/// not judged. One with a manager (refused or held) is answered.
+fn awaits_an_answer(state: QueueItemState) -> bool {
+    matches!(
+        state,
+        QueueItemState::Signing | QueueItemState::Waiting | QueueItemState::Pending
+    )
+}
+
+/// The server's sync answer, as the core reads it.
+#[derive(serde::Deserialize)]
+struct WireSyncResult {
+    confirmed_seq: i64,
+    #[serde(default)]
+    open_exception_count: i64,
+    items: Vec<WireSyncItem>,
+}
+
+#[derive(serde::Deserialize)]
+struct WireSyncItem {
+    client_id: String,
+    device_epoch: i64,
+    device_seq: i64,
+    outcome: String,
+    invoice_id: Option<String>,
+    invoice_number: Option<String>,
+    reason_code: Option<String>,
+    reason_message: Option<String>,
+}
+
+/// The room left on a cached account on this register: the least of the
+/// snapshot's offline room, the credit limit less the open receivable and
+/// the branch's per account cap, less every account tender this register
+/// holds against that snapshot (ADR 0011 sections 1 and 6.2).
+fn account_room(
+    snapshot: &OfflineSnapshot,
+    acc: &crate::offline::model::SnapshotAccount,
+    existing_sales: &[QueuedSaleEntry],
+) -> i64 {
+    let credit_room = (acc.credit_limit_cents - acc.open_receivable_cents).max(0);
+    let snapshot_room = acc
+        .offline_room_cents
+        .min(credit_room)
+        .min(snapshot.policy.account_cap_cents)
+        .max(0);
+    // A sale posted since the snapshot is not in its open receivable,
+    // so it keeps counting against that snapshot's room once synced.
+    let queued_for_account: i64 = existing_sales
+        .iter()
+        .filter(|e| counts_against_snapshot(e, &snapshot.snapshot_id))
+        .filter(|e| e.sale.customer_id.as_deref() == Some(acc.customer_id.as_str()))
+        .flat_map(|e| e.sale.tenders.iter())
+        .filter(|t| t.method == "account")
+        .map(|t| t.amount_cents)
+        .sum();
+    snapshot_room - queued_for_account
+}
+
+/// The count and total of the sales still waiting on the server; the queue
+/// caps count these only, never the synced ones.
+fn waiting_figures(existing_sales: &[QueuedSaleEntry]) -> (i64, i64) {
+    let mut count = 0i64;
+    let mut total = 0i64;
+    for entry in existing_sales {
+        if entry.state.is_unsettled() {
+            count += 1;
+            total += entry.sale.total_cents;
+        }
+    }
+    (count, total)
 }
 
 /// Whether a queued sale is outside the figures a snapshot was issued with:
@@ -1782,6 +2183,16 @@ pub fn canonical_sale_bytes(sale: &SignedOfflineSale) -> Result<Vec<u8>, Offline
 /// Computes the 64-character lowercase hex SHA-256 digest of `bytes`.
 pub fn sha256_hex(bytes: &[u8]) -> String {
     hex::encode(digest(&SHA256, bytes).as_ref())
+}
+
+/// Test seam for the shared signing vector: signs canonical bytes with a
+/// given seed, the sign path's own signing.
+#[cfg(test)]
+pub(crate) fn sign_canonical_for_vector(
+    seed_hex: &str,
+    canonical_bytes: &[u8],
+) -> Result<String, OfflineError> {
+    sign_canonical_bytes(seed_hex, canonical_bytes)
 }
 
 fn sign_canonical_bytes(seed_hex: &str, canonical_bytes: &[u8]) -> Result<String, OfflineError> {

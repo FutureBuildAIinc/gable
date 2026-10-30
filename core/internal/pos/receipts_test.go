@@ -83,7 +83,7 @@ func withRealInvoiceAndThermalReceipts(failInvoice *bool) func(*fixture) {
 	return func(f *fixture) {
 		f.mounts = append(f.mounts, func(f *fixture, mux *http.ServeMux) {
 			store := document.NewStore(f.db)
-			docSvc := document.NewService(nil).WithYards(store).WithJobs(store)
+			docSvc := document.NewService(nil).WithYards(store).WithJobs(store).WithInvoiceTenders(f.service)
 			invRepo := &toggleInvoiceRepo{Repository: invoice.NewRepository(f.db), fail: failInvoice}
 			invSvc := invoice.NewService(invRepo, nil, nil, f.db)
 			custSvc := customer.NewService(customer.NewRepository(f.db))

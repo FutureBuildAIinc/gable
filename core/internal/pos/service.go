@@ -87,21 +87,23 @@ type TxRunner interface {
 // offline sync, every money moment one transaction whose events are written
 // last (ADR 0005 sections 11 and 14.2 C2-5).
 type Service struct {
-	db        *database.DB
-	grants    *middleware.BranchGuard
-	repo      Repository
-	logger    *slog.Logger
-	now       func() time.Time
-	pricer    PriceEngine
-	tax       TaxProvider
-	invoices  InvoiceWriter
-	ledger    LedgerPoster
-	gateway   PaymentGateway
-	auditLog  *audit.Logger
-	events    EventRecorder
-	tx        TxRunner
-	ar        ARCore
-	inventory CounterInventory
+	db     *database.DB
+	grants *middleware.BranchGuard
+	repo   Repository
+	logger *slog.Logger
+	now    func() time.Time
+	pricer PriceEngine
+	// sessionEnder ends a revoked register's web sessions (ADR 0011 6.1)
+	sessionEnder RegisterSessionEnder
+	tax          TaxProvider
+	invoices     InvoiceWriter
+	ledger       LedgerPoster
+	gateway      PaymentGateway
+	auditLog     *audit.Logger
+	events       EventRecorder
+	tx           TxRunner
+	ar           ARCore
+	inventory    CounterInventory
 	// terminal is the card terminal device seam and terminalLedger its
 	// intent ledger (CP-05, IX-01). Both nil keeps the plain gateway path.
 	terminal       payment.TerminalProvider
@@ -928,6 +930,9 @@ func (s *Service) AddLine(ctx context.Context, saleID uuid.UUID, parsed []salesd
 				if old.ParentLineID != nil {
 					return invalid("line_id", "is a kit component: change the kit line, its components follow")
 				}
+				if err := refuseWeighedChange(old, in); err != nil {
+					return err
+				}
 				merged := mergeReplacedLine(old, in)
 				line, pricedOut, err := s.priceLine(ctx, sale, merged, actor)
 				if err != nil {
@@ -954,10 +959,7 @@ func (s *Service) AddLine(ctx context.Context, saleID uuid.UUID, parsed []salesd
 						family[j].Position = places[len(places)-1] + (j - len(places) + 1)
 					}
 				}
-				if err := s.repo.RemoveLine(ctx, saleID, old.ID); err != nil {
-					return err
-				}
-				if err := s.repo.AddLines(ctx, saleID, family); err != nil {
+				if err := s.reAddLine(ctx, saleID, old, family); err != nil {
 					return err
 				}
 				if in.UnitPrice != nil || old.PriceSource != salesdoc.PriceSourceOverride {
@@ -1013,6 +1015,50 @@ func (s *Service) AddLine(ctx context.Context, saleID uuid.UUID, parsed []salesd
 		return nil, err
 	}
 	return out, nil
+}
+
+// refuseWeighedChange refuses a replace that moves a weighed line's product,
+// unit, quantity or line type: those are the scale's, as they are on the plus button. A
+// request that restates what the line already holds (a price override sends
+// the whole line) passes.
+func refuseWeighedChange(old *salesdoc.Line, in salesdoc.ParsedLine) error {
+	if old.WeightSource == nil {
+		return nil
+	}
+	changed := (in.LineType != "" && in.LineType != old.LineType) ||
+		(in.ProductID != nil && (old.ProductID == nil || *in.ProductID != *old.ProductID)) ||
+		(in.UOM != "" && (old.UOM == nil || in.UOM != *old.UOM)) ||
+		(in.HasQuantity && (old.Quantity == nil || in.Quantity != *old.Quantity))
+	if changed {
+		return invalid("line_id", "is weighed: the quantity is the scale's; remove the line and weigh again")
+	}
+	return nil
+}
+
+// reAddLine swaps a cart line for its priced rebuild (a price override, a
+// reprice for a new customer). The rebuilt top line takes the weight block
+// the old one carried and the scale ticket is pointed at it again, so
+// rebuilding a weighed line never loses the record of its weighing. The
+// ticket's link is written after the re-add so the foreign key never chases
+// the deleted row.
+func (s *Service) reAddLine(ctx context.Context, saleID uuid.UUID, old *salesdoc.Line, family []salesdoc.Line) error {
+	if old.WeightSource != nil && len(family) > 0 {
+		top := &family[0]
+		top.WeightSource, top.WeightGrossLb, top.WeightTareLb, top.WeightNetLb = old.WeightSource, old.WeightGrossLb, old.WeightTareLb, old.WeightNetLb
+		top.WeightNetBasis, top.ScaleDeviceID, top.ScaleTicketID = old.WeightNetBasis, old.ScaleDeviceID, old.ScaleTicketID
+		top.ScaleTicketNumber, top.ManualWeightReason = old.ScaleTicketNumber, old.ManualWeightReason
+		top.WeightCapturedBy, top.WeightCapturedAt = old.WeightCapturedBy, old.WeightCapturedAt
+	}
+	if err := s.repo.RemoveLine(ctx, saleID, old.ID); err != nil {
+		return err
+	}
+	if err := s.repo.AddLines(ctx, saleID, family); err != nil {
+		return err
+	}
+	if old.ScaleTicketID != nil && len(family) > 0 {
+		return s.repo.LinkScaleTicketLine(ctx, *old.ScaleTicketID, family[0].ID)
+	}
+	return nil
 }
 
 // mergeReplacedLine overlays a line request onto the existing cart line it

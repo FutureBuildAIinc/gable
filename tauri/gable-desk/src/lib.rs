@@ -8,8 +8,14 @@
 //! that is set (an http or https URL of a running Gable). A `gable://` link
 //! opens a record route: `gable://quotes/<id>` opens `/quotes/<id>`.
 //!
-//! The webview holds no native capability (see `capabilities/default.json`);
-//! everything native happens here.
+//! The webview holds exactly four commands (see `capabilities/default.json`):
+//! the two token commands and the two sign in commands, each answering only
+//! to the app's own origins. Sign in is the redirect methods through the
+//! system browser: `begin_sign_in` opens the core's start route with a PKCE
+//! challenge and the registered `gable://auth/callback` return target, and
+//! the deep link that comes back carries a one time code that this crate
+//! redeems with the verifier it kept (never a route: see `open_deep_link`).
+//! Everything else native happens here.
 //!
 //! Smoke mode (`GABLE_DESK_SMOKE=1`) is for CI: the app logs the page load and
 //! the document title, then exits cleanly. A watchdog exits non-zero if the
@@ -21,6 +27,11 @@ use std::time::Duration;
 use tauri::webview::PageLoadEvent;
 use tauri::{AppHandle, Manager, Url, WebviewUrl, WebviewWindowBuilder};
 use tauri_plugin_deep_link::DeepLinkExt;
+
+use gable_shell_core::fence::BadOrigin;
+use gable_shell_core::profiles;
+use gable_shell_core::shell::{self, TokenState};
+use gable_shell_core::signin::DeepLinkSignIn;
 
 /// The deep link scheme, also declared in `tauri.conf.json`.
 pub const SCHEME: &str = "gable";
@@ -42,7 +53,10 @@ pub fn route_from_deep_link(raw: &str) -> Option<String> {
     let rest = raw.strip_prefix("gable://")?;
     let rest = rest.trim_start_matches('/').trim_end_matches('/');
     let segments: Vec<&str> = rest.split('/').collect();
-    if segments.len() > MAX_SEGMENTS || !segments.iter().all(|s| valid_segment(s)) {
+    if segments.len() > MAX_SEGMENTS
+        || !segments.iter().all(|s| valid_segment(s))
+        || segments[0] == "auth"
+    {
         return None;
     }
     Some(format!("/{}", segments.join("/")))
@@ -80,8 +94,129 @@ fn smoke_mode() -> bool {
     std::env::var(SMOKE_VAR).is_ok_and(|v| v == "1")
 }
 
+/// The Tauri command wrappers, in their own module because the command macro
+/// exports its hidden wrapper at the crate root.
+pub mod commands {
+    use std::sync::Arc;
+
+    use gable_shell_core::shell::{self, TokenState};
+    use gable_shell_core::signin::{self, DeepLinkSignIn};
+
+    /// The access token and nothing else.
+    #[derive(serde::Serialize)]
+    pub struct AccessTokenAnswer {
+        pub access_token: String,
+    }
+
+    #[tauri::command]
+    pub async fn core_token(
+        window: tauri::WebviewWindow,
+        state: tauri::State<'_, TokenState>,
+    ) -> Result<AccessTokenAnswer, String> {
+        let url = window.url().map_err(|_| shell::ERR_ORIGIN.to_string())?;
+        let state = state.inner().clone();
+        tauri::async_runtime::spawn_blocking(move || {
+            shell::core_token_answer(&state, url.as_str())
+                .map(|access_token| AccessTokenAnswer { access_token })
+        })
+        .await
+        .map_err(|_| shell::ERR_CUSTODY.to_string())?
+    }
+
+    #[tauri::command]
+    pub async fn clear_tokens(
+        window: tauri::WebviewWindow,
+        state: tauri::State<'_, TokenState>,
+    ) -> Result<(), String> {
+        let url = window.url().map_err(|_| shell::ERR_ORIGIN.to_string())?;
+        let state = state.inner().clone();
+        tauri::async_runtime::spawn_blocking(move || {
+            shell::clear_tokens_answer(&state, url.as_str())
+        })
+        .await
+        .map_err(|_| shell::ERR_CUSTODY.to_string())?
+    }
+
+    /// Opens the system browser on the core's start route for a redirect
+    /// method and answers at once; the deep link that comes back finishes
+    /// the sign in.
+    #[tauri::command]
+    pub async fn begin_sign_in(
+        window: tauri::WebviewWindow,
+        state: tauri::State<'_, TokenState>,
+        pending: tauri::State<'_, Arc<DeepLinkSignIn>>,
+        method: String,
+    ) -> Result<(), String> {
+        let url = window.url().map_err(|_| shell::ERR_ORIGIN.to_string())?;
+        let state = state.inner().clone();
+        let pending = pending.inner().clone();
+        tauri::async_runtime::spawn_blocking(move || {
+            shell::begin_deep_link_sign_in_answer(
+                &state,
+                &pending,
+                url.as_str(),
+                &method,
+                &signin::open_in_browser,
+            )
+        })
+        .await
+        .map_err(|_| shell::ERR_CUSTODY.to_string())?
+    }
+
+    #[tauri::command]
+    pub async fn refresh_tokens(
+        window: tauri::WebviewWindow,
+        state: tauri::State<'_, TokenState>,
+    ) -> Result<AccessTokenAnswer, String> {
+        let url = window.url().map_err(|_| shell::ERR_ORIGIN.to_string())?;
+        let state = state.inner().clone();
+        tauri::async_runtime::spawn_blocking(move || {
+            shell::refresh_tokens_answer(&state, url.as_str())
+                .map(|access_token| AccessTokenAnswer { access_token })
+        })
+        .await
+        .map_err(|_| shell::ERR_CUSTODY.to_string())?
+    }
+}
+
+/// True for a `gable://auth/...` link: sign in's own, never a route.
+pub fn is_auth_link(raw: &str) -> bool {
+    raw.strip_prefix("gable://").is_some_and(|rest| {
+        rest == "auth" || rest.starts_with("auth/") || rest.starts_with("auth?")
+    })
+}
+
+/// Completes a sign in from the deep link the OS delivered. The redemption is
+/// a network call, so it runs on its own thread; when it ends the window
+/// reloads so the page reads the new session. A link that is not a pending
+/// sign in's callback spends nothing.
+fn complete_sign_in(app: &AppHandle, raw: &str) {
+    let state = app.state::<TokenState>().inner().clone();
+    let pending = app
+        .state::<std::sync::Arc<DeepLinkSignIn>>()
+        .inner()
+        .clone();
+    let app = app.clone();
+    let raw = raw.to_string();
+    std::thread::spawn(move || {
+        let _ = shell::complete_deep_link_sign_in(&state, &pending, &raw);
+        if let Some(window) = app.get_webview_window("main") {
+            if let Ok(current) = window.url() {
+                let _ = window.navigate(current);
+            }
+            let _ = window.set_focus();
+        }
+    });
+}
+
 /// Opens the route a deep link names in the main window.
 fn open_deep_link(app: &AppHandle, raw: &str) {
+    // The sign in callback carries a one time code: it is handed to the
+    // sign in and never read as a route, so the code goes nowhere else.
+    if is_auth_link(raw) {
+        complete_sign_in(app, raw);
+        return;
+    }
     let Some(route) = route_from_deep_link(raw) else {
         eprintln!("gable-desk: ignoring deep link that is not a record route");
         return;
@@ -107,10 +242,27 @@ fn open_deep_link(app: &AppHandle, raw: &str) {
     let _ = window.set_focus();
 }
 
+/// The desk shell's token state: the platform keychain, and the Gable server
+/// when a URL is set.
+fn token_state(override_url: Option<&Url>) -> Result<TokenState, BadOrigin> {
+    TokenState::for_profile(profiles::desk(), override_url)
+}
+
 pub fn run() {
     let smoke = smoke_mode();
+    let override_url = configured_url();
+    let token_state =
+        token_state(override_url.as_ref()).expect("the app's own origins build a fence");
 
     tauri::Builder::default()
+        .manage(token_state)
+        .manage(std::sync::Arc::new(DeepLinkSignIn::default()))
+        .invoke_handler(tauri::generate_handler![
+            commands::core_token,
+            commands::clear_tokens,
+            commands::begin_sign_in,
+            commands::refresh_tokens
+        ])
         // Registered first, as the plugin requires. A second launch (a deep
         // link on Linux and Windows starts a new process) forwards its
         // arguments here and the deep link plugin turns them into an event.
@@ -121,7 +273,7 @@ pub fn run() {
         }))
         .plugin(tauri_plugin_deep_link::init())
         .setup(move |app| {
-            let url = match configured_url() {
+            let url = match override_url {
                 Some(url) => WebviewUrl::External(url),
                 None => WebviewUrl::App("index.html".into()),
             };
@@ -189,6 +341,18 @@ pub fn run() {
 mod tests {
     use super::*;
 
+    // RULE (PR 246 read, finding P1): with a Gable URL set, the shell's token
+    // state holds a sign in client; a shell that drops the server cannot put
+    // a token in its keychain or rotate the one it holds.
+    #[test]
+    fn the_state_has_a_client_when_a_url_is_set() {
+        let url = Url::parse("https://gable.yard.internal:8443/").unwrap();
+        let state = token_state(Some(&url)).expect("a fence over the bundled origins and the url");
+        assert!(state.client().is_some(), "a url names the server");
+        let bare = token_state(None).expect("a fence over the bundled origins");
+        assert!(bare.client().is_none(), "no url, no server");
+    }
+
     #[test]
     fn a_record_link_opens_its_route() {
         assert_eq!(
@@ -227,6 +391,88 @@ mod tests {
         assert_eq!(route_from_deep_link(&long), None);
         let deep = format!("gable://{}", vec!["a"; MAX_SEGMENTS + 1].join("/"));
         assert_eq!(route_from_deep_link(&deep), None);
+    }
+
+    #[test]
+    fn an_auth_link_is_sign_ins_and_never_a_route() {
+        for auth in [
+            "gable://auth/callback?code=abc",
+            "gable://auth/callback",
+            "gable://auth",
+            "gable://auth/anything",
+        ] {
+            assert!(is_auth_link(auth), "{auth}");
+            assert_eq!(
+                route_from_deep_link(auth),
+                None,
+                "{auth} must never open a route"
+            );
+        }
+        for route in [
+            "gable://quotes/1",
+            "gable://authors/1",
+            "gable://orders/auth",
+            "https://auth/x",
+        ] {
+            assert!(!is_auth_link(route), "{route}");
+        }
+        assert_eq!(
+            route_from_deep_link("gable://orders/auth"),
+            Some("/orders/auth".to_string())
+        );
+    }
+
+    const CAPABILITY: &str = include_str!("../capabilities/default.json");
+
+    #[test]
+    fn the_capability_allows_exactly_the_four_commands_by_name() {
+        let cap: serde_json::Value = serde_json::from_str(CAPABILITY).unwrap();
+        let perms: Vec<&str> = cap["permissions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|p| p.as_str().unwrap())
+            .collect();
+        assert_eq!(
+            perms,
+            [
+                "allow-core-token",
+                "allow-clear-tokens",
+                "allow-begin-sign-in",
+                "allow-refresh-tokens"
+            ]
+        );
+        for banned in [
+            "shell:",
+            "fs:",
+            "sql:",
+            "updater",
+            "core:default",
+            "deep-link:",
+        ] {
+            assert!(
+                !CAPABILITY.contains(&format!("\"{banned}")),
+                "{banned} must not be granted"
+            );
+        }
+    }
+
+    #[test]
+    fn the_sign_in_path_holds_no_logging_of_a_link() {
+        // The link carries a one time code; the code handler prints nothing.
+        let src = include_str!("lib.rs");
+        let production = src.split("#[cfg(test)]").next().unwrap();
+        let handler = production
+            .split("fn complete_sign_in")
+            .nth(1)
+            .and_then(|rest| rest.split("/// Opens the route").next())
+            .unwrap();
+        for banned in ["println!", "eprintln!", "dbg!"] {
+            assert!(
+                !handler.contains(banned),
+                "complete_sign_in contains {banned}"
+            );
+        }
     }
 
     #[test]

@@ -215,16 +215,17 @@ describe('front door production build (no dev mode)', () => {
     localStorage.clear();
     resetAuthMethodsCache();
     // The door asks for the dealer's allowed methods at boot; a failed
-    // answer fails closed to email and password with the token paste.
+    // answer fails closed to email and password.
     vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status: 500 })));
   });
 
-  it('renders the token door with no persona cards', async () => {
+  it('renders the staff door with no persona cards and no token paste', async () => {
     authConfig.devMode = false;
     const el = await mount();
     await settle(el);
     expect(el.querySelector('h1')?.textContent).toBe('Sign in to Gable');
-    expect(el.querySelector('textarea[aria-label="Bearer token"]')).not.toBeNull();
+    expect(el.querySelector('textarea[aria-label="Bearer token"]')).toBeNull();
+    expect(el.querySelector('input[aria-label="Email"]')).not.toBeNull();
     expect(el.querySelector('button[aria-label^="Sign in as"]')).toBeNull();
     expect(el.querySelector('[role="listitem"]')).toBeNull();
   });
@@ -265,13 +266,13 @@ describe('front door runtime sign in methods (S8)', () => {
       auth_mode: 'production',
       methods: [
         { method: 'google', kind: 'redirect', label: 'Google', start_url: '/api/v1/auth/start/google', issuer_url: null, client_id: null },
-        { method: 'email_password', kind: 'form', label: 'Email and password', start_url: '/api/portal/v1/login', issuer_url: null, client_id: null },
+        { method: 'email_password', kind: 'form', label: 'Email and password', start_url: '/api/v1/auth/signin', issuer_url: null, client_id: null },
       ],
     });
     const el = await mount();
     await settle(el);
     expect(el.querySelector('h1')?.textContent).toBe('Sign in to Gable');
-    // The subtitle speaks to the methods shown, not the token paste.
+    // The subtitle speaks to the methods shown.
     expect(el.querySelector('h1 + p')?.textContent).toContain('Sign in with your work account');
     expect(el.querySelector('input[aria-label="Email"]')).not.toBeNull();
     // The form's submit is the card's one primary button, named Sign in.
@@ -284,9 +285,9 @@ describe('front door runtime sign in methods (S8)', () => {
     expect(methodButtons.map((b) => b.getAttribute('aria-label'))).toEqual(['Sign in with Google']);
     // Each method button leads with a mark in the icon style.
     expect(methodButtons[0].querySelector('svg')).not.toBeNull();
-    // The token sentence moved inside the disclosure.
+    // No bearer token paste: a staff session is the core's cookie.
     expect(el.querySelector('h1 + p')?.textContent).not.toContain('bearer token');
-    expect(el.querySelector('details')?.textContent).toContain('bearer token');
+    expect(el.querySelector('details')).toBeNull();
   });
 
   it('renders a different allowlist the same way (allowlist two)', async () => {
@@ -319,8 +320,7 @@ describe('front door runtime sign in methods (S8)', () => {
     expect(orDividers).toHaveLength(0);
     // No email form: the dealer allows no form method.
     expect(el.querySelector('input[aria-label="Email"]')).toBeNull();
-    // The out of band token paste stays available either way.
-    expect(el.querySelector('textarea[aria-label="Bearer token"]')).not.toBeNull();
+    expect(el.querySelector('textarea[aria-label="Bearer token"]')).toBeNull();
   });
 
   it('fails closed to email and password with a warning notice box and Retry action that re-reads the config', async () => {
@@ -355,24 +355,24 @@ describe('front door runtime sign in methods (S8)', () => {
     expect(el.querySelector('button[aria-label="Sign in with Google"]')).not.toBeNull();
   });
 
-  it('places the error message directly under the control that raised it (form, method button, or token button)', async () => {
+  it('places the error message directly under the control that raised it (form or method button)', async () => {
     authConfig.devMode = false;
     stubConfig({
       auth_mode: 'production',
       methods: [
-        { method: 'email_password', kind: 'form', label: 'Email and password', start_url: '/api/portal/v1/login', issuer_url: null, client_id: null },
-        { method: 'google', kind: 'redirect', label: 'Google', start_url: '/api/v1/auth/start/google', issuer_url: null, client_id: null },
+        { method: 'email_password', kind: 'form', label: 'Email and password', start_url: '/api/v1/auth/signin', issuer_url: null, client_id: null },
+        { method: 'passkey', kind: 'passkey', label: 'Passkey', start_url: '/api/v1/auth/start/passkey', issuer_url: null, client_id: null },
         { method: 'microsoft', kind: 'redirect', label: 'Microsoft', start_url: '/api/v1/auth/start/microsoft', issuer_url: null, client_id: null },
       ],
     });
     const el = await mount();
     await settle(el);
 
-    // 1. Form error renders inside the form block, above the Google button.
+    // 1. Form error renders inside the form block, above the Passkey button.
     const signInBtn = [...el.querySelectorAll<HTMLButtonElement>('button')].find(
       (b) => b.textContent?.trim() === 'Sign in',
     )!;
-    const googleBtn = el.querySelector<HTMLButtonElement>('button[aria-label="Sign in with Google"]')!;
+    const passkeyBtn = el.querySelector<HTMLButtonElement>('button[aria-label="Sign in with Passkey"]')!;
     const microsoftBtn = el.querySelector<HTMLButtonElement>('button[aria-label="Sign in with Microsoft"]')!;
 
     signInBtn.click();
@@ -382,32 +382,39 @@ describe('front door runtime sign in methods (S8)', () => {
     expect(alertEl).not.toBeNull();
     expect(alertEl.textContent).toContain('Enter your email and password.');
     expect(signInBtn.compareDocumentPosition(alertEl) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(alertEl.compareDocumentPosition(googleBtn) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(alertEl.compareDocumentPosition(passkeyBtn) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 
-    // 2. Method start error renders directly under the clicked Google button, above Microsoft.
+    // 2. Method start error renders directly under the clicked Passkey button, above Microsoft.
     vi.stubGlobal('fetch', vi.fn(async () => new Response(
-      JSON.stringify({ error: { code: 'not_implemented', message: 'sign in by google is not available on this server yet' } }),
+      JSON.stringify({ error: { code: 'not_implemented', message: 'sign in by passkey is not available on this server yet' } }),
       { status: 501 },
     )));
-    googleBtn.click();
+    passkeyBtn.click();
     await settle(el);
 
     alertEl = el.querySelector<HTMLElement>('[role="alert"]')!;
     expect(alertEl).not.toBeNull();
     expect(alertEl.textContent).toContain('not available on this server yet');
-    expect(googleBtn.compareDocumentPosition(alertEl) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(passkeyBtn.compareDocumentPosition(alertEl) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(alertEl.compareDocumentPosition(microsoftBtn) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 
-    // 3. Token error renders inside the <details> disclosure under the token button.
-    const tokenBtn = [...el.querySelectorAll<HTMLButtonElement>('details button')].find(
-      (b) => b.textContent?.trim() === 'Sign in with the token',
-    )!;
-    tokenBtn.click();
+    // 3. A refused staff sign in shows the core's plain refusal under the form.
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(
+      JSON.stringify({ error: { code: 'unauthorized', message: 'sign in failed' } }),
+      { status: 401 },
+    )));
+    const email = el.querySelector<HTMLInputElement>('input[aria-label="Email"]')!;
+    const password = el.querySelector<HTMLInputElement>('input[aria-label="Password"]')!;
+    email.value = 'till@example.test';
+    email.dispatchEvent(new Event('input'));
+    password.value = 'not-the-password';
+    password.dispatchEvent(new Event('input'));
+    signInBtn.click();
     await settle(el);
-
-    const detailsAlert = el.querySelector<HTMLElement>('details [role="alert"]')!;
-    expect(detailsAlert).not.toBeNull();
-    expect(detailsAlert.textContent).toContain('not a readable, unexpired JWT');
+    alertEl = el.querySelector<HTMLElement>('[role="alert"]')!;
+    expect(alertEl.textContent).toContain('not accepted');
+    expect(signInBtn.compareDocumentPosition(alertEl) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(authCustody.session).toBeNull();
   });
 
   it('a dev persona sign in stokes the identity tap and writes no token anywhere', async () => {
@@ -442,7 +449,7 @@ describe('front door runtime sign in methods (S8)', () => {
           auth_mode: 'production',
           methods: [
             { method: 'google', kind: 'redirect', label: 'Google', start_url: '/api/v1/auth/start/google', issuer_url: null, client_id: null },
-            { method: 'email_password', kind: 'form', label: 'Email and password', start_url: '/api/portal/v1/login', issuer_url: null, client_id: null },
+            { method: 'email_password', kind: 'form', label: 'Email and password', start_url: '/api/v1/auth/signin', issuer_url: null, client_id: null },
           ],
         }), { status: 200 });
       }
@@ -467,9 +474,73 @@ describe('front door runtime sign in methods (S8)', () => {
     expect(continueBtn!.textContent).not.toContain('OWNER');
     expect(continueBtn!.textContent).not.toContain('KEL-MAIN');
 
+    const nav = vi.fn();
+    el.navigateTo = nav;
     continueBtn!.click();
     await settle(el);
-    expect(calls.some((u) => u.includes('/api/v1/auth/start/google'))).toBe(true);
+    // A redirect method is a GET navigation, never a fetch.
+    expect(nav).toHaveBeenCalledWith('/api/v1/auth/start/google');
+    expect(calls.some((u) => u.includes('/api/v1/auth/start/google'))).toBe(false);
+  });
+
+  it('a provider button navigates to the start route, and a magic link posts {email} with the CSRF header', async () => {
+    authConfig.devMode = false;
+    const calls: Array<{ url: string; init?: RequestInit }> = [];
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      calls.push({ url: String(url), init });
+      if (String(url).includes('/api/v1/auth/config')) {
+        return new Response(JSON.stringify({
+          auth_mode: 'production',
+          methods: [
+            { method: 'google', kind: 'redirect', label: 'Google', start_url: '/api/v1/auth/start/google', issuer_url: null, client_id: null },
+            { method: 'magic_link', kind: 'link', label: 'Email a sign in link', start_url: '/api/v1/auth/start/magic_link', issuer_url: null, client_id: null },
+          ],
+        }), { status: 200 });
+      }
+      return new Response(JSON.stringify({ message: 'x' }), { status: 200 });
+    }));
+    const el = await mount();
+    const nav = vi.fn();
+    el.navigateTo = nav;
+    await settle(el);
+
+    el.querySelector<HTMLButtonElement>('button[aria-label="Sign in with Google"]')!.click();
+    await settle(el);
+    expect(nav).toHaveBeenCalledWith('/api/v1/auth/start/google');
+
+    const linkBtn = el.querySelector<HTMLButtonElement>('button[aria-label="Sign in with Email a sign in link"]')!;
+    linkBtn.click();
+    await settle(el);
+    expect(el.querySelector('[role="alert"]')?.textContent).toContain('Enter your email address.');
+
+    const input = el.querySelector<HTMLInputElement>('input[aria-label="Email for sign in link"]')!;
+    input.value = 'member@example.com';
+    input.dispatchEvent(new Event('input'));
+    linkBtn.click();
+    await settle(el);
+    const post = calls.find((c) => c.url.includes('/auth/start/magic_link'))!;
+    expect(post.init?.method).toBe('POST');
+    expect((post.init?.headers as Record<string, string>)['X-Gable-CSRF']).toBeTruthy();
+    expect(JSON.parse(post.init?.body as string)).toEqual({ email: 'member@example.com' });
+    expect(el.querySelector('[role="status"]')?.textContent).toContain('a sign in link is on its way');
+  });
+
+  it('shows the one fixed refusal when the callback sends the browser back with sign_in=failed', async () => {
+    authConfig.devMode = false;
+    window.history.replaceState({}, '', '/?sign_in=failed');
+    try {
+      stubConfig({
+        auth_mode: 'production',
+        methods: [
+          { method: 'google', kind: 'redirect', label: 'Google', start_url: '/api/v1/auth/start/google', issuer_url: null, client_id: null },
+        ],
+      });
+      const el = await mount();
+      await settle(el);
+      expect(el.querySelector('[role="alert"]')?.textContent).toContain('That sign in did not work');
+    } finally {
+      window.history.replaceState({}, '', '/');
+    }
   });
 
   it('focuses the first allowed method when the Continue as method is no longer allowed', async () => {
@@ -505,7 +576,7 @@ describe('front door runtime sign in methods (S8)', () => {
       dealer_name: 'Northridge Lumber',
       dealer_mark_url: null,
       methods: [
-        { method: 'email_password', kind: 'form', label: 'Email and password', start_url: '/api/portal/v1/login', issuer_url: null, client_id: null },
+        { method: 'email_password', kind: 'form', label: 'Email and password', start_url: '/api/v1/auth/signin', issuer_url: null, client_id: null },
       ],
     });
     const el = await mount();
@@ -526,7 +597,7 @@ describe('front door runtime sign in methods (S8)', () => {
       dealer_name: 'Northridge Lumber',
       dealer_mark_url: '/api/v1/dealer-profile/logo',
       methods: [
-        { method: 'email_password', kind: 'form', label: 'Email and password', start_url: '/api/portal/v1/login', issuer_url: null, client_id: null },
+        { method: 'email_password', kind: 'form', label: 'Email and password', start_url: '/api/v1/auth/signin', issuer_url: null, client_id: null },
       ],
     });
     const elWithLogo = await mount();
@@ -536,12 +607,12 @@ describe('front door runtime sign in methods (S8)', () => {
     expect(logoImg?.getAttribute('src')).toBe('/api/v1/dealer-profile/logo');
   });
 
-  it('applies light-theme solid primary Sign in styling, 44px/16px mobile sizing, grouped icon+label, interactive summary, and sans token placeholder', async () => {
+  it('applies light-theme solid primary Sign in styling, 44px/16px mobile sizing, and grouped icon+label', async () => {
     authConfig.devMode = false;
     stubConfig({
       auth_mode: 'production',
       methods: [
-        { method: 'email_password', kind: 'form', label: 'Email and password', start_url: '/api/portal/v1/login', issuer_url: null, client_id: null },
+        { method: 'email_password', kind: 'form', label: 'Email and password', start_url: '/api/v1/auth/signin', issuer_url: null, client_id: null },
         { method: 'oidc', kind: 'redirect', label: 'Northridge Corporate Single Sign On', start_url: '/api/v1/auth/start/oidc', issuer_url: 'https://id.example.com', client_id: 'gable' },
       ],
     });
@@ -573,16 +644,6 @@ describe('front door runtime sign in methods (S8)', () => {
     expect(innerGroup.className).toContain('inline-flex');
     expect(innerGroup.className).toContain('items-center');
     expect(innerGroup.className).toContain('gap-2.5');
-
-    // V3-3: Disclosure summary styles as an interactive control.
-    const summary = el.querySelector<HTMLElement>('details > summary')!;
-    expect(summary.className).toContain('hover:text-white');
-    expect(summary.className).toContain('hover:underline');
-    expect(summary.className).toContain('focus-visible:ring-2');
-
-    // V3-5: Bearer token textarea uses sans face for its placeholder.
-    const textarea = el.querySelector<HTMLTextAreaElement>('textarea[aria-label="Bearer token"]')!;
-    expect(textarea.className).toContain('placeholder:font-sans');
   });
 });
 
@@ -727,3 +788,114 @@ describe('front door console launcher (?console=1)', () => {
   });
 });
 
+
+/**
+ * The staff sign in on the production door (ADR 0012 slice 3): the form posts
+ * to the core, the cookie is the session, custody keeps display data, and
+ * sign out revokes at the core. A fresh tab asks the core who the cookie is.
+ */
+describe('front door staff sign in', () => {
+  const SUB = '3f2b8c1e-0d5a-5b7e-9c41-6a1d2e3f4a5b';
+  const config = {
+    auth_mode: 'production',
+    methods: [
+      { method: 'email_password', kind: 'form', label: 'Email and password', start_url: '/api/v1/auth/signin', issuer_url: null, client_id: null },
+    ],
+  };
+  const apps = {
+    apps: [
+      { key: 'pos', name: 'Counter', summary: '', category: 'Front of House', core: true, enabled: true, depends_on: null },
+      { key: 'purchase_order', name: 'Purchasing', summary: '', category: 'Purchasing', core: true, enabled: true, depends_on: null },
+    ],
+  };
+  let calls: { url: string; method: string; csrf: string | null }[];
+
+  function stubCore(opts: { session?: number } = {}) {
+    calls = [];
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      const u = String(url);
+      const headers = new Headers(init?.headers);
+      calls.push({ url: u, method: init?.method ?? 'GET', csrf: headers.get('X-Gable-CSRF') });
+      if (u.includes('/api/v1/auth/config')) return new Response(JSON.stringify(config), { status: 200 });
+      if (u.endsWith('/api/v1/auth/signin')) return new Response(JSON.stringify({ sub: SUB, roles: ['cashier'] }), { status: 200 });
+      if (u.endsWith('/api/v1/auth/signout')) return new Response(null, { status: 204 });
+      if (u.endsWith('/api/v1/auth/session')) {
+        return opts.session === 200
+          ? new Response(JSON.stringify({ sub: SUB, roles: ['cashier'] }), { status: 200 })
+          : new Response('{}', { status: 401 });
+      }
+      if (u.endsWith('/api/v1/apps')) return new Response(JSON.stringify(apps), { status: 200 });
+      return new Response('{}', { status: 404 });
+    }));
+  }
+
+  beforeEach(() => {
+    localStorage.clear();
+    resetAuthMethodsCache();
+    authConfig.devMode = false;
+  });
+
+  function fill(el: GableFrontDoor, email: string, password: string) {
+    const e = el.querySelector<HTMLInputElement>('input[aria-label="Email"]')!;
+    const p = el.querySelector<HTMLInputElement>('input[aria-label="Password"]')!;
+    e.value = email;
+    e.dispatchEvent(new Event('input'));
+    p.value = password;
+    p.dispatchEvent(new Event('input'));
+  }
+
+  it('signs in through the core, shows only the roles\' tiles, and keeps no password', async () => {
+    stubCore();
+    const el = await mount();
+    await settle(el);
+    fill(el, 'till@example.test', 'a-password');
+    [...el.querySelectorAll<HTMLButtonElement>('button')].find((b) => b.textContent?.trim() === 'Sign in')!.click();
+    await settle(el);
+
+    const signIn = calls.find((c) => c.url.endsWith('/api/v1/auth/signin'))!;
+    expect(signIn.method).toBe('POST');
+    expect(signIn.csrf).toBe('1');
+    expect(authCustody.session?.kind).toBe('staff');
+    expect(authCustody.roles).toEqual(['cashier']);
+    expect(el.querySelector('h1')?.textContent).toContain('till@example.test');
+    // A cashier sees the counter and not purchasing.
+    expect(el.querySelector('button[aria-label="Open Counter"]')).not.toBeNull();
+    expect(el.querySelector('button[aria-label="Open Purchasing"]')).toBeNull();
+    expect(JSON.stringify(sessionStorage)).not.toContain('a-password');
+    expect(JSON.stringify(localStorage)).not.toContain('a-password');
+  });
+
+  it('Sign out revokes the session at the core and returns to the form', async () => {
+    stubCore();
+    const el = await mount();
+    await settle(el);
+    fill(el, 'till@example.test', 'a-password');
+    [...el.querySelectorAll<HTMLButtonElement>('button')].find((b) => b.textContent?.trim() === 'Sign in')!.click();
+    await settle(el);
+    [...el.querySelectorAll<HTMLButtonElement>('button')].find((b) => b.textContent?.trim() === 'Sign out')!.click();
+    await settle(el);
+
+    const out = calls.find((c) => c.url.endsWith('/api/v1/auth/signout'))!;
+    expect(out.method).toBe('POST');
+    expect(out.csrf).toBe('1');
+    expect(authCustody.session).toBeNull();
+    expect(el.querySelector('input[aria-label="Email"]')).not.toBeNull();
+  });
+
+  it('a fresh tab with a live cookie lands on the apps without asking for a password', async () => {
+    stubCore({ session: 200 });
+    const el = await mount();
+    await settle(el);
+    expect(calls.some((c) => c.url.endsWith('/api/v1/auth/session'))).toBe(true);
+    expect(authCustody.roles).toEqual(['cashier']);
+    expect(el.querySelector('button[aria-label="Open Counter"]')).not.toBeNull();
+  });
+
+  it('a fresh tab with no cookie shows the form', async () => {
+    stubCore({ session: 401 });
+    const el = await mount();
+    await settle(el);
+    expect(authCustody.session).toBeNull();
+    expect(el.querySelector('input[aria-label="Email"]')).not.toBeNull();
+  });
+});

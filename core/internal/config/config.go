@@ -73,6 +73,12 @@ type Config struct {
 	AppwriteTeamID    string // APPWRITE_TEAM_ID
 	AppwriteAPIKey    string // APPWRITE_API_KEY
 
+	// Staff session limits (ADR 0012 section 2); zero keeps the staffauth default.
+	StaffSessionIdle     time.Duration // STAFF_SESSION_IDLE
+	StaffSessionAbsolute time.Duration // STAFF_SESSION_ABSOLUTE
+	StaffSessionRefresh  time.Duration // STAFF_SESSION_REFRESH, membership re-read interval
+	StaffSessionSnapshot time.Duration // STAFF_SESSION_SNAPSHOT_MAX, oldest unconfirmed snapshot served
+
 	// TrustedProxies lists the reverse proxy networks whose X-Forwarded-For
 	// is believed (TRUSTED_PROXIES, comma separated CIDRs or addresses).
 	// Empty by default: no forwarding header is trusted and the client is the
@@ -144,6 +150,20 @@ type Config struct {
 	// unrecognized value wires no terminal at all, so the simulator is never
 	// the default in a production configuration.
 	POSTerminalSimulator string // POS_TERMINAL_SIMULATOR
+
+	// POSTerminal selects the card terminal driver by configuration, the
+	// way the simulator is selected: "run" wires the Run Terminal API driver
+	// (CP-05). An unset value wires no terminal at all, so a production
+	// configuration without a provisioned Run terminal runs none.
+	POSTerminal string // POS_TERMINAL
+
+	// The Run Reporting API credential set (its own OAuth client id and
+	// secret, separate from the Terminal API key): the transaction lookup a
+	// lost answer resolves by and the terminal settlement batch read.
+	// Optional; env values only until Run provisions them.
+	RunReportingBaseURL      string // RUN_REPORTING_BASE_URL
+	RunReportingClientID     string // RUN_REPORTING_CLIENT_ID
+	RunReportingClientSecret string // RUN_REPORTING_CLIENT_SECRET
 
 	// POSScaleSimulator selects the simulated scale on a demo stack (CP-19,
 	// ruling D8): the value "1" wires the SMA simulator on loopback and a
@@ -251,6 +271,11 @@ func Load() (*Config, error) {
 		AppwriteTeamID:    getEnv("APPWRITE_TEAM_ID", ""),
 		AppwriteAPIKey:    getEnv("APPWRITE_API_KEY", ""),
 
+		StaffSessionIdle:     getEnvDuration("STAFF_SESSION_IDLE", 0),
+		StaffSessionAbsolute: getEnvDuration("STAFF_SESSION_ABSOLUTE", 0),
+		StaffSessionRefresh:  getEnvDuration("STAFF_SESSION_REFRESH", 0),
+		StaffSessionSnapshot: getEnvDuration("STAFF_SESSION_SNAPSHOT_MAX", 0),
+
 		// Logging
 		LogLevel: getEnv("LOG_LEVEL", "INFO"),
 
@@ -270,7 +295,12 @@ func Load() (*Config, error) {
 
 		RateLimitPerMinute:   getEnvInt("RATE_LIMIT_PER_MINUTE", 120),
 		POSTerminalSimulator: getEnv("POS_TERMINAL_SIMULATOR", ""),
+		POSTerminal:          getEnv("POS_TERMINAL", ""),
 		POSScaleSimulator:    getEnv("POS_SCALE_SIMULATOR", ""),
+
+		RunReportingBaseURL:      getEnv("RUN_REPORTING_BASE_URL", ""),
+		RunReportingClientID:     getEnv("RUN_REPORTING_CLIENT_ID", ""),
+		RunReportingClientSecret: getEnv("RUN_REPORTING_CLIENT_SECRET", ""),
 
 		// Database Pool
 		DBMaxConns:        int32(getEnvInt("DB_MAX_CONNS", 10)),

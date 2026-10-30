@@ -41,7 +41,7 @@ import {
   type ChromeTitleFeed,
   type Theme,
 } from '@gable/design-system';
-import { authConfig, authCustody } from '@gable/auth';
+import { authConfig, authCustody, signOutStaff } from '@gable/auth';
 import {
   RAIL_PHONE_MAX,
   RAIL_STATE_KEY,
@@ -292,7 +292,7 @@ export class GableWorkShell extends LitElement {
       });
     }
     this._leaveOutcome = outcome;
-    authCustody.signOut();
+    await signOutStaff();
     this._state = switchRole(this._state);
     this._frameControls = [];
     this._frameFeed = null;

@@ -8,6 +8,7 @@
 
 pub mod arithmetic;
 pub mod model;
+pub mod server;
 pub mod store;
 
 pub use arithmetic::{
@@ -18,14 +19,15 @@ pub use arithmetic::{
     QUANTITY_MAX, QUANTITY_SCALE, TAX_RATE_SCALE,
 };
 pub use model::{
-    CashRoundingMode, EnrolmentPublic, EnrolmentRecord, HighWaterMark, OfflineError,
+    CartPreview, CashRoundingMode, EnrolmentPublic, EnrolmentRecord, HighWaterMark, OfflineError,
     OfflineSnapshot, PriorEpochMark, QueueItemState, QueueStatusView, QueuedSaleEntry,
     SignLineRequest, SignSaleRequest, SignTenderRequest, SignedOfflineSale, SignedSaleLine,
     SignedSaleTender, SignedTally, SignedTallyRow, SnapshotAccount, SnapshotBuyer, SnapshotJob,
-    SnapshotPolicy, SnapshotPriceRow, SnapshotProduct, SnapshotTax, SnapshotTillSession,
-    SnapshotUnitRow, SnapshotWalkIn, StoreMeta, SyncBatchOutcome, SyncOutcomeItem,
-    TallyRequestInput, TallyRowRequestInput,
+    SnapshotPolicy, SnapshotPriceRow, SnapshotProduct, SnapshotRefresh, SnapshotTax,
+    SnapshotTillSession, SnapshotUnitRow, SnapshotWalkIn, StoreMeta, SyncBatchOutcome,
+    SyncOutcomeItem, SyncReport, TallyRequestInput, TallyRowRequestInput,
 };
+pub use server::{HttpOfflineServer, OfflineServer, ServerAnswer, TokenSource};
 pub use store::{
     canonical_sale_bytes, sha256_hex, verify_sale_signature, CrashPoint, OfflineCounter,
 };
@@ -37,7 +39,7 @@ mod tests {
     use crate::fence::OriginFence;
     use serde::Deserialize;
     use std::path::PathBuf;
-    use std::sync::Arc;
+    use std::sync::{Arc, Mutex};
     use uuid::Uuid;
 
     const GABLE_ORIGIN: &str = "https://gable.yard.internal";
@@ -1461,5 +1463,517 @@ mod tests {
             second.is_err(),
             "two account sales of {total} each signed against a room of 150000 on one snapshot"
         );
+    }
+
+    // ---- slice C2: the core's own snapshot fetch, preview and sync ----
+
+    struct FakeServer {
+        snapshot: Mutex<Option<ServerAnswer>>,
+        sync: Mutex<Option<Box<dyn Fn(&serde_json::Value) -> ServerAnswer + Send>>>,
+        calls: Mutex<Vec<(String, String)>>,
+    }
+
+    impl FakeServer {
+        fn new() -> Self {
+            Self {
+                snapshot: Mutex::new(None),
+                sync: Mutex::new(None),
+                calls: Mutex::new(vec![]),
+            }
+        }
+        fn answering_snapshot(self, status: u16, body: String) -> Self {
+            *self.snapshot.lock().unwrap() = Some(ServerAnswer { status, body });
+            self
+        }
+        fn answering_sync(
+            self,
+            f: impl Fn(&serde_json::Value) -> ServerAnswer + Send + 'static,
+        ) -> Self {
+            *self.sync.lock().unwrap() = Some(Box::new(f));
+            self
+        }
+        fn calls(&self) -> Vec<(String, String)> {
+            self.calls.lock().unwrap().clone()
+        }
+    }
+
+    impl OfflineServer for FakeServer {
+        fn get_snapshot(
+            &self,
+            register_id: &str,
+            high_seq: i64,
+        ) -> Result<ServerAnswer, OfflineError> {
+            self.calls
+                .lock()
+                .unwrap()
+                .push(("snapshot".into(), format!("{register_id}:{high_seq}")));
+            match self.snapshot.lock().unwrap().as_ref() {
+                Some(a) => Ok(ServerAnswer {
+                    status: a.status,
+                    body: a.body.clone(),
+                }),
+                None => Err(server::unreachable()),
+            }
+        }
+        fn post_sync(&self, body: &str, key: &str) -> Result<ServerAnswer, OfflineError> {
+            self.calls
+                .lock()
+                .unwrap()
+                .push(("sync".into(), body.to_string()));
+            let v: serde_json::Value = serde_json::from_str(body).unwrap();
+            assert_eq!(
+                v["batch_id"].as_str(),
+                Some(key),
+                "the idempotency key is the batch id"
+            );
+            match self.sync.lock().unwrap().as_ref() {
+                Some(f) => Ok(f(&v)),
+                None => Err(server::unreachable()),
+            }
+        }
+    }
+
+    fn enrolled_counter(label: &str) -> (OfflineCounter, PathBuf) {
+        let db_path = temp_db_path(label);
+        let custody = Arc::new(MemoryCustody::new());
+        let fence = OriginFence::from_starts(&[GABLE_ORIGIN]).unwrap();
+        let counter = OfflineCounter::new(PROFILE_ID, custody, &db_path, Some(fence));
+        counter
+            .enrol_register(Some(GABLE_ORIGIN), "REG-01", 3)
+            .unwrap();
+        (counter, db_path)
+    }
+
+    fn posted_answer(v: &serde_json::Value, outcome: &str) -> ServerAnswer {
+        let items: Vec<serde_json::Value> = v["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|it| {
+                serde_json::json!({
+                    "client_id": it["client_id"], "device_epoch": it["device_epoch"],
+                    "device_seq": it["device_seq"], "outcome": outcome,
+                    "invoice_id": null, "invoice_number": if outcome == "posted" { serde_json::json!("IN-000101") } else { serde_json::Value::Null },
+                    "reason_code": if outcome == "refused" { serde_json::json!("insufficient_stock") } else { serde_json::Value::Null },
+                    "reason_message": null,
+                })
+            })
+            .collect();
+        let high = v["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|it| it["device_seq"].as_i64().unwrap())
+            .max()
+            .unwrap();
+        ServerAnswer {
+            status: 200,
+            body: serde_json::json!({
+                "batch_id": v["batch_id"], "register_id": v["register_id"], "device_epoch": v["device_epoch"],
+                "confirmed_seq": high, "open_exception_count": if outcome == "refused" { 1 } else { 0 },
+                "items": items,
+            })
+            .to_string(),
+        }
+    }
+
+    // C2 (ADR 0011 5.3): the counter's figures are the core's. The preview
+    // prices through the sign path's own code, so the total it shows is the
+    // total the sale is signed with, and it writes nothing.
+    #[test]
+    fn the_preview_answers_the_sign_paths_figures_and_writes_nothing() {
+        let (counter, db_path) = enrolled_counter("c2-preview");
+        counter.install_test_snapshot(sample_snapshot()).unwrap();
+        let mut req = walk_in_sale_request("77777777-7777-7777-7777-7777777777c1", "3", 0);
+        req.tenders.clear();
+        let preview = counter.price_cart(Some(GABLE_ORIGIN), req.clone()).unwrap();
+        assert_eq!(preview.change_cents, None);
+        assert_eq!(preview.tender_refusal, None);
+        assert_eq!(
+            counter
+                .queue_status(Some(GABLE_ORIGIN))
+                .unwrap()
+                .items
+                .len(),
+            0
+        );
+        req.tenders = vec![SignTenderRequest {
+            method: "cash".into(),
+            amount_cents: preview.total_cents + 500,
+            reference: None,
+            id_checked: false,
+            id_type: None,
+        }];
+        let tendered = counter.price_cart(Some(GABLE_ORIGIN), req.clone()).unwrap();
+        assert_eq!(tendered.change_cents, Some(500));
+        let signed = counter
+            .sign_and_queue_sale(Some(GABLE_ORIGIN), req)
+            .unwrap();
+        let _ = std::fs::remove_file(&db_path);
+        assert_eq!(signed.total_cents, preview.total_cents);
+        assert_eq!(signed.tax_cents, preview.tax_cents);
+        assert_eq!(signed.lines, preview.lines);
+        assert_eq!(signed.change_cents, 500);
+    }
+
+    // C2 (ADR 0011 sections 1 and 4): a tender the branch does not take
+    // offline is answered as a refusal on the preview, a kit line is refused
+    // from the core's own kit flag, and the queue's room is the caps less
+    // what waits.
+    #[test]
+    fn the_preview_names_the_refusals_and_the_room() {
+        let (counter, db_path) = enrolled_counter("c2-preview-refusals");
+        let mut snap = sample_snapshot();
+        snap.products[0].is_kit = false;
+        counter.install_test_snapshot(snap.clone()).unwrap();
+        let mut card = walk_in_sale_request("77777777-7777-7777-7777-7777777777c2", "1", 0);
+        card.tenders[0].method = "card".into();
+        card.tenders[0].amount_cents = 1;
+        let preview = counter.price_cart(Some(GABLE_ORIGIN), card).unwrap();
+        assert!(
+            preview.tender_refusal.is_some(),
+            "a card tender offline is refused"
+        );
+        assert_eq!(preview.queue_room_count, snap.policy.max_queue_count);
+        assert_eq!(preview.queue_room_cents, snap.policy.max_queue_total_cents);
+        snap.products[0].is_kit = true;
+        counter.install_test_snapshot(snap).unwrap();
+        let kit = counter
+            .price_cart(
+                Some(GABLE_ORIGIN),
+                walk_in_sale_request("77777777-7777-7777-7777-7777777777c3", "1", 0),
+            )
+            .unwrap_err();
+        let _ = std::fs::remove_file(&db_path);
+        assert_eq!(kit.code, "kit_not_offline");
+    }
+
+    // C2 (ADR 0011 5.3): a sale declared for a different customer names the
+    // result unknown cart and replaces nothing; the declaration and the
+    // replaced cart are signed fields, absent when not given.
+    #[test]
+    fn the_declaration_is_checked_and_signed() {
+        let (counter, db_path) = enrolled_counter("c2-declaration");
+        counter.install_test_snapshot(sample_snapshot()).unwrap();
+        let cart = "99999999-9999-4999-8999-999999999999".to_string();
+        let mut bad = walk_in_sale_request("77777777-7777-7777-7777-7777777777d1", "1", 100_000);
+        bad.different_customer = true;
+        let err = counter
+            .sign_and_queue_sale(Some(GABLE_ORIGIN), bad)
+            .unwrap_err();
+        assert_eq!(err.code, "declaration_invalid");
+        let mut both = walk_in_sale_request("77777777-7777-7777-7777-7777777777d2", "1", 100_000);
+        both.different_customer = true;
+        both.unknown_cart_id = Some(cart.clone());
+        both.replaces_sale_id = Some(cart.clone());
+        assert_eq!(
+            counter
+                .sign_and_queue_sale(Some(GABLE_ORIGIN), both)
+                .unwrap_err()
+                .code,
+            "declaration_invalid"
+        );
+        let mut replaces =
+            walk_in_sale_request("77777777-7777-7777-7777-7777777777d3", "1", 100_000);
+        replaces.replaces_sale_id = Some(cart.clone());
+        let signed = counter
+            .sign_and_queue_sale(Some(GABLE_ORIGIN), replaces)
+            .unwrap();
+        let json = serde_json::to_value(&signed).unwrap();
+        assert_eq!(json["replaces_sale_id"].as_str(), Some(cart.as_str()));
+        assert!(json.get("different_customer").is_none());
+        assert!(json.get("unknown_cart_id").is_none());
+        let enrol = counter.enrolment_status(Some(GABLE_ORIGIN)).unwrap();
+        verify_sale_signature(&enrol.public_key_hex, &signed).unwrap();
+        let mut declared =
+            walk_in_sale_request("77777777-7777-7777-7777-7777777777d4", "1", 100_000);
+        declared.different_customer = true;
+        declared.unknown_cart_id = Some(cart.clone());
+        let signed = counter
+            .sign_and_queue_sale(Some(GABLE_ORIGIN), declared)
+            .unwrap();
+        let _ = std::fs::remove_file(&db_path);
+        let json = serde_json::to_value(&signed).unwrap();
+        assert_eq!(json["different_customer"].as_bool(), Some(true));
+        assert!(json.get("replaces_sale_id").is_none());
+        verify_sale_signature(&enrol.public_key_hex, &signed).unwrap();
+    }
+
+    // C2 (ADR 0011 5.4 and 6.2): the core fetches its own snapshot, only once
+    // every queued sale is answered, naming its high sequence; it keeps the
+    // copy only when it is the register's, of its epoch, since the session.
+    #[test]
+    fn the_snapshot_refresh_waits_for_the_drain_and_checks_the_copy() {
+        let (counter, db_path) = enrolled_counter("c2-refresh");
+        let mut fresh = sample_snapshot();
+        fresh.snapshot_id = "11111111-1111-1111-1111-1111111111aa".into();
+        let server = FakeServer::new()
+            .answering_snapshot(200, serde_json::to_string(&fresh).unwrap())
+            .answering_sync(|v| posted_answer(v, "posted"));
+        // first fetch on an empty queue
+        let r = counter
+            .refresh_snapshot(Some(GABLE_ORIGIN), &server)
+            .unwrap();
+        assert_eq!(r.status, "updated");
+        assert_eq!(
+            counter
+                .load_snapshot(Some(GABLE_ORIGIN))
+                .unwrap()
+                .snapshot_id,
+            fresh.snapshot_id
+        );
+        let mut req = walk_in_sale_request("77777777-7777-7777-7777-7777777777e1", "1", 100_000);
+        req.snapshot_id = fresh.snapshot_id.clone();
+        counter
+            .sign_and_queue_sale(Some(GABLE_ORIGIN), req)
+            .unwrap();
+        // a waiting sale holds the refresh, and the server is not asked
+        let before = server.calls().len();
+        let held = counter
+            .refresh_snapshot(Some(GABLE_ORIGIN), &server)
+            .unwrap_err();
+        assert_eq!(held.code, "queue_not_drained");
+        assert!(held.message.contains("REG-01-3-000001"), "{}", held.message);
+        assert_eq!(server.calls().len(), before);
+        // drained, the refresh names the high sequence and the same copy is unchanged
+        counter.sync_queue(Some(GABLE_ORIGIN), &server).unwrap();
+        let r = counter
+            .refresh_snapshot(Some(GABLE_ORIGIN), &server)
+            .unwrap();
+        assert_eq!(r.status, "unchanged");
+        assert_eq!(server.calls().last().unwrap().1, "REG-01:1");
+        // another epoch's copy is refused and the held copy stays
+        let mut other = fresh.clone();
+        other.device_epoch = 2;
+        other.snapshot_id = "11111111-1111-1111-1111-1111111111bb".into();
+        let server2 =
+            FakeServer::new().answering_snapshot(200, serde_json::to_string(&other).unwrap());
+        assert_eq!(
+            counter
+                .refresh_snapshot(Some(GABLE_ORIGIN), &server2)
+                .unwrap_err()
+                .code,
+            "snapshot_unknown"
+        );
+        // the server's refusal passes through with its words
+        let server3 = FakeServer::new().answering_snapshot(
+            409,
+            r#"{"error":{"code":"till_not_open","message":"open the till first"}}"#.into(),
+        );
+        let refused = counter
+            .refresh_snapshot(Some(GABLE_ORIGIN), &server3)
+            .unwrap_err();
+        let kept = counter
+            .load_snapshot(Some(GABLE_ORIGIN))
+            .unwrap()
+            .snapshot_id;
+        let _ = std::fs::remove_file(&db_path);
+        assert_eq!(refused.code, "till_not_open");
+        assert_eq!(refused.message, "open the till first");
+        assert_eq!(kept, fresh.snapshot_id);
+    }
+
+    // C2 (ADR 0011 sections 3, 5.1 and 6.2): the core sends its own queue
+    // with its own mark, and only the server's answer settles an item: posted
+    // and duplicate settle, refused and held stay with a manager (sent again
+    // next time), resolved settles, an error waits for the next sync; the
+    // confirmed mark moves to the server's figure.
+    #[test]
+    fn the_sync_sends_the_queue_and_records_only_the_servers_answer() {
+        let (counter, db_path) = enrolled_counter("c2-sync");
+        counter.install_test_snapshot(sample_snapshot()).unwrap();
+        let a = counter
+            .sign_and_queue_sale(
+                Some(GABLE_ORIGIN),
+                walk_in_sale_request("77777777-7777-7777-7777-7777777777f1", "1", 100_000),
+            )
+            .unwrap();
+        let b = counter
+            .sign_and_queue_sale(
+                Some(GABLE_ORIGIN),
+                walk_in_sale_request("77777777-7777-7777-7777-7777777777f2", "1", 100_000),
+            )
+            .unwrap();
+        let refuse_b = b.client_id.clone();
+        let server = FakeServer::new().answering_sync(move |v| {
+            let mut ans = posted_answer(v, "posted");
+            let mut doc: serde_json::Value = serde_json::from_str(&ans.body).unwrap();
+            for it in doc["items"].as_array_mut().unwrap() {
+                if it["client_id"] == refuse_b.as_str() {
+                    it["outcome"] = "refused".into();
+                    it["reason_code"] = "insufficient_stock".into();
+                }
+            }
+            doc["open_exception_count"] = 1.into();
+            ans.body = doc.to_string();
+            ans
+        });
+        let report = counter.sync_queue(Some(GABLE_ORIGIN), &server).unwrap();
+        let (_, body) = server.calls().last().unwrap().clone();
+        let sent: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(sent["register_id"], "REG-01");
+        assert_eq!(sent["device_epoch"], 3);
+        assert_eq!(sent["reported_seq"], 2);
+        let enrol = counter.enrolment_status(Some(GABLE_ORIGIN)).unwrap();
+        for it in sent["items"].as_array().unwrap() {
+            let sale: SignedOfflineSale = serde_json::from_value(it.clone()).unwrap();
+            verify_sale_signature(&enrol.public_key_hex, &sale).unwrap();
+        }
+        assert_eq!((report.sent, report.posted, report.refused), (2, 1, 1));
+        assert_eq!(report.open_exception_count, 1);
+        assert_eq!(report.confirmed_seq, 2);
+        assert_eq!(report.queue.confirmed_seq, 2);
+        assert_eq!(report.queue.review_count, 1);
+        let state_of = |q: &QueueStatusView, id: &str| {
+            q.items
+                .iter()
+                .find(|e| e.sale.client_id == id)
+                .unwrap()
+                .state
+        };
+        assert_eq!(
+            state_of(&report.queue, &a.client_id),
+            QueueItemState::Synced
+        );
+        assert_eq!(
+            state_of(&report.queue, &b.client_id),
+            QueueItemState::Review
+        );
+        // the refused one is sent again, alone; resolved settles it
+        let server = FakeServer::new().answering_sync(|v| posted_answer(v, "resolved"));
+        let report = counter.sync_queue(Some(GABLE_ORIGIN), &server).unwrap();
+        let (_, body) = server.calls().last().unwrap().clone();
+        let sent: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(sent["items"].as_array().unwrap().len(), 1);
+        assert_eq!(report.resolved, 1);
+        assert_eq!(
+            state_of(&report.queue, &b.client_id),
+            QueueItemState::Synced
+        );
+        // an item the server could not judge waits for the next sync
+        let c = counter
+            .sign_and_queue_sale(
+                Some(GABLE_ORIGIN),
+                walk_in_sale_request("77777777-7777-7777-7777-7777777777f3", "1", 100_000),
+            )
+            .unwrap();
+        let server = FakeServer::new().answering_sync(|v| {
+            let mut ans = posted_answer(v, "error");
+            let mut doc: serde_json::Value = serde_json::from_str(&ans.body).unwrap();
+            doc["confirmed_seq"] = 2.into();
+            ans.body = doc.to_string();
+            ans
+        });
+        let report = counter.sync_queue(Some(GABLE_ORIGIN), &server).unwrap();
+        assert_eq!(report.errors, 1);
+        assert_eq!(
+            state_of(&report.queue, &c.client_id),
+            QueueItemState::Pending
+        );
+        // a refusal of the whole batch changes nothing
+        let server = FakeServer::new().answering_sync(|_| ServerAnswer {
+            status: 409,
+            body: r#"{"error":{"code":"money_never_queues","message":"not at this branch"}}"#
+                .into(),
+        });
+        let err = counter.sync_queue(Some(GABLE_ORIGIN), &server).unwrap_err();
+        let q = counter.queue_status(Some(GABLE_ORIGIN)).unwrap();
+        // the server being away changes nothing either
+        let away = FakeServer::new();
+        let gone = counter.sync_queue(Some(GABLE_ORIGIN), &away).unwrap_err();
+        let _ = std::fs::remove_file(&db_path);
+        assert_eq!(err.code, "money_never_queues");
+        assert_eq!(state_of(&q, &c.client_id), QueueItemState::Pending);
+        assert_eq!(gone.code, "server_unreachable");
+    }
+
+    // C2 (ADR 0011 5.4, the shared snapshot fixture, lead entry 692): the
+    // snapshot the Go route issued (core/internal/pos/testdata/offline-snapshot.json,
+    // pinned to the route's shape by TestOfflineSnapshot_TheSharedFixtureIsWhatTheRouteIssues)
+    // reads into the core with nothing lost, goes through the core's own
+    // refresh, and prices a walk-in line at its sheet row.
+    #[test]
+    fn the_core_reads_the_snapshot_the_go_route_issued() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../core/internal/pos/testdata/offline-snapshot.json");
+        let raw = std::fs::read_to_string(&path).expect("the shared snapshot fixture");
+        let issued: serde_json::Value = serde_json::from_str(&raw).unwrap();
+        let snap: OfflineSnapshot =
+            serde_json::from_str(&raw).expect("the core reads the route's snapshot");
+        // the core's only fields the route does not issue: no override and no
+        // discount offline (ADR 0011 section 4), so both default to false
+        let mut read = serde_json::to_value(&snap).unwrap();
+        for extra in ["allow_price_override", "allow_discount"] {
+            assert_eq!(read["policy"][extra], serde_json::json!(false), "{extra}");
+            read["policy"].as_object_mut().unwrap().remove(extra);
+        }
+        assert_eq!(
+            read, issued,
+            "the core dropped or reshaped a field the route issues"
+        );
+        assert!(!snap.accounts[0].jobs.is_empty() && !snap.accounts[0].buyers.is_empty());
+
+        // the same document through the core's refresh, as this register's copy
+        let (counter, db_path) = enrolled_counter("c2-go-snapshot");
+        let mut served = issued.clone();
+        served["register_id"] = "REG-01".into();
+        served["device_epoch"] = 3.into();
+        let server = FakeServer::new().answering_snapshot(200, served.to_string());
+        let refreshed = counter.refresh_snapshot(Some(GABLE_ORIGIN), &server);
+        let product = snap
+            .products
+            .iter()
+            .find(|p| p.category == "Boards")
+            .expect("the fixture's board product");
+        let row = snap
+            .price_sheet
+            .iter()
+            .find(|r| r.product_id == product.id && r.price_key == "walkin")
+            .expect("its walk-in row");
+        let mut req = walk_in_sale_request("77777777-7777-7777-7777-7777777777f1", "2", 0);
+        req.tenders.clear();
+        req.snapshot_id = snap.snapshot_id.clone();
+        req.till_session_id = snap.till_session.id.clone();
+        req.cashier_id = snap.till_session.cashier_id.clone();
+        req.business_date = snap.till_session.business_date.clone();
+        req.sold_at = snap.issued_at.clone();
+        req.lines[0].product_id = product.id.clone();
+        req.lines[0].uom = product.sale_uom.clone();
+        let preview = counter.price_cart(Some(GABLE_ORIGIN), req);
+        let _ = std::fs::remove_file(&db_path);
+        assert_eq!(refreshed.unwrap().status, "updated");
+        let preview = preview.unwrap();
+        assert_eq!(preview.snapshot_id, snap.snapshot_id);
+        assert_eq!(
+            preview.lines[0].unit_price_ten_thousandths,
+            row.unit_price_ten_thousandths
+        );
+        assert_eq!(preview.lines[0].price_key, "walkin");
+    }
+
+    // C2 (ADR 0011 6.1, the shared signing vector O3 asked for): a sale the
+    // core signs with a fixed seed has a fixed signature, and the Go sync
+    // verifies the same file (core/internal/pos/testdata/offline-signed-sale.json).
+    #[test]
+    fn the_shared_signing_vector_is_the_cores_signature() {
+        #[derive(Deserialize)]
+        struct Vector {
+            seed_hex: String,
+            public_key_hex: String,
+            sale: SignedOfflineSale,
+        }
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../core/internal/pos/testdata/offline-signed-sale.json");
+        let raw = std::fs::read_to_string(&path).expect("the shared signing vector");
+        let v: Vector = serde_json::from_str(&raw).unwrap();
+        let mut unsigned = v.sale.clone();
+        unsigned.device_sig = String::new();
+        let canonical = canonical_sale_bytes(&unsigned).unwrap();
+        let sig = store::sign_canonical_for_vector(&v.seed_hex, &canonical).unwrap();
+        assert_eq!(
+            sig, v.sale.device_sig,
+            "the core's signature over the vector moved"
+        );
+        verify_sale_signature(&v.public_key_hex, &v.sale).unwrap();
     }
 }

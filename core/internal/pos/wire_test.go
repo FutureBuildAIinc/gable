@@ -965,15 +965,15 @@ func withToken(t map[string]any) map[string]any {
 	return t
 }
 
-// RULE (money never queues): the offline sale replay is refused by rule. A
-// well formed batch past the branch and customer walls answers 409
-// money_never_queues and nothing of it is written: no replayed sale, no
-// invoice, no payment, no sync log row.
+// RULE (money never queues where the dealer has not opted in, ADR 0011
+// section 4): at a branch with no offline policy a well formed batch past the
+// branch and customer walls answers 409 money_never_queues and nothing of it
+// is written: no replayed sale, no invoice, no payment, no sync log row.
 func TestSyncOfflineRefusedByRule(t *testing.T) {
 	testutil.LockOutboxTables(t)
 	f := newFixture(t, testutil.RequireDB(t))
 	batch := map[string]any{
-		"batch_id": "sync-refused-1", "register_id": f.register,
+		"batch_id": "sync-refused-1", "register_id": f.register, "device_epoch": 1, "reported_seq": 0,
 		"items": []map[string]any{{
 			"client_id": "c1c1c1c1-0000-4000-8000-00000000beef", "cashier_id": mustUUID(t),
 			"items":   []map[string]any{{"product_id": f.productID.String(), "quantity": "1"}},

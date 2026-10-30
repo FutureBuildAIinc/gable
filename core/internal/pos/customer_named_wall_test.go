@@ -126,15 +126,16 @@ func TestTheCreateHoldsABoundKeyToItsPin(t *testing.T) {
 
 func (w *namedWall) syncBody(customer uuid.UUID) (string, string) {
 	client := uuid.NewString()
-	return client, fmt.Sprintf(`{"batch_id":"cw-%s","register_id":%q,"items":[{"client_id":%q,"cashier_id":%q,`+
+	return client, fmt.Sprintf(`{"batch_id":"cw-%s","register_id":%q,"device_epoch":1,"reported_seq":0,"items":[{"client_id":%q,"cashier_id":%q,`+
 		`"customer_id":%q,"items":[{"product_id":%q,"quantity":"1"}],`+
 		`"tenders":[{"method":"account","amount_cents":599}],"client_created_at":%q}]}`,
 		uuid.NewString()[:8], w.f.register, client, uuid.NewString(), customer.String(),
 		w.f.productID.String(), time.Now().UTC().Format(time.RFC3339))
 }
 
-// RULE (money never queues): the offline sync refuses every batch that
-// parses, a user naming another yard's customer included, and nothing of it
+// RULE (money never queues where the dealer has not opted in): with no
+// offline policy at the branch the sync refuses every batch that parses, a
+// user naming another yard's customer included, and nothing of it
 // is written: no sale, no invoice, no sync log row. The customer walls ahead
 // of the handler keep their own refusals (the bound key's is the serve
 // package's wire test).
@@ -157,26 +158,6 @@ func TestTheSyncRefusesEveryBatchByRule(t *testing.T) {
 	}
 	if n := countOf(t, f.db, `SELECT count(*) FROM pos_sync_log WHERE register_id = $1`, f.register); n != 0 {
 		t.Errorf("the refused sync wrote %d sync log rows, want 0", n)
-	}
-}
-
-// RULE: a branch bound key keeps its pin in the sync: the item is an error,
-// no sale and no invoice is written.
-func TestTheSyncHoldsABoundKeyToItsPin(t *testing.T) {
-	w := newNamedWall(t)
-	f := w.f
-	client := uuid.New()
-	item := &pos.OfflineSale{ClientID: client, CashierID: uuid.New(), CustomerID: &w.hidden}
-	_, err := f.service.StartSaleAt(w.boundCtx(), item, f.register, "key")
-	var he *httpx.Error
-	if !errors.As(err, &he) || he.Status != http.StatusNotFound {
-		t.Fatalf("bound key sync naming another yard's customer: %v, want the module's 404", err)
-	}
-	if n := countOf(t, f.db, `SELECT count(*) FROM pos_transactions WHERE id = $1`, client); n != 0 {
-		t.Errorf("the refused sync item wrote its sale")
-	}
-	if n := countOf(t, f.db, `SELECT count(*) FROM invoices WHERE customer_id = $1`, w.hidden); n != 0 {
-		t.Errorf("the refused sync item posted %d invoices to the customer", n)
 	}
 }
 

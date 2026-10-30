@@ -36,8 +36,11 @@ import (
 // terminalAnswerLease is how long a card leg's answer may take at the device
 // before the sweep may turn the intent lost. It exceeds the counter's wait
 // below, so a waited out act leaves the intent inside its lease and only the
-// sweep (past the lease) decides it is lost.
-const terminalAnswerLease = 90 * time.Second
+// sweep (past the lease) decides it is lost. It is the seam's own number
+// (payment.TerminalAnswerLease), because every driver's own window has to fit
+// inside it: a poller that works longer than the lease is closed by the sweep
+// while the device is still answering.
+const terminalAnswerLease = payment.TerminalAnswerLease
 
 // terminalWaitDefault is how long the counter waits for the device's answer
 // before it answers the desk a waiting state. The intent stays
@@ -113,7 +116,7 @@ func firstNonEmpty(values ...string) string {
 // resultOfLeg reads an authorized leg as the charge the completion records.
 func resultOfLeg(in *payment.TerminalIntent) *chargeResult {
 	return &chargeResult{GatewayTxID: firstNonEmpty(in.AnswerProviderRef, in.ProviderRef), AuthCode: in.AnswerAuthCode,
-		Last4: in.AnswerLast4, Brand: in.AnswerBrand, IntentID: in.ID}
+		Last4: in.AnswerLast4, Brand: in.AnswerBrand, IntentID: in.ID, FeeCents: in.AnswerFeeCents}
 }
 
 // attemptOf reads the attempt number of a leg key (card-0 is attempt 0,
@@ -432,7 +435,7 @@ func (s *Service) reverseTerminalLeg(ctx context.Context, c chargeMade, saleID u
 		return err
 	}
 	comp := s.terminalCompensationLeg(ctx, leg)
-	rerr := s.reverseCharge(ctx, c.result.GatewayTxID, c.amountCents, saleID, actor, cause, terminalRefundKey(comp))
+	rerr := s.reverseCharge(ctx, c.result.GatewayTxID, c.amountCents+c.result.FeeCents, saleID, actor, cause, terminalRefundKey(comp))
 	if rerr != nil {
 		// the reversal's outcome is unknown or failed: the compensation
 		// intent stays pending_at_device, so the sweep files its manager item

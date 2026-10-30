@@ -10,7 +10,7 @@ import '../../pages/pos/PayerDialog.ts';
 import { apiErrorMessage, ApiError } from '../../services/apiError';
 import type {
   Sale, QuickSearchResult, SaleLine, TillSession, TillReport, TillMovement, TenderMethod, ExchangeTenderMethod, RefundMethod, CounterCustomer, CounterRegister,
-  CounterStanding, ReturnReason, ReturnReasonCode, ExchangeFigures, ReturnFigures, IdType, SaleSummary,
+  CounterStanding, ReturnReason, ReturnReasonCode, ExchangeFigures, ReturnFigures, IdType, SaleSummary, CardSurcharge,
 } from '../../types/pos';
 import { ID_TYPES } from '../../types/pos';
 import { branchContext } from '../../services/BranchContext';
@@ -31,8 +31,9 @@ import { isCountedUnit, normalizeQuantity } from '../../lib/money';
 import { payPlan, panelProgress, type PanelState, type PanelKey } from './panels';
 import { roundCashFor, type CashRoundingMode } from '../../lib/cashRounding';
 import './PosOrderDeposit';
-import { intentIdOfRefusal, cardWaitWords, CARD_DECLINED_WORDS, CARD_CANCEL_WORDS } from './terminal';
+import { intentIdOfRefusal, cardOverWords, cardWaitWords, CARD_DECLINED_WORDS, CARD_CANCEL_WORDS } from './terminal';
 import { receiptEmailAnswer, type ReceiptTone } from './receiptEmail';
+import { cardFeeNotice } from './cardFee';
 import { EmailDeliveryService } from '../../services/EmailDeliveryService';
 
 /**
@@ -55,6 +56,14 @@ import './TillZReports.ts';
 import './TintLineDialog.ts';
 import { tintSummary } from './tint.ts';
 import { kindLabel } from './movements.ts';
+import './OfflineCounter';
+import { offlineCounter, OfflineCounterError } from '../../services/OfflineCounterService';
+import type { OfflineQueue, OfflineSignedSale } from '../../types/offline';
+import {
+  OFFLINE_BANNER, RESULT_UNKNOWN, SAME_GOODS_QUESTION, bannerFigures, carryCart, isLostAnswer,
+  NEEDS_CONNECTION, NO_SESSION_ASK, queueDrained, snapshotRefusalWords, syncWords, tillCloseWait, unknownCardKey, unknownCartKey, type CarriedCart,
+} from './offline';
+import { POS_SW_WARNING_ATTR } from '../../lib/pos-sw';
 
 const REGISTER_STORAGE_PREFIX = 'gable.pos.register.';
 // The sale each register last opened, so a visit that left it empty reuses it.
@@ -146,6 +155,8 @@ export class POSTerminal extends LitElement {
   // The dealer's check ID rule (never by default; a read failure reads as
   // never: the server holds the rule itself at the completion).
   @state() private _idRule: CheckIDRule | null = null;
+  /** The active branch's card fee rule (CP-15); null while none is known. */
+  @state() private _cardFee: CardSurcharge | null = null;
   // The dealer's database wide check limit from the same read, so a walk-in
   // (no standing of its own) is warned at entry, not first at the server.
   @state() private _dealerCheckLimitCents: number | null = null;
@@ -164,6 +175,8 @@ export class POSTerminal extends LitElement {
   // The card the terminal still holds: the intent's own record, read again
   // while the desk shows the waiting state. Null when no card leg waits.
   @state() private _cardIntent: TerminalIntent | null = null;
+  /** The card leg being watched, kept while its read is in flight or failed (ADR 0011 5.3). */
+  private _cardWaitId: string | null = null;
   @state() private _cardNote: string | null = null;
   @state() private _cardBusy = false;
   /** Counts card reads; an answer to an older one is dropped. */
@@ -238,7 +251,28 @@ export class POSTerminal extends LitElement {
 
   private _onConnection = () => {
     this._online = navigator.onLine;
+    if (!this._online) void this._goOffline();
+    else void this._reconnect();
   };
+
+  // The counter's offline mode (ADR 0011 slice C2): with the work shell's
+  // core enrolled for this register and a till open, the counter keeps
+  // selling when the connection drops. A browser tab has no core and keeps
+  // the online only refusal.
+  @state() private _offline = false;
+  @state() private _offlineSeed: CarriedCart | null = null;
+  /** The cart whose completion was sent and not answered (ADR 0011 5.3). */
+  @state() private _unknownCart: string | null = null;
+  /** The unknown cart's card leg the terminal had not answered when the connection dropped. */
+  private _unknownCard: string | null = null;
+  @state() private _offlineQueue: OfflineQueue | null = null;
+  @state() private _offlineStrip: string | null = null;
+  @state() private _offlineRoom: ReturnType<typeof bannerFigures> = null;
+  /** The abandoned unknown cart whose default linked offline sale the clerk is asked about. */
+  @state() private _sameGoods: { cartId: string; saleId: string; offlineRef: string } | null = null;
+  private _completing = false;
+  private _reconnecting = false;
+  @state() private _needsSignIn = false;
 
   // The X report of the open drawer, and the register's stored Z reports (CP-08).
   @state() private _showXReport = false;
@@ -278,15 +312,226 @@ export class POSTerminal extends LitElement {
     void this._loadIDRule();
   }
 
+  /** Whether the work shell's core sells offline for the register on screen. */
+  private async _offlineReady(): Promise<boolean> {
+    if (!offlineCounter.available() || !this._registerId) return false;
+    try {
+      const enrolment = await offlineCounter.enrolment();
+      return enrolment.register_id === this._registerId;
+    } catch {
+      return false;
+    }
+  }
+
+  private async _refreshOfflineQueue() {
+    try {
+      const queue = await offlineCounter.queue();
+      this._offlineQueue = queue;
+      const snapshot = await offlineCounter.snapshot().catch(() => null);
+      this._offlineRoom = bannerFigures(queue, snapshot);
+    } catch {
+      this._offlineQueue = null;
+      this._offlineRoom = null;
+    }
+  }
+
+  /** The unknown cart survives a reload: it is kept per register until it is read online. */
+  private _restoreUnknownCart() {
+    try {
+      this._unknownCart = this._registerId ? localStorage.getItem(unknownCartKey(this._registerId)) : null;
+      this._unknownCard = this._registerId && this._unknownCart ? localStorage.getItem(unknownCardKey(this._registerId)) : null;
+    } catch {
+      this._unknownCart = null;
+      this._unknownCard = null;
+    }
+  }
+
+  private _setUnknownCart(id: string | null, cardIntentId: string | null = null) {
+    this._unknownCart = id;
+    this._unknownCard = id ? cardIntentId : null;
+    try {
+      if (!this._registerId) return;
+      if (id) localStorage.setItem(unknownCartKey(this._registerId), id);
+      else localStorage.removeItem(unknownCartKey(this._registerId));
+      if (this._unknownCard) localStorage.setItem(unknownCardKey(this._registerId), this._unknownCard);
+      else localStorage.removeItem(unknownCardKey(this._registerId));
+    } catch {
+      // a refused store keeps the cart for this page only
+    }
+  }
+
+  /** The card leg the terminal has not answered: waiting at the device, or its read in flight or failed. */
+  private _cardInFlight(): string | null {
+    if (this._cardIntent) return ['claimed', 'pending_at_device'].includes(this._cardIntent.state) ? this._cardIntent.id : null;
+    return this._cardWaitId;
+  }
+
+  /**
+   * The connection dropped (ADR 0011 5.3). With no completion in flight the
+   * open cart's lines become the local cart and the offline sale names it;
+   * a completion or a terminal call sent and not answered is the result
+   * unknown case, whose cart is never carried.
+   */
+  private async _goOffline(): Promise<boolean> {
+    if (this._offline) return true;
+    if (this._till === null || !(await this._offlineReady())) return false;
+    let seed: CarriedCart | null = null;
+    const card = this._cardInFlight();
+    if (card !== null && this._sale && this._unknownCart === null) this._setUnknownCart(this._sale.id, card);
+    if (!this._completing && this._unknownCart === null && this._sale && this._sale.status !== 'completed') {
+      try {
+        const snapshot = await offlineCounter.snapshot();
+        seed = carryCart(this._sale, snapshot, () => crypto.randomUUID());
+      } catch {
+        seed = null;
+      }
+    }
+    this._offlineSeed = seed;
+    this._offline = true;
+    this._error = this._unknownCart ? RESULT_UNKNOWN : null;
+    await this._refreshOfflineQueue();
+    return true;
+  }
+
+  /** The strip's "Sign in this register": the shell's sign in, then the reconnect runs again. */
+  private async _signInRegister() {
+    try {
+      await offlineCounter.signIn();
+    } catch (err) {
+      this._offlineStrip = err instanceof Error ? err.message : null;
+      return;
+    }
+    this._offlineStrip = null;
+    this._needsSignIn = false;
+    await this._reconnect();
+  }
+
+  /**
+   * The connection returned: the queue drains first, then the core takes new
+   * prices, then the unknown cart is read and followed (ADR 0011 5.3, 6.2).
+   * The same runs when the counter opens online, so a register that went
+   * away offline sends what it kept.
+   */
+  private async _reconnect() {
+    if (this._reconnecting) return;
+    if (!(await this._offlineReady())) {
+      this._offline = false;
+      return;
+    }
+    this._reconnecting = true;
+    this._needsSignIn = false;
+    const wasOffline = this._offline;
+    let drained = false;
+    try {
+      try {
+        const report = await offlineCounter.sync();
+        this._offlineQueue = report.queue;
+        drained = queueDrained(report.queue);
+        this._offlineStrip = report.sent > 0 ? syncWords(report) : this._offlineStrip;
+      } catch (err) {
+        this._offlineStrip = err instanceof Error ? err.message : null;
+        if (err instanceof OfflineCounterError && err.code === 'no_session') this._needsSignIn = true;
+      }
+      try {
+        await offlineCounter.refreshSnapshot();
+      } catch (err) {
+        if (err instanceof OfflineCounterError && err.code === 'no_session') {
+          this._needsSignIn = true;
+          this._offlineStrip = this._offlineStrip ?? err.message;
+        } else if (err instanceof OfflineCounterError && err.code !== 'no_core') {
+          this._offlineStrip = [this._offlineStrip, snapshotRefusalWords(err.code, err.message)].filter(Boolean).join('. ');
+        }
+      }
+      // 5.3: the unknown cart is read only once the queue has drained; a
+      // linked sale still waiting means the cart may yet be abandoned by it
+      if (drained) await this._settleUnknownCart();
+      await this._refreshOfflineQueue();
+    } finally {
+      this._reconnecting = false;
+      if (wasOffline && navigator.onLine) {
+        this._offline = false;
+        this._offlineSeed = null;
+        await this._loadTill();
+        if (this._sale === null || this._sale.status !== 'open') void this._beginFresh();
+      }
+    }
+  }
+
+  /**
+   * Reads the result unknown cart online and follows what it says (ADR 0011
+   * 5.3): completed, it is shown complete; abandoned by a default linked
+   * offline sale, the clerk is asked whether it was the same customer and
+   * goods; still open, it returns to the screen.
+   */
+  private async _settleUnknownCart() {
+    const id = this._unknownCart;
+    if (!id) return;
+    // the card leg first: while the terminal may still take the card the cart stays unknown
+    const card = this._unknownCard;
+    if (card) {
+      try {
+        const intent = await posService.getTerminalIntent(card);
+        if (intent.state === 'claimed' || intent.state === 'pending_at_device') return;
+      } catch {
+        return;
+      }
+    }
+    let sale: Sale;
+    try {
+      sale = await posService.getSale(id);
+    } catch {
+      return;
+    }
+    const status = sale.status as string;
+    if (status === 'completed') {
+      this._success = `The sale whose result was unknown completed online: ${sale.number}. A sale rung again for it offline is with a manager.`;
+      this._setUnknownCart(null);
+      this._error = null;
+      return;
+    }
+    if (status === 'abandoned') {
+      const linked = this._offlineQueue?.items.find((i) => i.sale.replaces_sale_id === id && i.state === 'synced');
+      if (linked) this._sameGoods = { cartId: id, saleId: linked.sale.client_id, offlineRef: linked.sale.offline_ref };
+      this._setUnknownCart(null);
+      this._error = null;
+      return;
+    }
+    if (status === 'open' || status === 'held') {
+      this._sale = sale;
+      this._setUnknownCart(null);
+      this._error = null;
+    }
+  }
+
+  private async _answerSameGoods(same: boolean) {
+    const ask = this._sameGoods;
+    if (!ask) return;
+    try {
+      await posService.answerReplacedCart(ask.saleId, same);
+      this._sameGoods = null;
+      this._success = same ? 'Recorded: the same customer and goods.' : 'Recorded for a manager: not the same customer and goods.';
+    } catch (err) {
+      this._error = apiErrorMessage(err, 'The answer could not be recorded');
+    }
+  }
+
+  private _onOfflineSold = (e: Event) => {
+    const sold = (e as CustomEvent<OfflineSignedSale>).detail;
+    void sold;
+    void this._refreshOfflineQueue();
+  };
+
   /** Reads the dealer's check ID rule and check limit; a read failure leaves them off (the server still holds both). */
   private async _loadIDRule() {
     try {
       const s = await posService.settings();
       this._idRule = s.rules.check_id_required;
       this._dealerCheckLimitCents = s.rules.check_limit_cents;
+      this._cardFee = s.rules.card_surcharge ?? null;
     } catch {
       this._idRule = null;
       this._dealerCheckLimitCents = null;
+      this._cardFee = null;
     }
   }
 
@@ -300,6 +545,7 @@ export class POSTerminal extends LitElement {
     if (!this._saleHasLines) {
       this._yardId = branchContext.currentId;
       void this._loadRegisters();
+      void this._loadIDRule();
       return;
     }
     const askedYard = branchContext.currentId;
@@ -317,6 +563,7 @@ export class POSTerminal extends LitElement {
       }
       this._yardId = askedYard;
       void this._loadRegisters();
+      void this._loadIDRule();
     });
   };
 
@@ -354,6 +601,10 @@ export class POSTerminal extends LitElement {
       all = await posService.listRegisters();
     } catch (err: unknown) {
       if (seq !== this._registerSeq) return;
+      // Opened with no connection on an enrolled work shell register (a reload
+      // offline, ADR 0011 5.2): the core's enrolment and snapshot name the
+      // register and its till session, and the counter sells offline.
+      if (!navigator.onLine && await this._openOfflineRegister()) return;
       // A failed list is not an empty one: say it failed and offer a retry.
       this._error = err instanceof Error ? err.message : 'Failed to list the registers';
       this._registers = [];
@@ -389,7 +640,35 @@ export class POSTerminal extends LitElement {
     // until a till is: opening the till starts it (and reuses a remembered
     // empty one), so the till opening never leaves a second sale behind.
     if (this._till === null) return;
+    this._restoreUnknownCart();
+    if (offlineCounter.available()) void this._reconnect();
     await this._beginFresh();
+  }
+
+  /** The register and till the core's own copy names, for a counter opened offline. */
+  private async _openOfflineRegister(): Promise<boolean> {
+    if (!offlineCounter.available()) return false;
+    try {
+      const enrolment = await offlineCounter.enrolment();
+      const snapshot = await offlineCounter.snapshot();
+      this._registers = [{ id: enrolment.register_id, name: enrolment.register_id, branch_id: snapshot.branch_id, branch_code: '', branch_name: 'Offline' }];
+      this._register = this._registers[0];
+      this._registersLoaded = true;
+      this._registersFailed = false;
+      this._till = {
+        id: snapshot.till_session.id, register_id: enrolment.register_id, branch_id: snapshot.branch_id,
+        cashier_id: snapshot.till_session.cashier_id, status: 'open', opening_float_cents: snapshot.till_session.opening_float_cents,
+        opened_at: snapshot.till_session.opened_at, closed_at: null, expected_by_method: {}, counted_by_method: {},
+        over_short_cents: null, gl_entry_id: null, notes: '', closed_by: null,
+      } as unknown as TillSession;
+      this._restoreUnknownCart();
+      this._offline = true;
+      this._error = this._unknownCart ? RESULT_UNKNOWN : null;
+      await this._refreshOfflineQueue();
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   /**
@@ -402,7 +681,7 @@ export class POSTerminal extends LitElement {
     const s = authCustody.session;
     if (s === null) return { key: 'anon', cashierId: NIL };
     if (s.kind === 'dev') return { key: `dev-${s.name}`, cashierId: NIL };
-    const sub = s.claims.sub ?? '';
+    const sub = s.kind === 'staff' ? s.sub : (s.claims.sub ?? '');
     const isId = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(sub);
     return { key: sub !== '' ? sub : 'anon', cashierId: isId ? sub.toLowerCase() : NIL };
   }
@@ -457,6 +736,8 @@ export class POSTerminal extends LitElement {
       this._errorTimer = setTimeout(() => { this._success = null; }, 2500);
       // Re-start the sale so it attaches to the new session.
       void this._beginFresh();
+      // a register enrolled to sell offline takes its prices for the new session
+      if (offlineCounter.available()) void this._reconnect();
     } catch (err: unknown) {
       this._error = err instanceof Error ? err.message : 'Failed to open till';
     } finally {
@@ -480,6 +761,13 @@ export class POSTerminal extends LitElement {
 
   private async _beginCloseTill() {
     if (!this._till) return;
+    // the till close waits for the queue and for a result unknown cart (ADR 0011 sections 4 and 5.3)
+    if (offlineCounter.available()) await this._refreshOfflineQueue();
+    const waits = tillCloseWait(this._offlineQueue, this._unknownCart);
+    if (waits) {
+      this._error = waits;
+      return;
+    }
     // The same question a register change asks: declining keeps till and sale.
     if (this._saleHasLines && !(await confirmDialog({ title: this._leaveSaleQuestion(), confirmLabel: 'Leave sale', cancelLabel: 'Stay' }))) return;
     try {
@@ -899,7 +1187,7 @@ export class POSTerminal extends LitElement {
               <div class="rounded border border-amber-500/30 bg-amber-500/10 px-2 py-1.5 text-xs text-amber-100" data-testid="pos-alert-warning" data-alert-id=${a.id}>
                 <span class="font-semibold">Warning:</span> ${a.text}
                 ${a.acknowledge_required
-                  ? html`<div class="mt-1 ${acknowledged ? 'text-amber-300' : 'text-amber-200/90'}" data-testid="pos-alert-ack">
+                  ? html`<div class="mt-1 ${acknowledged ? 'text-amber-400' : 'text-amber-400/90'}" data-testid="pos-alert-ack">
                       ${acknowledged ? 'Read and acknowledged' : 'The counter must read this before the sale is taken.'}
                     </div>`
                   : nothing}
@@ -1295,6 +1583,8 @@ export class POSTerminal extends LitElement {
     const open = sale?.status === 'open';
     const hasLines = (sale?.lines ?? []).some((l) => l.parent_line_id === null);
     const till = this._till !== null;
+    // the offline counter has none of these keys; the legend dims them as the tender buttons dim
+    if (this._offline) return false;
     switch (action) {
       case 'search':
       case 'add':
@@ -1615,6 +1905,10 @@ export class POSTerminal extends LitElement {
         if (why) return why;
       }
     }
+    if (entry.method === 'card') {
+      const over = cardOverWords(entry.amount_cents, this._owedCents, fmt(this._owedCents));
+      if (over) return over;
+    }
     if (entry.method === 'store_credit') {
       const held = this._standing?.open_credit_memo_cents ?? 0;
       if (entry.amount_cents > held) return `The account holds ${money(held)} of store credit`;
@@ -1699,6 +1993,14 @@ export class POSTerminal extends LitElement {
     // the field shell's (ADR 0011's first ruling), so Pay is refused here
     // before anything dials.
     if (!this._online) {
+      // the work shell's core sells offline for an enrolled register; a
+      // browser tab, or a register not enrolled, keeps the refusal
+      if (offlineCounter.available()) {
+        void this._goOffline().then((entered) => {
+          if (!entered) this._error = YARD_OFFLINE_REFUSAL;
+        });
+        return;
+      }
       this._error = YARD_OFFLINE_REFUSAL;
       return;
     }
@@ -1803,6 +2105,7 @@ export class POSTerminal extends LitElement {
     if (!this._sale || tenders.length === 0) return;
     try {
       this._loading = true;
+      this._completing = true;
       this._error = null;
       // A timer set earlier must not clear this completion's band.
       if (this._errorTimer) clearTimeout(this._errorTimer);
@@ -1840,6 +2143,16 @@ export class POSTerminal extends LitElement {
       // The completed sale, its band and the change due stay until the cashier
       // moves on: New Sale, a product added or a customer named.
     } catch (err: unknown) {
+      // The completion was sent and its answer lost (ADR 0011 5.3): the
+      // server may have committed it, so the cart is result unknown. It keeps
+      // its tender on screen, is never converted, and holds the till close
+      // until it is read online.
+      if (!(err instanceof ApiError) && isLostAnswer(err, navigator.onLine) && this._sale) {
+        this._setUnknownCart(this._sale.id);
+        this._error = RESULT_UNKNOWN;
+        if (!navigator.onLine) void this._goOffline();
+        return;
+      }
       // a check over the limit the screen could not know of (a walk-in's, or the database wide limit) says so beside Ask a manager
       if (err instanceof ApiError && err.hasBlocker('check_over_limit')) this._checkOverWords = err.message;
       // A large cash crossing without the payer's details, or a walk-in's cash
@@ -1881,6 +2194,7 @@ export class POSTerminal extends LitElement {
       this._error = words;
     } finally {
       this._loading = false;
+      this._completing = false;
     }
   }
 
@@ -1955,6 +2269,7 @@ export class POSTerminal extends LitElement {
   /** Reads the card leg's own record until the terminal answers or the waiting is dismissed. */
   private async _watchCard(id: string) {
     const seq = ++this._cardSeq;
+    this._cardWaitId = id;
     this._cardIntent = null;
     this._cardNote = null;
     try {
@@ -1966,7 +2281,10 @@ export class POSTerminal extends LitElement {
       this._cardNote = err instanceof Error ? err.message : 'Failed to read the card at the terminal';
       return;
     }
-    if (this._cardIntent === null || !['claimed', 'pending_at_device'].includes(this._cardIntent.state)) return;
+    if (this._cardIntent === null || !['claimed', 'pending_at_device'].includes(this._cardIntent.state)) {
+      this._cardWaitId = null;
+      return;
+    }
     this._cardTimer = setTimeout(() => { void this._watchCard(id); }, 2000);
   }
 
@@ -1974,6 +2292,7 @@ export class POSTerminal extends LitElement {
   private _dismissCardWait() {
     this._cardSeq++;
     if (this._cardTimer) clearTimeout(this._cardTimer);
+    this._cardWaitId = null;
     this._cardIntent = null;
     this._cardNote = null;
   }
@@ -2850,22 +3169,23 @@ export class POSTerminal extends LitElement {
           ${this._till ? html`
             <span title="Drawer open with a float of ${fmt(this._till.opening_float_cents)}" class="whitespace-nowrap rounded-full border border-gable-green/40 px-2 py-0.5 font-mono text-xs font-semibold text-gable-green" data-testid="pos-till-state">Till open</span>` : html`
             <span class="whitespace-nowrap rounded-full border border-safety-red/40 px-2 py-0.5 text-xs font-semibold text-safety-red" data-testid="pos-till-state">No till</span>`}
-          <span class="hidden max-w-[8rem] truncate text-xs text-slate-200 min-[900px]:inline" title="Cashier" data-testid="pos-cashier">${cashier}</span>
+          <span class="hidden max-w-[10rem] shrink-0 truncate text-xs text-slate-200 min-[900px]:inline" title=${cashier} data-testid="pos-cashier">${cashier}</span>
           ${!this._register ? nothing : this._till ? html`
             ${this._renderTillMenu()}
             <button @click=${() => { this._showScale = true; }} data-testid="pos-scale-button"
               title="Weigh a truck in and out, or enter a weight by hand"
               class="min-h-11 whitespace-nowrap rounded border border-white/20 px-3 py-2 text-xs text-slate-200 hover:bg-white/5">Scale</button>
-            <button @click=${() => this._beginFresh()}
-              class="min-h-11 whitespace-nowrap rounded border border-white/20 px-3 py-2 text-xs text-slate-200 hover:bg-white/5">New Sale</button>` : html`
+            <button @click=${() => this._beginFresh()} ?disabled=${this._offline} title=${this._offline ? NEEDS_CONNECTION : 'Start a new sale'}
+              class="min-h-11 whitespace-nowrap rounded border border-white/20 px-3 py-2 text-xs text-slate-200 hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-40">New Sale</button>` : html`
             <button id="pos-open-till" @click=${() => { this._showTillOpen = true; }}
               class="min-h-11 whitespace-nowrap rounded bg-gable-green px-3 py-2 text-xs font-semibold text-deep-space">Open Till</button>
             <button @click=${() => { this._showZReports = true; }} data-testid="pos-z-reports"
               title="The frozen Z report of each past drawer of this register"
               class="min-h-11 whitespace-nowrap rounded border border-white/20 px-3 py-2 text-xs text-slate-200">Z Reports</button>`}
           ${this._register && this._till ? html`
-          <button @click=${() => this._openReturnSearch()} data-testid="return-search-open"
-            class="min-h-11 whitespace-nowrap rounded border border-white/20 px-3 py-2 text-xs text-slate-200">Return a past sale</button>` : nothing}
+          <button @click=${() => this._openReturnSearch()} data-testid="return-search-open" ?disabled=${this._offline}
+            title=${this._offline ? NEEDS_CONNECTION : 'Find a past sale to return'}
+            class="min-h-11 whitespace-nowrap rounded border border-white/20 px-3 py-2 text-xs text-slate-200 disabled:cursor-not-allowed disabled:opacity-40">Return a past sale</button>` : nothing}
         </div>
       </header>`;
   }
@@ -2877,9 +3197,14 @@ export class POSTerminal extends LitElement {
    */
   private _renderTillMenu() {
     const item = 'flex min-h-11 w-full items-center whitespace-nowrap rounded border border-white/20 px-3 py-2 text-xs text-slate-200 hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-40';
+    // offline, every act here needs the server; Close Till stays live only to say what holds it
+    const off = this._offline;
+    const closeHeld = off && tillCloseWait(this._offlineQueue, this._unknownCart) !== null;
+    const needs = (title: string) => (off ? NEEDS_CONNECTION : title);
     return html`
       <div class="min-[900px]:contents" data-testid="pos-till-menu">
         <button type="button" data-testid="pos-till-menu-button" aria-label="Till" aria-haspopup="menu"
+          title=${off ? 'Offline: drawer cash and X report need the connection; Close Till says what holds it' : 'Till'}
           aria-expanded=${this._tillMenu ? 'true' : 'false'} @click=${() => { this._tillMenu = !this._tillMenu; }}
           class="flex h-11 w-11 items-center justify-center rounded border border-white/20 text-slate-200 hover:bg-white/5 min-[900px]:hidden">
           <svg viewBox="0 0 24 24" class="h-5 w-5" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
@@ -2889,28 +3214,28 @@ export class POSTerminal extends LitElement {
         ${this._tillMenu ? html`
           <div role="menu" aria-label="Till" data-testid="pos-till-menu-items"
             class="absolute right-0 top-full z-30 mt-1 flex w-44 flex-col gap-1 rounded border border-white/10 bg-slate-steel p-2 shadow-raised">
-            <button role="menuitem" @click=${() => { this._tillMenu = false; this._showMovement = true; }} ?disabled=${this._tillBusy}
-              data-testid="pos-drawer-cash" title="Safe drop, pickup, cash paid in or paid out" class=${item}>Drawer Cash</button>
-            <button role="menuitem" @click=${() => { this._tillMenu = false; this._beginXReport(); }} ?disabled=${this._tillBusy}
-              data-testid="pos-x-report" title="A mid-shift read of the drawer, printable; not a close" class=${item}>X Report</button>
-            <button role="menuitem" @click=${() => { this._tillMenu = false; this._showZReports = true; }} ?disabled=${this._tillBusy}
-              data-testid="pos-z-reports" title="The frozen Z report of each past drawer of this register" class=${item}>Z Reports</button>
-            <button role="menuitem" @click=${() => { this._tillMenu = false; this._beginCloseTill(); }} ?disabled=${this._tillBusy}
-              data-testid="pos-close-till" title="Count the drawer and close the till with its Z report" class=${item}>Close Till</button>
+            <button role="menuitem" @click=${() => { this._tillMenu = false; this._showMovement = true; }} ?disabled=${this._tillBusy || off}
+              data-testid="pos-drawer-cash" title=${needs("Safe drop, pickup, cash paid in or paid out")} class=${item}>Drawer Cash</button>
+            <button role="menuitem" @click=${() => { this._tillMenu = false; this._beginXReport(); }} ?disabled=${this._tillBusy || off}
+              data-testid="pos-x-report" title=${needs("A mid-shift read of the drawer, printable; not a close")} class=${item}>X Report</button>
+            <button role="menuitem" @click=${() => { this._tillMenu = false; this._showZReports = true; }} ?disabled=${this._tillBusy || off}
+              data-testid="pos-z-reports" title=${needs("The frozen Z report of each past drawer of this register")} class=${item}>Z Reports</button>
+            <button role="menuitem" @click=${() => { this._tillMenu = false; this._beginCloseTill(); }} ?disabled=${this._tillBusy || (off && !closeHeld)}
+              data-testid="pos-close-till" title=${off && !closeHeld ? NEEDS_CONNECTION : "Count the drawer and close the till with its Z report"} class=${item}>Close Till</button>
           </div>` : nothing}
         <div class="hidden items-center gap-2 min-[900px]:flex">
-          <button @click=${() => { this._showMovement = true; }} ?disabled=${this._tillBusy} data-testid="pos-drawer-cash"
-            title="Safe drop, pickup, cash paid in or paid out"
-            class="whitespace-nowrap rounded border border-white/20 px-3 py-1 text-xs text-slate-200">Drawer Cash</button>
-          <button @click=${() => this._beginXReport()} ?disabled=${this._tillBusy} data-testid="pos-x-report"
-            title="A mid-shift read of the drawer, printable; not a close"
-            class="whitespace-nowrap rounded border border-white/20 px-3 py-1 text-xs text-slate-200">X Report</button>
-          <button @click=${() => { this._showZReports = true; }} ?disabled=${this._tillBusy} data-testid="pos-z-reports"
-            title="The frozen Z report of each past drawer of this register"
-            class="whitespace-nowrap rounded border border-white/20 px-3 py-1 text-xs text-slate-200">Z Reports</button>
-          <button @click=${() => this._beginCloseTill()} ?disabled=${this._tillBusy}
-            title="Count the drawer and close the till with its Z report"
-            class="whitespace-nowrap rounded border border-white/20 px-3 py-1 text-xs text-slate-200">Close Till</button>
+          <button @click=${() => { this._showMovement = true; }} ?disabled=${this._tillBusy || off} data-testid="pos-drawer-cash"
+            title=${needs("Safe drop, pickup, cash paid in or paid out")}
+            class="whitespace-nowrap rounded border border-white/20 px-3 py-1 text-xs text-slate-200 disabled:cursor-not-allowed disabled:opacity-40">Drawer Cash</button>
+          <button @click=${() => this._beginXReport()} ?disabled=${this._tillBusy || off} data-testid="pos-x-report"
+            title=${needs("A mid-shift read of the drawer, printable; not a close")}
+            class="whitespace-nowrap rounded border border-white/20 px-3 py-1 text-xs text-slate-200 disabled:cursor-not-allowed disabled:opacity-40">X Report</button>
+          <button @click=${() => { this._showZReports = true; }} ?disabled=${this._tillBusy || off} data-testid="pos-z-reports"
+            title=${needs("The frozen Z report of each past drawer of this register")}
+            class="whitespace-nowrap rounded border border-white/20 px-3 py-1 text-xs text-slate-200 disabled:cursor-not-allowed disabled:opacity-40">Z Reports</button>
+          <button @click=${() => this._beginCloseTill()} ?disabled=${this._tillBusy || (off && !closeHeld)} data-testid="pos-close-till"
+            title=${off && !closeHeld ? NEEDS_CONNECTION : "Count the drawer and close the till with its Z report"}
+            class="whitespace-nowrap rounded border border-white/20 px-3 py-1 text-xs text-slate-200 disabled:cursor-not-allowed disabled:opacity-40">Close Till</button>
         </div>
       </div>`;
   }
@@ -2970,7 +3295,7 @@ export class POSTerminal extends LitElement {
       <section class="rounded-xl border ${waiting ? 'border-amber-400' : 'border-white/10'} bg-slate-steel p-4" data-testid="pos-card-wait" aria-live="polite">
         <div class="flex items-start justify-between gap-3">
           <div class="min-w-0">
-            <h2 class="text-base font-semibold ${waiting ? 'text-amber-300' : 'text-white'}" data-testid="pos-card-wait-title">${words.title}</h2>
+            <h2 class="text-base font-semibold ${waiting ? 'text-amber-400' : 'text-white'}" data-testid="pos-card-wait-title">${words.title}</h2>
             <p class="mt-1 text-sm text-slate-300" data-testid="pos-card-wait-body">${words.body}</p>
           </div>
           <span class="shrink-0 font-mono text-sm font-semibold text-slate-200" data-testid="pos-card-wait-amount">${fmt(intent.amount_cents)}</span>
@@ -2989,7 +3314,7 @@ export class POSTerminal extends LitElement {
               class="min-h-11 rounded border border-white/20 px-4 py-2 text-sm font-semibold text-slate-200 hover:bg-white/5">Close</button>
           </div>`}
         ${this._cardNote ? html`
-          <p class="mt-2 text-xs text-amber-300" role="status" data-testid="pos-card-note">${this._cardNote}</p>` : nothing}
+          <p class="mt-2 text-xs text-amber-400" role="status" data-testid="pos-card-note">${this._cardNote}</p>` : nothing}
       </section>`;
   }
 
@@ -3003,6 +3328,8 @@ export class POSTerminal extends LitElement {
     // the change due is the plan's: the tendered amount above the total, given from the cash
     const change = payPlanNow.ok ? payPlanNow.changeCents : 0;
     const tendersOver = !payPlanNow.ok && payPlanNow.over !== undefined;
+    // the card fee notice (CP-15): only while a card is the chosen way to pay and the branch charges one
+    const cardFee = this._tenderMethod === 'card' ? cardFeeNotice(this._cardFee, entry?.amount_cents ?? owed) : null;
     const overWords = !payPlanNow.ok && payPlanNow.over === 'typed'
       ? `A card, check or account charge cannot be more than ${fmt(payPlanNow.limitCents ?? total)} here`
       : 'The added tenders are more than the sale now: clear them and choose again';
@@ -3022,7 +3349,7 @@ export class POSTerminal extends LitElement {
           <div class="text-xs font-semibold uppercase tracking-wide text-slate-400">Amount due</div>
           <div class="font-mono text-4xl font-bold text-white" data-testid="pos-amount-due">${fmt(owed)}</div>
           ${this._roundingDiffCents !== 0 ? html`
-            <div class="mt-1 flex justify-between text-sm text-amber-300" data-testid="pos-cash-due">
+            <div class="mt-1 flex justify-between text-sm text-amber-400" data-testid="pos-cash-due">
               <span>Cash due (rounded to the nearest 5 cents)</span><span class="font-mono">${fmt(this._cashDueCents)}</span>
             </div>` : nothing}
           ${this._pendingTenders.length > 0 ? html`
@@ -3056,7 +3383,7 @@ export class POSTerminal extends LitElement {
             })}
           </div>
           ${accountWhy !== null ? html`
-            <div class="mt-3 rounded-lg border border-amber-400/40 bg-amber-400/10 p-3 text-sm text-amber-300" data-testid="pos-account-refusal">
+            <div class="mt-3 rounded-lg border border-amber-400/40 bg-amber-400/10 p-3 text-sm text-amber-400" data-testid="pos-account-refusal">
               <p>${accountWhy}</p>
               ${needsPO || needsJob ? html`
                 <button data-testid="pos-refusal-customer" @click=${() => { this._step = 'customer'; this._open = 'customer'; }}
@@ -3079,9 +3406,18 @@ export class POSTerminal extends LitElement {
             @blur=${() => this._formatTenderAmount()}
             class="mt-1 w-full rounded border border-white/10 bg-deep-space px-3 py-2 text-right font-mono text-xl font-bold text-white outline-none focus:border-gable-green"
             aria-label="Tender amount" />
+          ${cardFee !== null ? html`
+            <div class="mt-2 rounded-lg border border-white/10 bg-deep-space/60 p-3 text-sm text-slate-300" role="status" data-testid="pos-card-fee">
+              <div data-testid="pos-card-fee-notice">${cardFee.fee}</div>
+              <div class="mt-1 text-slate-400" data-testid="pos-card-fee-cash">${cardFee.cash}</div>
+            </div>` : nothing}
           ${tendersOver ? html`
-            <div class="mt-2 rounded-lg border border-amber-400/40 bg-amber-400/10 p-3 text-sm text-amber-300" role="status" data-testid="pos-tenders-over">
+            <div class="mt-2 rounded-lg border border-amber-400/40 bg-amber-400/10 p-3 text-sm text-amber-400" role="status" data-testid="pos-tenders-over">
               ${overWords}
+            </div>` : nothing}
+          ${this._tenderMethod === 'card' && entry !== null && cardOverWords(entry.amount_cents, owed, fmt(owed)) ? html`
+            <div class="mt-2 rounded-lg border border-amber-400/40 bg-amber-400/10 p-3 text-sm text-amber-400" role="status" data-testid="pos-card-over">
+              ${cardOverWords(entry.amount_cents, owed, fmt(owed))}
             </div>` : nothing}
           ${this._walkInNote !== '' ? html`
             <div class="mt-2 rounded-lg border border-white/10 bg-deep-space/60 p-3 text-sm text-slate-300" role="status" data-testid="pos-walk-in-note">
@@ -3127,7 +3463,7 @@ export class POSTerminal extends LitElement {
             class="mt-1 w-full rounded border border-white/10 bg-deep-space px-2 py-2 font-mono text-sm text-white outline-none focus:border-gable-green" />
           ${limit !== null ? html`<p class="mt-1 text-xs text-slate-400" data-testid="pos-check-limit">Check limit ${money(limit)}</p>` : nothing}` : nothing}
         ${idNeeded !== null ? html`
-          <div class="${isCheck ? 'mt-3 ' : ''}rounded border border-amber-400/40 bg-amber-400/10 p-2 text-sm text-amber-300" role="status" data-testid="pos-check-id-needed">
+          <div class="${isCheck ? 'mt-3 ' : ''}rounded border border-amber-400/40 bg-amber-400/10 p-2 text-sm text-amber-400" role="status" data-testid="pos-check-id-needed">
             <p>${idNeeded}</p>
           </div>` : nothing}
         <label class="${isCheck ? 'mt-3 ' : ''}flex items-center gap-2 text-sm text-slate-200" for="pos-id-checked">
@@ -3144,7 +3480,7 @@ export class POSTerminal extends LitElement {
             <p class="mt-1 text-xs text-slate-400">Only the kind of ID is kept, never its number</p>
           </div>` : nothing}
         ${isCheck && this._checkOverWords !== null ? html`
-          <div class="mt-3 rounded border border-amber-400/40 bg-amber-400/10 p-2 text-sm text-amber-300" role="status" data-testid="pos-check-over">
+          <div class="mt-3 rounded border border-amber-400/40 bg-amber-400/10 p-2 text-sm text-amber-400" role="status" data-testid="pos-check-over">
             <p>${this._checkOverWords}</p>
             <button data-testid="pos-check-ask-manager" @click=${() => void this._askManager('check', this._entry?.amount_cents ?? this._owedCents)}
               class="mt-2 min-h-11 rounded border border-white/20 px-3 py-2 text-sm font-semibold text-white hover:bg-white/5">Ask a manager to approve the check</button>
@@ -3273,7 +3609,10 @@ export class POSTerminal extends LitElement {
           ${completed ? html`
             ${(sale?.tenders ?? []).map((t) => html`
               <div class="flex justify-between py-1 text-slate-300"><dt>${t.method === 'account' ? 'Charged to account' : t.method === 'store_credit' ? 'Paid with store credit' : `Paid by ${t.method}`}</dt>
-                <dd class="font-mono">${fmt(t.amount_cents)}</dd></div>`)}
+                <dd class="font-mono">${fmt(t.amount_cents)}</dd></div>
+              ${(t.surcharge_cents ?? 0) > 0 ? html`
+              <div class="flex justify-between py-1 text-slate-300" data-testid="summary-card-fee"><dt>Card fee</dt>
+                <dd class="font-mono">${fmt(t.surcharge_cents)}</dd></div>` : nothing}`)}
             ${(sale?.change_cents ?? 0) > 0 ? html`
               <div class="flex justify-between py-1 font-semibold text-gable-green"><dt>Change given</dt>
                 <dd class="font-mono">${fmt(sale?.change_cents ?? 0)}</dd></div>` : nothing}` : this._pendingTenders.length > 0 ? html`
@@ -3500,7 +3839,11 @@ export class POSTerminal extends LitElement {
             ${this._success}
           </div>` : nothing}
 
-        ${this._registersFailed ? html`
+        ${this._renderOfflineBand()}
+        ${this._offline ? html`
+          <gable-pos-offline class="flex min-h-0 flex-1 overflow-y-auto" data-testid="pos-offline-mode"
+            .seed=${this._offlineSeed} .unknownCartId=${this._unknownCart}
+            @offline-sold=${this._onOfflineSold}></gable-pos-offline>` : this._registersFailed ? html`
           <div class="flex flex-1 flex-col items-center justify-center gap-3 p-8">
             <p class="max-w-md text-center text-base text-slate-200" data-testid="pos-registers-failed" role="status">
               The registers could not be loaded, so the counter cannot take a sale yet.
@@ -3570,12 +3913,45 @@ export class POSTerminal extends LitElement {
   }
 
   /**
+   * The offline band (ADR 0011 section 4): the banner with the waiting count,
+   * total and the room left under the queue caps; the strip with what the
+   * sync answered and why new prices could not be taken; the reload warning
+   * where the webview refused the service worker; and the question about a
+   * replaced cart once the connection returned.
+   */
+  private _renderOfflineBand() {
+    const room = this._offlineRoom;
+    const reloadWarning = typeof document !== 'undefined' ? document.documentElement.getAttribute(POS_SW_WARNING_ATTR) : null;
+    return html`
+      ${this._offline ? html`
+        <div class="border-b border-amber-400/40 bg-amber-400/10 px-4 py-2 text-sm text-amber-400" role="status" data-testid="pos-offline-banner">
+          <p class="font-semibold">${OFFLINE_BANNER}</p>
+          ${room ? html`<p class="mt-0.5 text-xs" data-testid="pos-offline-banner-figures">
+            Waiting: <span class="font-mono">${room.count}</span> ${room.count === 1 ? 'sale' : 'sales'}, <span class="font-mono">${formatCents(room.totalCents)}</span>.
+            Room left: <span class="font-mono">${room.roomCount}</span> ${room.roomCount === 1 ? 'sale' : 'sales'}, <span class="font-mono">${formatCents(room.roomCents)}</span>.</p>` : nothing}
+          ${reloadWarning ? html`<p class="mt-0.5 text-xs font-semibold" data-testid="pos-offline-reload-warning">${reloadWarning}</p>` : nothing}
+        </div>` : nothing}
+      ${this._offlineStrip ? html`
+        <div class="flex items-center justify-between gap-3 border-b border-blueprint-blue/30 bg-blueprint-blue/10 px-4 py-2 text-sm text-blueprint-blue" role="status" data-testid="pos-offline-strip">
+          <span>${this._offlineStrip}</span>
+          ${this._needsSignIn ? html`<button type="button" data-testid="pos-offline-sign-in" class="min-h-11 rounded-lg bg-gable-green px-4 font-semibold text-deep-space" @click=${() => void this._signInRegister()}>${NO_SESSION_ASK}</button>` : nothing}
+          <button type="button" class="min-h-11 px-2 text-lg" aria-label="Dismiss" @click=${() => { this._offlineStrip = null; }}>×</button>
+        </div>` : nothing}
+      ${this._sameGoods ? html`
+        <div class="flex flex-wrap items-center gap-3 border-b border-white/10 bg-slate-steel px-4 py-3 text-sm" role="group" data-testid="pos-offline-same-goods">
+          <span>Offline sale <span class="font-mono">${this._sameGoods.offlineRef}</span> replaced the sale whose result was unknown. ${SAME_GOODS_QUESTION}</span>
+          <button type="button" data-testid="pos-offline-same-goods-yes" class="min-h-11 rounded-lg bg-gable-green px-4 font-semibold text-deep-space" @click=${() => this._answerSameGoods(true)}>Yes</button>
+          <button type="button" data-testid="pos-offline-same-goods-no" class="min-h-11 rounded-lg border border-white/20 px-4 font-semibold" @click=${() => this._answerSameGoods(false)}>No</button>
+        </div>` : nothing}`;
+  }
+
+  /**
    * The pinned pay bar, a phone affordance below 768 only: the line count
    * and the total (one tap to the payment step), Pay at thumb height. At 768
    * and wider the Pay button in the order summary card is the affordance.
    */
   private _renderPayBar(sale: Sale | null, productLines: SaleLine[]) {
-    if (!this._register) return nothing;
+    if (!this._register || this._offline) return nothing;
     const total = sale?.total_cents ?? 0;
     const canPay = this._canPay;
     const label = this._loading ? 'Processing...' : `Pay ${fmt(total)}`;

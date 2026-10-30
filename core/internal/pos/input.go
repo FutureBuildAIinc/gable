@@ -4,13 +4,13 @@
 package pos
 
 import (
+	"bytes"
 	"encoding/json"
-
 	"fmt"
-	"github.com/gablelbm/gable/internal/largecash"
 	"strings"
 	"time"
 
+	"github.com/gablelbm/gable/internal/largecash"
 	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/gablelbm/gable/internal/salesdoc"
 	"github.com/google/uuid"
@@ -591,60 +591,48 @@ func (r *closeTillRequest) parse() (map[string]int64, string, error) {
 	return counted, notes, nil
 }
 
-// offlineSyncRequest is POST /pos/sync: a batch of completed sales captured
-// offline, replayed through the same completion path.
+// offlineSyncRequest is POST /pos/sync: one batch of the register's signed
+// offline sales (ADR 0011 section 3). Each item is kept as received: its
+// signature covers its canonical bytes, so the server reads the item only
+// through the signed sale's own parse (parseOfflineItem).
 type offlineSyncRequest struct {
-	BatchID    *string              `json:"batch_id"`
-	RegisterID *string              `json:"register_id"`
-	Items      []offlineSaleRequest `json:"items"`
+	BatchID     *string           `json:"batch_id"`
+	RegisterID  *string           `json:"register_id"`
+	DeviceEpoch *int64            `json:"device_epoch"`
+	ReportedSeq *int64            `json:"reported_seq"`
+	Items       []json.RawMessage `json:"items"`
 }
 
-type offlineSaleRequest struct {
-	ClientID        *string                `json:"client_id"`
-	CashierID       *string                `json:"cashier_id"`
-	CustomerID      *string                `json:"customer_id"`
-	Items           []salesdoc.LineRequest `json:"items"`
-	Tenders         []tenderRequest        `json:"tenders"`
-	ClientCreatedAt json.RawMessage        `json:"client_created_at"`
-}
-
-func (r *offlineSyncRequest) parse() (*OfflineSync, error) {
+func (r *offlineSyncRequest) parse() (*OfflineBatch, error) {
 	v := &httpx.Validator{}
-	out := &OfflineSync{}
+	out := &OfflineBatch{}
 	if r.BatchID != nil {
-		out.BatchID = *r.BatchID
+		out.BatchID = strings.TrimSpace(*r.BatchID)
 	}
 	v.Required("batch_id", out.BatchID)
 	if r.RegisterID != nil {
-		out.RegisterID = *r.RegisterID
+		out.RegisterID = strings.TrimSpace(*r.RegisterID)
+	}
+	v.Required("register_id", out.RegisterID)
+	v.Check(r.DeviceEpoch != nil && *r.DeviceEpoch >= 1, "device_epoch",
+		"is required: the register's enrolment epoch, one or more")
+	if r.DeviceEpoch != nil {
+		out.DeviceEpoch = *r.DeviceEpoch
+	}
+	v.Check(r.ReportedSeq != nil && *r.ReportedSeq >= 0, "reported_seq",
+		"is required: the last sequence the device assigned under its epoch, zero or more")
+	if r.ReportedSeq != nil {
+		out.ReportedSeq = *r.ReportedSeq
 	}
 	v.Check(len(r.Items) > 0, "items", "cannot be empty")
-	for i := range r.Items {
-		it := &r.Items[i]
-		field := func(name string) string { return fmt.Sprintf("items[%d].%s", i, name) }
-		sale := OfflineSale{}
-		if id, ok := v.UUID(field("client_id"), it.ClientID, true); ok {
-			sale.ClientID = id
-		}
-		if id, ok := v.UUID(field("cashier_id"), it.CashierID, false); ok {
-			sale.CashierID = id
-		}
-		if id, ok := v.UUID(field("customer_id"), it.CustomerID, false); ok {
-			sale.CustomerID = &id
-		}
-		if !isAbsentRaw(it.ClientCreatedAt) {
-			if ts, ok := v.Timestamp(field("client_created_at"), it.ClientCreatedAt, true); ok {
-				sale.ClientCreatedAt = ts
-			}
-		}
-		sale.Lines = salesdoc.ParseLines(v, it.Items)
-		v.Check(len(it.Tenders) > 0, field("tenders"), "name at least one tender")
-		sale.Tenders = parseTenders(v, field("tenders"), it.Tenders)
-		out.Items = append(out.Items, sale)
+	for i, raw := range r.Items {
+		trimmed := bytes.TrimSpace(raw)
+		v.Check(len(trimmed) > 0 && trimmed[0] == '{', fmt.Sprintf("items[%d]", i), "must be a signed sale object")
 	}
 	if err := v.Err(); err != nil {
 		return nil, err
 	}
+	out.Items = r.Items
 	return out, nil
 }
 
