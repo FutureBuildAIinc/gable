@@ -187,6 +187,17 @@ describe('ScalePanel', () => {
     el.remove();
   });
 
+  it('shows the refusal in the panel when the weigh-in reads zero', async () => {
+    svc.weighIn.mockRejectedValue(new Error('the scale reads zero: enter a weight above zero'));
+    const el = await mountPanel();
+    typeInto(q(el, 'scale-vehicle-in') as HTMLInputElement, 'TRUCK-Z');
+    await flush();
+    q(el, 'scale-weigh-in').click();
+    await flush();
+    expect(q(el, 'scale-error').textContent).toContain('enter a weight above zero');
+    el.remove();
+  });
+
   it('weighs out the chosen line and ticket and dispatches the updated sale', async () => {
     const line = productLine('l1', 'Crushed stone');
     const updated = sale([{ ...line, weight_source: 'scale', weight_net_lb: '12400', scale_ticket_number: 'WT-000002' } as Sale['lines'][0]]);

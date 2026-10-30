@@ -86,7 +86,7 @@
           }
         ],
         "margin_percent": "36.3636",
-        "number": "SO-000089",
+        "number": "SO-000082",
         "ordered_by_contact_id": null,
         "quote_id": null,
         "revision": 3,
@@ -193,7 +193,7 @@
           }
         ],
         "margin_percent": "36.3636",
-        "number": "SO-000089",
+        "number": "SO-000082",
         "ordered_by_contact_id": null,
         "quote_id": null,
         "revision": 3,
@@ -303,7 +303,7 @@
           }
         ],
         "margin_percent": "36.3636",
-        "number": "SO-000089",
+        "number": "SO-000082",
         "ordered_by_contact_id": null,
         "quote_id": null,
         "revision": 4,
@@ -513,7 +513,7 @@
             "invoice_date": "<day+0>",
             "is_overdue": false,
             "job_id": null,
-            "number": "IN-000052",
+            "number": "IN-000050",
             "open_cents": 3696,
             "order_id": "<id-1>",
             "origin": "order",
@@ -617,7 +617,7 @@
             "weight_tare_lb": null
           }
         ],
-        "number": "IN-000052",
+        "number": "IN-000050",
         "open_cents": 3696,
         "order_id": "<id-1>",
         "origin": "order",
@@ -1642,7 +1642,7 @@
               "currency": "USD",
               "customer_id": "<id-3>",
               "delivery_id": null,
-              "number": "IN-000052",
+              "number": "IN-000050",
               "order_id": "<id-1>",
               "status": "unpaid",
               "subtotal_cents": 3300,

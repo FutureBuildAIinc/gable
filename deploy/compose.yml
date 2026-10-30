@@ -116,6 +116,8 @@ services:
       # seed says so and exits.
       DEMO_SEED: ${DEMO_SEED-}
       DEMO_SEED_IMPORT: ${DEMO_SEED_IMPORT-}
+      # The demo manager's counter PIN. No default: unset, the manager gets none.
+      DEMO_MANAGER_PIN: ${DEMO_MANAGER_PIN-}
       # The seed's memory: it writes a marker when it finishes and skips on a
       # later run. DEMO_SEED_FORCE=1 asks for a reseed on purpose.
       DEMO_SEED_ONCE: ${DEMO_SEED_ONCE-1}

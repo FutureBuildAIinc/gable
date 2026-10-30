@@ -254,6 +254,28 @@ func demoHistoryRequested() bool {
 	}
 }
 
+// demoPortalCustomer is the account the demo portal user (demo@tarnwick.example)
+// is linked to: the portal's front door lists its invoices.
+const demoPortalCustomer = "Tarnwick Construction"
+
+// seedOrderStatus is the status of a customer's i-th seeded order, drawn from
+// r in [0, 1): 15 percent DRAFT, 10 CONFIRMED, 5 CANCELLED, the rest
+// FULFILLED. The demo portal customer's first order is always FULFILLED, so
+// its invoice exists and the portal never opens on "No invoices yet".
+func seedOrderStatus(custName string, i int, r float32) string {
+	switch {
+	case custName == demoPortalCustomer && i == 0:
+		return "FULFILLED"
+	case r < 0.15:
+		return "DRAFT"
+	case r < 0.25:
+		return "CONFIRMED"
+	case r < 0.30:
+		return "CANCELLED"
+	}
+	return "FULFILLED"
+}
+
 // Run seeds the demo data and returns. Behaviour is unchanged from the old
 // entry point: without DEMO_SEED set it logs and returns without touching
 // any database.
@@ -394,6 +416,13 @@ func Run() {
 		}
 		if id != "" {
 			branchIDs[b.Code] = uuid.MustParse(id)
+		}
+	}
+	for _, b := range branches {
+		if _, ok := branchIDs[b.Code]; ok {
+			if err := seedDemoBankAccount(db, b.Name); err != nil {
+				log.Printf("Bank account for %s: %v", b.Name, err)
+			}
 		}
 	}
 	kelMainID := branchIDs["KEL-MAIN"]
@@ -738,7 +767,7 @@ func Run() {
 		log.Printf("Payment terms NET45: %v", err)
 	}
 
-	for _, c := range customers {
+	for i, c := range customers {
 		profileID, ok := profileIDs[c.Profile]
 		if !ok {
 			log.Printf("Customer %s: no profile for level %q; the default profile answers", c.Name, c.Profile)
@@ -750,6 +779,9 @@ func Run() {
 		}
 		customerIDs[c.Name] = custID
 		custToBranch[custID] = branchID
+		if err := seedDemoCounterAlerts(db, custID, i); err != nil {
+			log.Printf("Counter alerts for %s: %v", c.Name, err)
+		}
 		custToProjects[custID] = []uuid.UUID{}
 
 		// The customer's main ship-to address, the default for its orders and deliveries.
@@ -891,15 +923,7 @@ func Run() {
 			log.Fatalf("Seed: %v", err)
 		}
 		for i := 0; i < numOrders; i++ {
-			status := "FULFILLED"
-			r := rand.Float32()
-			if r < 0.15 {
-				status = "DRAFT"
-			} else if r < 0.25 {
-				status = "CONFIRMED"
-			} else if r < 0.30 {
-				status = "CANCELLED"
-			}
+			status := seedOrderStatus(custName, i, rand.Float32())
 			orderDate := recentDate(180)
 			orderID := uuid.New()
 			spID := custSalesperson[custID]
@@ -976,6 +1000,8 @@ func Run() {
 						FROM order_lines ol WHERE ol.order_id = $2 AND ol.line_type = 'PRODUCT'`, invID, orderID)
 					seeded = append(seeded, seedInvoice{ID: invID, CustomerID: custID, BranchID: branchID, Date: invoiceDay,
 						Subtotal: subCents, Tax: taxCents, Paid: int64(math.Round(float64(subCents+taxCents) * paidShare))})
+				} else {
+					log.Printf("Seed: invoice for order %s of %s: %v", orderID, custName, err)
 				}
 			}
 		}
@@ -1631,6 +1657,56 @@ func seedCustomer(db *sql.DB, c demoCustomer, profile uuid.UUID) (uuid.UUID, uui
 		return uuid.Nil, uuid.Nil, fmt.Errorf("mirror the primary branch: %w", err)
 	}
 	return uuid.MustParse(cid), uuid.MustParse(branch), nil
+}
+
+// demoBankAccountName is the name of a yard's demo bank account, the natural
+// key the seed upserts on (bank_accounts holds no unique column).
+func demoBankAccountName(yardName string) string { return yardName + " Operating" }
+
+// seedDemoBankAccount gives a demo yard one bank account on the GL account
+// the ledger posts cash to (1010), so "Deposit to" lists it on the end of day
+// and a cash day closes on a fresh demo. Reference data: found by its name and
+// repaired, else inserted; an operator's other accounts are never touched.
+func seedDemoBankAccount(db *sql.DB, yardName string) error {
+	name := demoBankAccountName(yardName)
+	res, err := db.Exec(`UPDATE bank_accounts SET gl_account_id = (SELECT id FROM gl_accounts WHERE code = '1010'), is_active = TRUE
+		WHERE name = $1`, name)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n > 0 {
+		return nil
+	}
+	_, err = db.Exec(`INSERT INTO bank_accounts (name, gl_account_id, is_active)
+		SELECT $1, id, TRUE FROM gl_accounts WHERE code = '1010'`, name)
+	return err
+}
+
+// demoCounterAlerts are what the demo leaves on its first two accounts so a
+// prospect sees both kinds at the counter (CP-11): the first account carries
+// a warning the clerk must read before the sale, the second a plain note.
+var demoCounterAlerts = []struct {
+	Kind, Text      string
+	AcknowledgeNeed bool
+}{
+	{"warning", "Account is past due: confirm a payment arrangement with the office before the sale.", true},
+	{"note", "Prefers an early morning pickup. Ask for the foreman at the yard gate.", false},
+}
+
+// seedDemoCounterAlerts writes the alert for the customer at index i of the
+// demo list, when there is one. The seed owns only its own rows (created_by
+// 'demo-seed'): they are replaced each run, an alert an operator added is left.
+func seedDemoCounterAlerts(db *sql.DB, customerID uuid.UUID, i int) error {
+	if i < 0 || i >= len(demoCounterAlerts) {
+		return nil
+	}
+	a := demoCounterAlerts[i]
+	if _, err := db.Exec(`DELETE FROM customer_alerts WHERE customer_id = $1 AND created_by = 'demo-seed'`, customerID); err != nil {
+		return err
+	}
+	_, err := db.Exec(`INSERT INTO customer_alerts (customer_id, kind, text, show_at_counter, show_at_orders, acknowledge_required, created_by)
+		VALUES ($1, $2, $3, TRUE, TRUE, $4, 'demo-seed')`, customerID, a.Kind, a.Text, a.AcknowledgeNeed)
+	return err
 }
 
 // posRegisterUpsertSQL moves the demo register REG-01 onto the location given

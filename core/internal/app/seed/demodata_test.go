@@ -24,7 +24,9 @@ import (
 
 	"github.com/gablelbm/gable/internal/account"
 	"github.com/gablelbm/gable/internal/dashboard"
+	"github.com/gablelbm/gable/internal/staff"
 	"github.com/gablelbm/gable/internal/testutil"
+	"github.com/google/uuid"
 )
 
 // Tests for the demo data import (DEMO_SEED_IMPORT).
@@ -147,6 +149,68 @@ func TestDemoImport(t *testing.T) {
 		t.Fatalf("the import wrote nothing: %+v", first)
 	}
 
+	t.Run("the demo carries a read-first warning and a plain note at the counter", func(t *testing.T) {
+		var warnings, notes int
+		if err := db.QueryRow(`SELECT
+			COUNT(*) FILTER (WHERE kind = 'warning' AND acknowledge_required),
+			COUNT(*) FILTER (WHERE kind = 'note' AND NOT acknowledge_required)
+			FROM customer_alerts WHERE created_by = 'demo-seed' AND show_at_counter AND ended_at IS NULL`).Scan(&warnings, &notes); err != nil {
+			t.Fatal(err)
+		}
+		if warnings != 1 || notes != 1 {
+			t.Errorf("demo alerts: %d acknowledge-required warnings and %d notes, want 1 and 1", warnings, notes)
+		}
+	})
+	t.Run("the demo portal customer holds an invoice", func(t *testing.T) {
+		var invoices int
+		if err := db.QueryRow(`SELECT COUNT(*) FROM invoices i JOIN customers c ON c.id = i.customer_id
+			WHERE c.name = $1`, demoPortalCustomer).Scan(&invoices); err != nil {
+			t.Fatal(err)
+		}
+		if invoices == 0 {
+			t.Errorf("%s holds no invoice: the portal opens on \"No invoices yet\"", demoPortalCustomer)
+		}
+	})
+	t.Run("every demo yard has one active bank account on cash, and a reseed adds none", func(t *testing.T) {
+		count := func() (yards, accounts, onCash int) {
+			if err := db.QueryRow(`SELECT (SELECT COUNT(*) FROM locations WHERE type = 'BRANCH' AND active),
+				COUNT(*), COUNT(*) FILTER (WHERE g.code = '1010' AND b.is_active)
+				FROM bank_accounts b JOIN gl_accounts g ON g.id = b.gl_account_id`).Scan(&yards, &accounts, &onCash); err != nil {
+				t.Fatal(err)
+			}
+			return
+		}
+		yards, accounts, onCash := count()
+		if yards == 0 || accounts != yards || onCash != yards {
+			t.Errorf("%d yards, %d bank accounts, %d active on 1010: want one each", yards, accounts, onCash)
+		}
+		runCommand(t, dbURL, "./cmd/seed")
+		if y2, a2, c2 := count(); y2 != yards || a2 != accounts || c2 != onCash {
+			t.Errorf("a reseed moved the counts to %d, %d, %d from %d, %d, %d", y2, a2, c2, yards, accounts, onCash)
+		}
+	})
+	t.Run("the counter manager can approve with the demo PIN", func(t *testing.T) {
+		// P2 7 of walk B: a fresh demo had no approver. The seed's counter
+		// manager holds an approver role, an active row and a PIN that the
+		// step up verifies, and the picker's own query lists them.
+		var hash, role string
+		if err := db.QueryRow(`SELECT counter_pin_hash, role FROM staff
+			WHERE staff_no = 'STF-046' AND active AND NOT counter_pin_locked`).Scan(&hash, &role); err != nil {
+			t.Fatalf("read the counter manager: %v", err)
+		}
+		if !staff.VerifyCounterPIN(hash, DemoCounterPIN) {
+			t.Errorf("the demo counter PIN does not verify against the seeded hash")
+		}
+		if staff.VerifyCounterPIN(hash, "0000") {
+			t.Errorf("a wrong PIN verifies")
+		}
+		var listed int
+		if err := db.QueryRow(`SELECT COUNT(*) FROM staff
+			WHERE active AND counter_pin_hash IS NOT NULL AND NOT counter_pin_locked
+			  AND LOWER(role) IN ('admin', 'owner') AND staff_no = 'STF-046'`).Scan(&listed); err != nil || listed != 1 {
+			t.Errorf("the override approver list holds the counter manager %d times (%v), want once", listed, err)
+		}
+	})
 	t.Run("no vendor carries the dealer's own name", func(t *testing.T) {
 		// The dealer buying from a vendor of its own name reads as the dealer
 		// buying from itself on every product and purchase order. A vendor that
@@ -932,7 +996,7 @@ func demoSeedInstant(t *testing.T) string {
 // scratch database with the demo seed and its import asked for.
 func runCommand(t *testing.T, dbURL, pkg string) {
 	t.Helper()
-	cmd := exec.Command("go", "run", pkg)
+	cmd := exec.Command("go", "run", "-tags", "devauth", pkg)
 	cmd.Dir = "../../.."
 	cmd.Env = append(os.Environ(),
 		// every seed run of one test reads the same instant, so a boundary
@@ -941,6 +1005,10 @@ func runCommand(t *testing.T, dbURL, pkg string) {
 		"DATABASE_URL="+dbURL,
 		demoSeedEnv+"=1",
 		demoImportEnv+"=1",
+		// the stack is a local dev one (the run is a devauth build), and the environment's manager PIN is
+		// unset, so the fixed local PIN is the one the seed may write
+		"AUTH_MODE=dev",
+		demoManagerPINEnv+"=",
 	)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("go run %s: %v\n%s", pkg, err, out)
@@ -1444,5 +1512,74 @@ func TestLumberVendorRowIsNotTheDealersOwnFeed(t *testing.T) {
 		if strings.Contains(strings.ToLower(string(vendorKeysData)), w) {
 			t.Errorf("vendor_keys.json still says %q", w)
 		}
+	}
+}
+
+// The fixed counter PIN is a local dev fixture: it is written only when the
+// build carries the devauth tag and AUTH_MODE is dev, the same pair the serve
+// start check uses. The environment's value wins in any mode (CP walk B,
+// P2 7; Round 2 item 2).
+func TestDemoCounterPINIsFixedOnlyInDevMode(t *testing.T) {
+	for _, mode := range []string{"", "production", "staging"} {
+		if pin, ok, err := demoCounterPIN("", mode, true); ok || pin != "" || err != nil {
+			t.Errorf("AUTH_MODE %q: got (%q, %v, %v), want the fixed PIN refused", mode, pin, ok, err)
+		}
+	}
+	for _, mode := range []string{"dev", "DEV"} {
+		if pin, ok, err := demoCounterPIN("", mode, true); !ok || pin != DemoCounterPIN || err != nil {
+			t.Errorf("AUTH_MODE %q: got (%q, %v, %v), want the fixed PIN written", mode, pin, ok, err)
+		}
+		// An untagged build never writes it, whatever AUTH_MODE says.
+		if pin, ok, err := demoCounterPIN("", mode, false); ok || pin != "" || err != nil {
+			t.Errorf("AUTH_MODE %q on an untagged build: got (%q, %v, %v), want the fixed PIN refused", mode, pin, ok, err)
+		}
+	}
+	if pin, ok, err := demoCounterPIN("7391", "production", false); !ok || pin != "7391" || err != nil {
+		t.Errorf("an environment PIN outside dev: got (%q, %v, %v), want it used", pin, ok, err)
+	}
+	if pin, _, _ := demoCounterPIN("7391", "dev", true); pin != "7391" {
+		t.Errorf("the environment PIN must win in dev mode, got %q", pin)
+	}
+	if _, ok, err := demoCounterPIN("1234", "dev", true); ok || err == nil {
+		t.Errorf("a plain run PIN from the environment must be refused, got ok=%v err=%v", ok, err)
+	}
+}
+
+// The demo manager without a PIN (an untagged or non dev seed, with
+// DEMO_MANAGER_PIN unset) still gets its home yard grant and is no approver
+// (Round 3, P3-1 of the walk B small read).
+func TestDemoManagerWithoutAPINKeepsItsYardGrant(t *testing.T) {
+	if testing.Short() {
+		t.Skip("seeds a scratch database of its own; skipped under -short")
+	}
+	db, dbURL := demoImportDB(t)
+	runCommand(t, dbURL, "./cmd/migrate")
+	ctx := context.Background()
+	var yardID string
+	if err := db.QueryRow(`INSERT INTO locations (id, code, type, description, path, name, active)
+		VALUES (gen_random_uuid(), 'KEL-MAIN', 'BRANCH', 'Kelowna Main', 'KEL-MAIN', 'Kelowna Main', TRUE)
+		RETURNING id`).Scan(&yardID); err != nil {
+		t.Fatalf("insert the yard: %v", err)
+	}
+	t.Setenv(demoManagerPINEnv, "")
+	t.Setenv("AUTH_MODE", "production")
+	if err := importStaff(ctx, db, map[string]uuid.UUID{"KEL-MAIN": uuid.MustParse(yardID)}); err != nil {
+		t.Fatalf("importStaff: %v", err)
+	}
+	const manager = "counter.manager.kel@brand.example"
+	var pinHash sql.NullString
+	if err := db.QueryRow(`SELECT counter_pin_hash FROM staff WHERE email = $1`, manager).Scan(&pinHash); err != nil {
+		t.Fatalf("read the manager: %v", err)
+	}
+	if pinHash.Valid {
+		t.Errorf("the manager holds a PIN hash with no PIN configured")
+	}
+	var grants int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM user_locations WHERE user_sub = $1 AND branch_id = $2 AND is_home`,
+		manager, yardID).Scan(&grants); err != nil {
+		t.Fatal(err)
+	}
+	if grants != 1 {
+		t.Errorf("the manager without a PIN holds %d home yard grants, want 1", grants)
 	}
 }

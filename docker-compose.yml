@@ -40,6 +40,10 @@ services:
     environment:
       DATABASE_URL: postgres://${POSTGRES_USER:-gable_user}:${POSTGRES_PASSWORD:-gable_password}@postgres:5432/${POSTGRES_DB:-gable_db}?sslmode=disable
       DEMO_SEED: "1"
+      # Local stack only: the seed writes its fixed demo manager PIN only
+      # under AUTH_MODE=dev. DEMO_MANAGER_PIN, if set, wins.
+      AUTH_MODE: dev
+      DEMO_MANAGER_PIN: ${DEMO_MANAGER_PIN-}
       # The larger invented catalogue and its 120 day history: DEMO_SEED_IMPORT=1 make up.
       DEMO_SEED_IMPORT: "${DEMO_SEED_IMPORT:-0}"
       # The import's 120 day history; DEMO_SEED_HISTORY=0 leaves it out.

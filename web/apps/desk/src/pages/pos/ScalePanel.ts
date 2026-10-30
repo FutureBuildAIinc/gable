@@ -154,7 +154,8 @@ export class ScalePanel extends LitElement {
       this._vehicleRef = '';
       await this._loadTickets();
     } catch (err: unknown) {
-      this._emitError(apiErrorMessage(err, 'Failed to weigh in'));
+      this._error = apiErrorMessage(err, 'Failed to weigh in');
+      this._emitError(this._error);
     } finally {
       this._busy = false;
     }

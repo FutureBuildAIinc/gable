@@ -76,18 +76,23 @@ says which one is missing.
 | `APPWRITE_API_KEY` | The Appwrite server key. It goes in the platform's environment from the vault, never into a file. | made in the Appwrite console | yes |
 | `TRUSTED_PROXIES` | The platform's proxy network (and the compose network where `web` fronts `core`), as CIDRs or addresses separated by commas, so each visitor gets their own rate limit budget instead of sharing one budget on the proxy's address. | For example `10.0.0.0/8,172.16.0.0/12` (confirm from the `core` boot log on the first deploy) | no |
 
-The demo adds three more, and none is authentication:
+The demo adds four more, and none is authentication:
 
 | Value | What it is |
 |---|---|
 | `DEMO_SEED` | `1`. The `migrate` service loads the demo data. |
 | `DEMO_SEED_IMPORT` | `1`. The same, with the larger invented catalogue and its history. |
+| `DEMO_MANAGER_PIN` | The demo counter manager's PIN (four to eight digits, no plain run), from the vault. No default and never printed: left empty, the manager has no PIN and "Ask a manager to approve" has no approver. |
 | `DEMO_POS_TERMINAL_SIMULATOR` | `approve`. The `core` service gets `POS_TERMINAL_SIMULATOR=approve`, so the counter takes a card with no machine. No card is charged, and the counter says so in words beside Card ("Simulated card terminal: no card is charged"). |
 
 The demo signs in the way a customer does, through Appwrite. Seed the demo
 people once into the Appwrite project the demo points at, with
-`scripts/appwrite/seed-demo-people.sh --config <file>` and the password in
-`DEMO_PEOPLE_PASSWORD` from the vault.
+`DEMO_PEOPLE_PASSWORD=... scripts/appwrite/seed-demo-people.sh --config <file> --core https://<the demo's address>`,
+the password coming from the vault. That one run, made after the demo's first
+start has loaded the demo data, also links each person to their staff row and
+yard grants through the core's own sign in link and branch grant routes (what
+the staff screen does), so no step is left by hand. Run again it reads what is
+linked and makes no new link.
 
 `AUTH_MODE=dev` and the persona sign in (`VITE_AUTH_DEV_MODE`) are not part of
 this recipe. They belong to the local root compose stack alone, where the core

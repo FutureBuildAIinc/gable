@@ -702,7 +702,7 @@
           }
         ],
         "margin_percent": "36.3636",
-        "number": "SO-000088",
+        "number": "SO-000081",
         "ordered_by_contact_id": null,
         "quote_id": "<id-4>",
         "revision": 1,
@@ -2179,8 +2179,8 @@
         "manual_conversion_rate": 36.666666666666664,
         "rejected_count": 1,
         "sent_count": 10,
-        "total_accepted_value_cents": 13866289,
-        "total_quote_value_cents": 22485453,
+        "total_accepted_value_cents": 9441510,
+        "total_quote_value_cents": 21587029,
         "total_quotes": 30,
         "trend_data": [
           {
@@ -2200,20 +2200,20 @@
             "total_value_cents": 0
           },
           {
-            "accepted": 0,
-            "accepted_value_cents": 0,
-            "created": 0,
+            "accepted": 1,
+            "accepted_value_cents": 1332515,
+            "created": 1,
             "date": "<day-27>",
             "rejected": 0,
-            "total_value_cents": 0
+            "total_value_cents": 1332515
           },
           {
-            "accepted": 0,
-            "accepted_value_cents": 0,
-            "created": 0,
+            "accepted": 1,
+            "accepted_value_cents": 921100,
+            "created": 1,
             "date": "<day-26>",
             "rejected": 0,
-            "total_value_cents": 0
+            "total_value_cents": 921100
           },
           {
             "accepted": 0,
@@ -2242,34 +2242,34 @@
           {
             "accepted": 0,
             "accepted_value_cents": 0,
-            "created": 0,
+            "created": 1,
             "date": "<day-22>",
             "rejected": 0,
-            "total_value_cents": 0
-          },
-          {
-            "accepted": 0,
-            "accepted_value_cents": 0,
-            "created": 0,
-            "date": "<day-21>",
-            "rejected": 0,
-            "total_value_cents": 0
-          },
-          {
-            "accepted": 0,
-            "accepted_value_cents": 0,
-            "created": 0,
-            "date": "<day-20>",
-            "rejected": 0,
-            "total_value_cents": 0
+            "total_value_cents": 1514075
           },
           {
             "accepted": 1,
-            "accepted_value_cents": 1936900,
+            "accepted_value_cents": 1340519,
             "created": 1,
+            "date": "<day-21>",
+            "rejected": 0,
+            "total_value_cents": 1340519
+          },
+          {
+            "accepted": 0,
+            "accepted_value_cents": 0,
+            "created": 1,
+            "date": "<day-20>",
+            "rejected": 0,
+            "total_value_cents": 732140
+          },
+          {
+            "accepted": 0,
+            "accepted_value_cents": 0,
+            "created": 0,
             "date": "<day-19>",
             "rejected": 0,
-            "total_value_cents": 1936900
+            "total_value_cents": 0
           },
           {
             "accepted": 0,
@@ -2282,10 +2282,10 @@
           {
             "accepted": 0,
             "accepted_value_cents": 0,
-            "created": 0,
+            "created": 1,
             "date": "<day-17>",
             "rejected": 0,
-            "total_value_cents": 0
+            "total_value_cents": 1160925
           },
           {
             "accepted": 0,
@@ -2306,10 +2306,10 @@
           {
             "accepted": 0,
             "accepted_value_cents": 0,
-            "created": 0,
+            "created": 1,
             "date": "<day-14>",
             "rejected": 0,
-            "total_value_cents": 0
+            "total_value_cents": 2349236
           },
           {
             "accepted": 0,
@@ -2338,10 +2338,10 @@
           {
             "accepted": 0,
             "accepted_value_cents": 0,
-            "created": 1,
+            "created": 0,
             "date": "<day-10>",
             "rejected": 0,
-            "total_value_cents": 403590
+            "total_value_cents": 0
           },
           {
             "accepted": 0,
@@ -2352,12 +2352,12 @@
             "total_value_cents": 0
           },
           {
-            "accepted": 0,
-            "accepted_value_cents": 0,
-            "created": 0,
+            "accepted": 1,
+            "accepted_value_cents": 736880,
+            "created": 1,
             "date": "<day-8>",
             "rejected": 0,
-            "total_value_cents": 0
+            "total_value_cents": 736880
           },
           {
             "accepted": 0,
@@ -2370,26 +2370,26 @@
           {
             "accepted": 0,
             "accepted_value_cents": 0,
-            "created": 1,
+            "created": 0,
             "date": "<day-6>",
             "rejected": 0,
-            "total_value_cents": 147515
-          },
-          {
-            "accepted": 0,
-            "accepted_value_cents": 0,
-            "created": 1,
-            "date": "<day-5>",
-            "rejected": 0,
-            "total_value_cents": 913880
+            "total_value_cents": 0
           },
           {
             "accepted": 0,
             "accepted_value_cents": 0,
             "created": 0,
-            "date": "<day-4>",
+            "date": "<day-5>",
             "rejected": 0,
             "total_value_cents": 0
+          },
+          {
+            "accepted": 0,
+            "accepted_value_cents": 0,
+            "created": 1,
+            "date": "<day-4>",
+            "rejected": 0,
+            "total_value_cents": 590015
           },
           {
             "accepted": 0,
@@ -2416,12 +2416,12 @@
             "total_value_cents": 0
           },
           {
-            "accepted": 4,
-            "accepted_value_cents": 1588319,
-            "created": 11,
+            "accepted": 3,
+            "accepted_value_cents": 16500,
+            "created": 10,
             "date": "<day+0>",
             "rejected": 1,
-            "total_value_cents": 1735519
+            "total_value_cents": 163700
           }
         ]
       }

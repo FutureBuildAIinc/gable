@@ -40,3 +40,4 @@
 {"email":"yard.swamper.lk.1@brand.example","full_name":"Rex Pemberton","staff_no":"STF-043","role":"yard_swamper","home_yard":"LK","active":true}
 {"email":"it.support@brand.example","full_name":"Quinn Aldridge","staff_no":"STF-044","role":"it_support","home_yard":"KEL-MAIN","active":true}
 {"email":"hr.coordinator@brand.example","full_name":"Bree Standish","staff_no":"STF-045","role":"hr_coordinator","home_yard":"KEL-MAIN","active":true}
+{"email":"counter.manager.kel@brand.example","full_name":"Rowan Ashcroft","staff_no":"STF-046","role":"admin","home_yard":"KEL-MAIN","active":true,"counter_pin_demo":true}

@@ -43,6 +43,33 @@
           "is_active": true,
           "name": "Golden Bank",
           "routing_number": "012345678"
+        },
+        {
+          "account_number": "",
+          "created_at": "<ts+0d>",
+          "gl_account_id": "<id-1>",
+          "id": "<id-3>",
+          "is_active": true,
+          "name": "Kelowna Main Yard Operating",
+          "routing_number": ""
+        },
+        {
+          "account_number": "",
+          "created_at": "<ts+0d>",
+          "gl_account_id": "<id-1>",
+          "id": "<id-4>",
+          "is_active": true,
+          "name": "Lake Country Outpost Operating",
+          "routing_number": ""
+        },
+        {
+          "account_number": "",
+          "created_at": "<ts+0d>",
+          "gl_account_id": "<id-1>",
+          "id": "<id-5>",
+          "is_active": true,
+          "name": "West Kelowna Satellite Operating",
+          "routing_number": ""
         }
       ]
     }
