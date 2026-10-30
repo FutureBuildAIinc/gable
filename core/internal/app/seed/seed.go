@@ -1000,6 +1000,8 @@ func Run() {
 						FROM order_lines ol WHERE ol.order_id = $2 AND ol.line_type = 'PRODUCT'`, invID, orderID)
 					seeded = append(seeded, seedInvoice{ID: invID, CustomerID: custID, BranchID: branchID, Date: invoiceDay,
 						Subtotal: subCents, Tax: taxCents, Paid: int64(math.Round(float64(subCents+taxCents) * paidShare))})
+				} else {
+					log.Printf("Seed: invoice for order %s of %s: %v", orderID, custName, err)
 				}
 			}
 		}
