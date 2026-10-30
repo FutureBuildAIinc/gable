@@ -6,7 +6,8 @@ package pos_test
 // Migration 146 (CP-13 slice O1, ADR 0011): pos_offline_policy,
 // pos_register_devices, pos_offline_snapshots, pos_offline_exceptions with its
 // partial unique indexes on sale_id and (register_id, device_epoch, device_seq)
-// excluding sequence_reused, bad_signature and replay_mismatch, and the
+// excluding sequence_reused, bad_signature, replay_mismatch, sequence_gap and
+// unknown_tail, and the
 // warning_alert_id column that holds the sold offline past an open warning
 // exception (CP-13 OW rides this table); the offline columns and unique index
 // on pos_transactions; ABANDONED in the sale status CHECK and wire enum;
@@ -201,6 +202,37 @@ func TestMigration146_OfflineCounterSchemaAndConstraints(t *testing.T) {
 			excSale1, branchID, snapID, excludedReason); err != nil {
 			t.Errorf("partial unique index refused %s on existing sale_id and sequence: %v", excludedReason, err)
 		}
+	}
+
+	// 4a. Gap and unknown tail items (ADR 0011 3.4, 8): a sequence_gap item
+	//     placed at the number it names does not collide with the
+	//     late_after_gap row of that number, and two gap items or two tail
+	//     items of one epoch do not collide with each other.
+	for i, gapReason := range []string{"sequence_gap", "unknown_tail"} {
+		for j := 0; j < 2; j++ {
+			if _, err := c.Exec(ctx, `
+				INSERT INTO pos_offline_exceptions (
+					sale_id, register_id, branch_id, device_epoch, device_seq,
+					gap_from_seq, gap_to_seq, business_date, reason_code
+				) VALUES (gen_random_uuid(), 'REG-01', $1::uuid, 2, 1, 1, 4, CURRENT_DATE, $2)`,
+				branchID, gapReason); err != nil {
+				t.Errorf("%s item %d (batch %d) at an used number was refused: %v", gapReason, j, i, err)
+			}
+		}
+	}
+	if _, err := c.Exec(ctx, `
+		INSERT INTO pos_offline_exceptions (
+			sale_id, register_id, branch_id, device_epoch, device_seq, business_date, reason_code
+		) VALUES ($1::uuid, 'REG-01', $2::uuid, 2, 9, CURRENT_DATE, 'late_after_gap')`,
+		"00000000-0000-0000-0000-00000000e109", branchID); err != nil {
+		t.Errorf("late_after_gap row refused: %v", err)
+	}
+	if _, err := c.Exec(ctx, `
+		INSERT INTO pos_offline_exceptions (
+			sale_id, register_id, branch_id, device_epoch, device_seq, gap_from_seq, gap_to_seq, business_date, reason_code
+		) VALUES (gen_random_uuid(), 'REG-01', $1::uuid, 2, 9, 9, 9, CURRENT_DATE, 'sequence_gap')`,
+		branchID); err != nil {
+		t.Errorf("sequence_gap item at the number of a late_after_gap row was refused: %v", err)
 	}
 
 	// 4b. The CP-13 OW exception rides this table: a sale sold offline past an
