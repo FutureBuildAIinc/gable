@@ -2432,6 +2432,12 @@ describe('PR 150 fix round 1: quantity edits, controls and the blind count', () 
     (byLabel(el, 'Increase quantity of Item a') as HTMLButtonElement).click();
     await el.updateComplete;
     expect((q(el, 'pos-pay') as HTMLButtonElement).disabled).toBe(true);
+    for (const id of ['tender-cash', 'tender-check', 'tender-card']) {
+      const button = el.querySelector(`[data-testid="${id}"]`) as HTMLButtonElement | null;
+      if (button) expect(button.disabled, id).toBe(true);
+    }
+    expect((q(el, 'tender-cash') as HTMLButtonElement).disabled).toBe(true);
+    expect((q(el, 'pos-add-tender') as HTMLButtonElement).disabled).toBe(true);
     (document.activeElement as HTMLElement | null)?.blur();
     await key(el, 'F12');
     await key(el, 'F6');

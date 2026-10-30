@@ -95,10 +95,13 @@ async function ringQuantity(page: Page, sku: string, qty: number) {
   await page.getByTestId('catalog-search').fill(sku);
   await page.getByTestId('catalog-search').press('Enter');
   await expect(lines).toHaveCount(1, { timeout: 10000 });
+  // the one unit's total, read before the quantity is raised: the wait below
+  // holds the spec until the raised quantity has reached the summary
+  const oneUnit = (await page.getByTestId('summary-total').textContent()) ?? '';
   const quantity = lines.nth(0).getByRole('textbox', { name: /Quantity of/i });
   await quantity.fill(String(qty));
   await quantity.press('Enter');
-  await expect(page.getByTestId('summary-total')).not.toContainText('$0', { timeout: 10000 });
+  await expect(page.getByTestId('summary-total')).not.toContainText(oneUnit, { timeout: 10000 });
 }
 
 /** Adds a cash tender for the whole total through the Payment panel. */
@@ -173,8 +176,9 @@ test('a United States cash sale over the threshold lands on the worklist with it
   await page.getByTestId('payer-date_of_birth').fill('1984-05-06');
   await page.getByTestId('payer-occupation').fill('Contractor');
   await pickOptionByValue(page.getByTestId('payer-id_type'), 'drivers_license');
-  await page.getByTestId('payer-id_number').fill('DL-00-1234567');
-  await page.getByTestId('payer-taxpayer_id').fill('00-1234567');
+  const taxpayer = `00-${Date.now().toString().slice(-7)}`; // this run's own payer, so the year's statement is not already issued by an earlier run
+  await page.getByTestId('payer-id_number').fill(`DL-${taxpayer}`);
+  await page.getByTestId('payer-taxpayer_id').fill(taxpayer);
   await page.getByTestId('payer-save').click();
   await expect(page.getByRole('heading', { name: /sale complete/i })).toBeVisible({ timeout: 20000 });
 
