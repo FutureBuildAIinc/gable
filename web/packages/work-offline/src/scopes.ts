@@ -8,6 +8,20 @@
  * configuration, so no manifest edit can open it.
  */
 
+/**
+ * The one exception (ADR 0011): the counter's offline sales, on an enrolled
+ * work shell register at a branch whose dealer opted in. They never pass
+ * through this fence or any web queue: the work shell's Rust core prices,
+ * signs and keeps them in its sealed store under the branch's caps, and the
+ * server's sync posts each once or hands it to a manager. pos_transactions
+ * stays a money scope here, so nothing in a page ever queues a sale.
+ */
+export const COUNTER_OFFLINE_QUEUE = {
+  scope: 'pos_transactions',
+  where: 'the work shell\'s Rust core (tauri/core offline), never a web queue',
+  rule: 'ADR 0011',
+} as const
+
 /** The scopes whose writes resolve online, always. */
 export const MONEY_SCOPES: readonly string[] = [
   'aging',

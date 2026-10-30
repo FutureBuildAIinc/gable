@@ -382,9 +382,10 @@ func TestNoHeader_Returns(t *testing.T) {
 	}
 }
 
-// TestNoHeader_Sync is the offline sync family: the replay is refused by
-// rule (money never queues) once past the walls, a batch naming B's register
-// and one naming A's alike, before any item runs and before the log row.
+// TestNoHeader_Sync is the offline sync family: a batch naming B's register
+// is refused by the register's wall (ADR 0011 6.3), and one naming A's is
+// refused by rule (money never queues where the branch has no offline
+// policy), each before any item runs and before the log row.
 func TestNoHeader_Sync(t *testing.T) {
 	f := newKeyPinFixture(t)
 	ctx := context.Background()
@@ -400,15 +401,15 @@ func TestNoHeader_Sync(t *testing.T) {
 	})
 	body := func(register string, client uuid.UUID) string {
 		return `{"batch_id":"` + batch + `","register_id":"` + register +
-			`","items":[{"client_id":"` + client.String() +
+			`","device_epoch":1,"reported_seq":0,"items":[{"client_id":"` + client.String() +
 			`","cashier_id":"` + uuid.NewString() + `","items":[{"product_id":"` + f.posProd.String() +
 			`","quantity":"1"}],"tenders":[{"method":"cash","amount_cents":100000}],"client_created_at":"` +
 			time.Now().UTC().Format(time.RFC3339) + `"}]}`
 	}
 
 	status, buf := f.cashierNoHeader(t, "POST", "/api/v1/pos/sync", body(f.regB, clientB))
-	if status != http.StatusConflict || !strings.Contains(string(buf), "money_never_queues") {
-		t.Errorf("no header sync on B's register: %d %s, want the rule's 409", status, buf)
+	if status != http.StatusForbidden || !strings.Contains(string(buf), "belongs to a different branch") {
+		t.Errorf("no header sync on B's register: %d %s, want the register wall's 403", status, buf)
 	}
 	if n := noheaderCount(t, f, `SELECT COUNT(*) FROM pos_sync_log WHERE batch_id = $1`, batch); n != 0 {
 		t.Errorf("the refused sync wrote %d log rows, want none", n)
@@ -417,8 +418,8 @@ func TestNoHeader_Sync(t *testing.T) {
 		t.Errorf("the refused sync wrote %d transactions, want none", n)
 	}
 
-	// The control: a batch on A's register is refused by the same rule,
-	// nothing written.
+	// The control: a batch on A's register passes the wall and is refused by
+	// rule, nothing written.
 	status, buf = f.cashierNoHeader(t, "POST", "/api/v1/pos/sync", body(f.regA, clientA))
 	if status != http.StatusConflict || !strings.Contains(string(buf), "money_never_queues") {
 		t.Errorf("no header sync on A's register: %d %s, want the rule's 409", status, buf)

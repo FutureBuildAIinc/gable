@@ -34,6 +34,9 @@ const (
 	OfflineDuplicate = "duplicate"
 	OfflineRefused   = "refused"
 	OfflineHeld      = "held"
+	// OfflineResolved: a manager resolved the item's exception with nothing
+	// posted (a write off); the device settles it
+	OfflineResolved = "resolved"
 	// offlineFault: the server could not judge the item; retried next sync
 	offlineFault = "error"
 )
@@ -93,6 +96,9 @@ type OfflineSyncResult struct {
 	DeviceEpoch  int64                `json:"device_epoch"`
 	ConfirmedSeq int64                `json:"confirmed_seq"`
 	Items        []OfflineItemOutcome `json:"items"`
+	// OpenExceptionCount is the register's exception rows that wait on a
+	// manager with nothing posted, the counter's "needs a manager" count.
+	OpenExceptionCount int64 `json:"open_exception_count"`
 }
 
 // offlineVerdict is what the snapshot verification hands the completion's
@@ -261,6 +267,11 @@ func (s *Service) SyncOffline(ctx context.Context, batch *OfflineBatch, actor st
 	if err := s.repo.LogSyncBatch(ctx, log); err != nil {
 		return nil, err
 	}
+	open, err := s.repo.OpenOfflineExceptionCount(ctx, batch.RegisterID)
+	if err != nil {
+		return nil, err
+	}
+	res.OpenExceptionCount = open
 	return res, nil
 }
 

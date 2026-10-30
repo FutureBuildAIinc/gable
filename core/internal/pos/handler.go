@@ -151,6 +151,9 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux, roleGuard ...func(http.Hand
 	mux.HandleFunc("POST /api/v1/pos/transactions/{id}/void", guard(h.VoidTransaction))
 	mux.HandleFunc("POST /api/v1/pos/transactions/{id}/overrides", guard(h.ApproveOverrideHandler))
 	mux.HandleFunc("POST /api/v1/pos/transactions/{id}/signature", guard(h.CaptureSignatureHandler))
+	// The clerk's answer for an offline sale that replaced a result unknown
+	// cart (CP-13 C2, ADR 0011 5.3).
+	mux.HandleFunc("POST /api/v1/pos/transactions/{id}/replaced-cart-answer", guard(h.AnswerReplacedCartHandler))
 
 	// History and search
 	mux.HandleFunc("GET /api/v1/pos/products/search", guard(h.SearchProducts))
@@ -759,23 +762,32 @@ func (h *Handler) AttachCustomer(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, sale)
 }
 
-// SyncOffline is POST /pos/sync: refused by rule. Money never queues
-// offline, so a batch that parses answers 409 money_never_queues and the
-// service never runs: no sale, invoice, payment or sync log row of it is
-// written. The malformed shapes keep their 400 and the branch and customer
-// wall middlewares ahead of this handler keep their refusals.
+// SyncOffline is POST /pos/sync: the register's shell sends its signed
+// offline sales (ADR 0011 section 3). The sync is a person's act, never a
+// machine key (6.3); a branch whose dealer has not opted in keeps 409
+// money_never_queues before anything of the batch is written (section 4).
+// The answer is every item's outcome, the mark the server confirms to the
+// device and the register's open exception count for the counter.
 func (h *Handler) SyncOffline(w http.ResponseWriter, r *http.Request) {
+	if refuseMachineKey(w, r, "the offline sync is a person's act at the register, never a machine key") {
+		return
+	}
 	var req offlineSyncRequest
 	if err := httpx.DecodeJSON(r, &req); err != nil {
 		httpx.WriteError(w, r, err)
 		return
 	}
-	if _, err := req.parse(); err != nil {
+	batch, err := req.parse()
+	if err != nil {
 		httpx.WriteError(w, r, err)
 		return
 	}
-	httpx.WriteError(w, r, &httpx.Error{Status: http.StatusConflict, Code: httpx.CodeMoneyNeverQueues,
-		Message: "money never queues offline: complete the sale online"})
+	res, err := h.service.SyncOffline(r.Context(), batch, h.actorFrom(r))
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, res)
 }
 
 // GetCatalog is GET /pos/catalog: the offline cache (a bare array, never

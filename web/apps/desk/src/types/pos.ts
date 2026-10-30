@@ -6,7 +6,8 @@
 // scale 4, quantities decimal strings, and human readable POS- and RTN-
 // numbers. Money stays integers until the display helper.
 
-export type SaleStatus = 'open' | 'held' | 'completed' | 'voided';
+/** abandoned: an open cart an offline sale replaced (ADR 0011 3.2). */
+export type SaleStatus = 'open' | 'held' | 'completed' | 'voided' | 'abandoned';
 export type TenderMethod = 'cash' | 'check' | 'card' | 'account' | 'store_credit';
 /** The methods an exchange's difference can be tendered by (CP-17a). */
 export type ExchangeTenderMethod = 'cash' | 'check' | 'card';

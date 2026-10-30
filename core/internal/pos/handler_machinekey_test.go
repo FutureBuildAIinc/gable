@@ -108,12 +108,12 @@ func TestMachineKeyNeverGetsFabricatedCashier(t *testing.T) {
 		`{"reason":"keyed","revision":`+jsonNumberOf(revision)+`}`); code == http.StatusForbidden {
 		t.Errorf("void with a machine key: 403, want reachable")
 	}
-	// the offline sync: reachable for a key, and refused by rule (money never
-	// queues), with nothing of the batch written
+	// the offline sync is a person's act (ADR 0011 6.3): a key is refused,
+	// with nothing of the batch written
 	clientID := uuid.NewString()
 	if code := keyedDo("POST", "/api/v1/pos/sync",
-		`{"batch_id":"key-sync","register_id":"`+f.register+`","items":[{"client_id":"`+clientID+`","cashier_id":"`+uuid.NewString()+`","items":[{"product_id":"`+f.productID.String()+`","quantity":"1"}],"tenders":[{"method":"cash","amount_cents":599}]}]}`); code != http.StatusConflict {
-		t.Errorf("sync with a machine key: %d, want the rule's 409", code)
+		`{"batch_id":"key-sync","register_id":"`+f.register+`","device_epoch":1,"reported_seq":0,"items":[{"client_id":"`+clientID+`"}]}`); code != http.StatusForbidden {
+		t.Errorf("sync with a machine key: %d, want 403", code)
 	}
 	if n := countOf(t, f.db, `SELECT count(*) FROM pos_transactions WHERE id = $1`, clientID); n != 0 {
 		t.Errorf("the refused sync wrote %d transactions, want 0", n)

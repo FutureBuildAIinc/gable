@@ -38,9 +38,10 @@ const (
 	// CodePaymentRequired is the 402 of a card charge that was declined or that
 	// the gateway could not take, before anything was recorded.
 	CodePaymentRequired = "payment_required"
-	// CodeMoneyNeverQueues is the 409 of the offline sale replay: money never
-	// queues offline, so every batch that parses is refused before any part of
-	// it is written.
+	// CodeMoneyNeverQueues is the 409 of the offline sync at a branch whose
+	// dealer has not opted in to offline selling (ADR 0011 section 4): money
+	// never queues there, so every batch that parses is refused before any
+	// part of it is written.
 	CodeMoneyNeverQueues = "money_never_queues"
 	// CodeChargeNotReversed is the 502 of a card charge the gateway approved,
 	// the system refused, and nothing gave back (ADR 0005 9.4).
