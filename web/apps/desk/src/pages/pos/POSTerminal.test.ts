@@ -35,6 +35,13 @@ vi.mock('../../services/POSService', async (orig) => {
   return { ...real, posService: svc };
 });
 
+const deliveries = vi.hoisted(() => ({
+  listForDocument: vi.fn().mockResolvedValue([]),
+  follow: vi.fn().mockResolvedValue({ id: 'd-1', status: 'sent', recipient: 'billing@example.test' }),
+}));
+
+vi.mock('../../services/EmailDeliveryService', () => ({ EmailDeliveryService: deliveries }));
+
 import './POSTerminal';
 import type { POSTerminal } from './POSTerminal';
 import { branchContext } from '../../services/BranchContext';
@@ -1097,12 +1104,15 @@ describe('the Panels board', () => {
     });
 
     it('sends the invoice for Email and says so, or says why not', async () => {
-      svc.emailReceipt.mockResolvedValueOnce(undefined).mockRejectedValueOnce(new Error('This account has no email address on file'));
+      svc.emailReceipt
+        .mockResolvedValueOnce({ status: 'queued', delivery_id: 'd-1' })
+        .mockRejectedValueOnce(new Error('This account has no email address on file'));
       const el = await mount(done({ id: 'sale-9', invoice_id: 'inv-1', customer_id: 'cu1' }));
       q(el, 'pos-receipt-email').click();
       await flush(el);
       expect(svc.emailReceipt).toHaveBeenCalledWith('sale-9');
-      expect(q(el, 'pos-receipt-note').textContent).toContain('sent');
+      expect(deliveries.follow).toHaveBeenCalledWith('d-1', 'inv-1');
+      expect(q(el, 'pos-receipt-note').textContent).toContain('Receipt sent to billing@example.test');
       q(el, 'pos-receipt-email').click();
       await flush(el);
       // the words sit beside Email receipt, not in the page band
