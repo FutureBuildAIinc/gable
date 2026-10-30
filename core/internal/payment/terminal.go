@@ -74,6 +74,20 @@ import (
 	"github.com/google/uuid"
 )
 
+// TerminalAnswerLease is how long a card leg's answer may take at the device
+// before the sweep may turn the intent lost. It exceeds the counter's wait
+// for the answer, so a waited out act leaves the intent inside its lease and
+// only the sweep (past the lease) decides it is lost.
+//
+// The number lives here, beside the seam, because every driver's own window
+// has to fit inside it: a poller that keeps working longer than the lease is
+// closed by the sweep while the device is still answering, and the leg is
+// filed as a manager item for an answer that is about to land. The counter
+// writes this lease onto the leg it claims (core/internal/pos/terminal.go)
+// and the Run driver bounds its poller by it
+// (core/internal/payment/terminal_run.go).
+const TerminalAnswerLease = 90 * time.Second
+
 // TerminalIntentState is one state of a card terminal intent. Every move is
 // one guarded statement; zero rows moved answers a conflict.
 type TerminalIntentState string

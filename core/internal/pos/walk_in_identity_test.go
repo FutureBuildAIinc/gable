@@ -142,7 +142,7 @@ func TestCP17_WalkInFloorAsksAndAggregates(t *testing.T) {
 		t.Fatalf("the third sale with the payer = %d: %s", r.status, r.raw)
 	}
 
-	events := countOf(t, f.db, `SELECT count(*) FROM large_cash_events`)
+	events := countOf(t, f.db, `SELECT count(*) FROM large_cash_events WHERE branch_id = $1`, f.branchID)
 	if events != 1 {
 		t.Fatalf("events = %d, want exactly the crossing of the second sale", events)
 	}
@@ -150,7 +150,7 @@ func TestCP17_WalkInFloorAsksAndAggregates(t *testing.T) {
 	var state, rule, key string
 	var ids []uuid.UUID
 	if err := f.db.Pool.QueryRow(ctxBG(),
-		`SELECT total_cents, state, rule_family, payer_key, transaction_ids FROM large_cash_events`).
+		`SELECT total_cents, state, rule_family, payer_key, transaction_ids FROM large_cash_events WHERE branch_id = $1`, f.branchID).
 		Scan(&total, &state, &rule, &key, &ids); err != nil {
 		t.Fatal(err)
 	}
@@ -208,10 +208,10 @@ func TestCP17_WalkInFloorOffAggregatesNothing(t *testing.T) {
 			t.Fatalf("the walk-in sale %d with the floor off = %d: %s", i+1, r.status, r.raw)
 		}
 	}
-	if n := countOf(t, f.db, `SELECT count(*) FROM large_cash_events`); n != 0 {
+	if n := countOf(t, f.db, `SELECT count(*) FROM large_cash_events WHERE branch_id = $1`, f.branchID); n != 0 {
 		t.Errorf("events = %d, want none with the floor off", n)
 	}
-	if n := countOf(t, f.db, `SELECT count(DISTINCT payer_key) FROM large_cash_tenders`); n != 3 {
+	if n := countOf(t, f.db, `SELECT count(DISTINCT payer_key) FROM large_cash_tenders WHERE branch_id = $1`, f.branchID); n != 3 {
 		t.Errorf("the counted tenders carry %d payers, want each walk-in on their own", n)
 	}
 }
@@ -238,7 +238,7 @@ func TestCP17_WalkInFloorRefusesWithoutAnAnswer(t *testing.T) {
 	if f.getSale(t, sale)["status"] != "open" {
 		t.Errorf("the refused completion left the sale %v, want open with nothing booked", f.getSale(t, sale)["status"])
 	}
-	if n := countOf(t, f.db, `SELECT count(*) FROM large_cash_tenders`); n != 0 {
+	if n := countOf(t, f.db, `SELECT count(*) FROM large_cash_tenders WHERE branch_id = $1`, f.branchID); n != 0 {
 		t.Errorf("the refused completion wrote %d counted tenders, want none", n)
 	}
 }
@@ -271,7 +271,7 @@ func TestCP17_WalkInIdentityDeclinedIsRecorded(t *testing.T) {
 	if amount != total {
 		t.Errorf("the worklist row's amount = %d, want the sale's %d", amount, total)
 	}
-	if n := countOf(t, f.db, `SELECT count(*) FROM large_cash_payers`); n != 0 {
+	if n := countOf(t, f.db, `SELECT count(*) FROM large_cash_payers WHERE branch_id = $1`, f.branchID); n != 0 {
 		t.Errorf("payer rows = %d, want none for a declined identity", n)
 	}
 }

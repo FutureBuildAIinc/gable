@@ -25,6 +25,7 @@ func TestNoHandlerReadsTheRoleClaimAlone(t *testing.T) {
 		"internal/payment/service.go":              "c is a Caller built from RoleOf",
 		"internal/order/handler.go":                "callerRole reads the set; audit role from ClaimsPrimaryRole",
 		"internal/portal/handler.go":               "the portal's own claims type",
+		"internal/app/serve/wire_branch_wall.go":   "reads Role and Roles together",
 		"internal/portal/handlers_core.go":         "the portal's own claims type",
 		"internal/portal/handlers_phase2.go":       "the portal's own claims type",
 		"internal/customerquote/handler.go":        "the portal's own claims type",

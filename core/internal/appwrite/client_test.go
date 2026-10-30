@@ -8,7 +8,6 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 )
 
@@ -173,9 +172,29 @@ func TestClientListMembershipsFiltersByUser(t *testing.T) {
 	if err != nil || !found || m.ID != "m9" {
 		t.Fatalf("m=%+v found=%v err=%v", m, found, err)
 	}
-	joined := strings.Join(queries, "|")
-	if !strings.Contains(joined, `equal("userId"`) || !strings.Contains(joined, "u9") {
-		t.Fatalf("request did not filter by user id: %q", joined)
+	if len(queries) != 2 {
+		t.Fatalf("queries = %q, want two", queries)
+	}
+	var byUser struct {
+		Method    string   `json:"method"`
+		Attribute string   `json:"attribute"`
+		Values    []string `json:"values"`
+	}
+	if err := json.Unmarshal([]byte(queries[0]), &byUser); err != nil {
+		t.Fatalf("first query is not JSON: %q: %v", queries[0], err)
+	}
+	if byUser.Method != "equal" || byUser.Attribute != "userId" || len(byUser.Values) != 1 || byUser.Values[0] != "u9" {
+		t.Fatalf("request did not filter by user id: %+v", byUser)
+	}
+	var page struct {
+		Method string `json:"method"`
+		Values []int  `json:"values"`
+	}
+	if err := json.Unmarshal([]byte(queries[1]), &page); err != nil {
+		t.Fatalf("second query is not JSON: %q: %v", queries[1], err)
+	}
+	if page.Method != "limit" || len(page.Values) != 1 || page.Values[0] != 25 {
+		t.Fatalf("request did not set the page size: %+v", page)
 	}
 }
 

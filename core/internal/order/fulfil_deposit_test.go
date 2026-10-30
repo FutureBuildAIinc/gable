@@ -30,10 +30,7 @@ func (f *fixture) deposit(orderID string, cents int64) uuid.UUID {
 	f.t.Helper()
 	ctx := context.Background()
 	oid := uuid.MustParse(orderID)
-	var branch uuid.UUID
-	if err := f.db.Pool.QueryRow(ctx, `SELECT value::uuid FROM system_settings WHERE key = 'default_branch_id'`).Scan(&branch); err != nil {
-		f.t.Fatal(err)
-	}
+	branch := f.branchID
 	acct := account.NewService(f.db, gl.NewService(gl.NewRepository(f.db), nil, slog.Default()), slog.Default())
 	var id uuid.UUID
 	err := f.db.RunInTx(ctx, func(ctx context.Context) error {

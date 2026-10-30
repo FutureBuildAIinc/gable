@@ -85,15 +85,16 @@ func ParsePriceSource(name string) (PriceSource, bool) {
 type TaxSource string
 
 const (
-	TaxSourceExempt     TaxSource = "EXEMPT"
-	TaxSourceProvider   TaxSource = "PROVIDER"
-	TaxSourceZoneRate   TaxSource = "ZONE_RATE"
-	TaxSourceShipToRate TaxSource = "SHIP_TO_RATE"
-	TaxSourceBranchRate TaxSource = "BRANCH_RATE"
-	TaxSourceLegacy     TaxSource = "LEGACY"
+	TaxSourceExempt      TaxSource = "EXEMPT"
+	TaxSourceProvider    TaxSource = "PROVIDER"
+	TaxSourceZoneRate    TaxSource = "ZONE_RATE"
+	TaxSourceShipToRate  TaxSource = "SHIP_TO_RATE"
+	TaxSourceBranchRate  TaxSource = "BRANCH_RATE"
+	TaxSourceOfflineRate TaxSource = "OFFLINE_RATE"
+	TaxSourceLegacy      TaxSource = "LEGACY"
 )
 
-var taxSourceNames = []string{"exempt", "provider", "zone_rate", "ship_to_rate", "branch_rate", "legacy"}
+var taxSourceNames = []string{"exempt", "provider", "zone_rate", "ship_to_rate", "branch_rate", "offline_rate", "legacy"}
 
 // MarshalText writes the lowercase wire name.
 func (s TaxSource) MarshalText() ([]byte, error) { return []byte(strings.ToLower(string(s))), nil }

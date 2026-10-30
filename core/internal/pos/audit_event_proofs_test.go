@@ -161,7 +161,7 @@ func TestFailingEventWriteRollsTheTillCloseBack(t *testing.T) {
 	if got := countOf(t, f.db, `SELECT count(*) FROM till_sessions WHERE id = $1 AND status = 'OPEN'`, sessionID); got != 1 {
 		t.Errorf("the session closed under a failing event write")
 	}
-	if got := countOf(t, f.db, `SELECT count(*) FROM till_z_reports`); got != 0 {
+	if got := countOf(t, f.db, `SELECT count(*) FROM till_z_reports WHERE register_id = $1`, f.register); got != 0 {
 		t.Errorf("%d Z reports after the refused close, want 0", got)
 	}
 	if got := f.accountBalance("5030"); got != 0 {

@@ -26,6 +26,7 @@ import (
 	"github.com/gablelbm/gable/internal/testutil"
 	"github.com/gablelbm/gable/pkg/actor"
 	"github.com/gablelbm/gable/pkg/audit"
+	"github.com/gablelbm/gable/pkg/branchctx"
 	"github.com/gablelbm/gable/pkg/database"
 	"github.com/gablelbm/gable/pkg/middleware"
 	"github.com/gablelbm/gable/pkg/outbox"
@@ -42,6 +43,9 @@ type kindFixture struct {
 	customerID uuid.UUID
 	productID  uuid.UUID
 	sku        string
+	// branchID is the branch the fixture owns: a locations row of its own
+	// carrying its own tax rate, which the draft payload names.
+	branchID uuid.UUID
 }
 
 func newKindFixture(t *testing.T, db *database.DB) *kindFixture {
@@ -49,25 +53,18 @@ func newKindFixture(t *testing.T, db *database.DB) *kindFixture {
 	t.Setenv("AUTH_MODE", "dev")
 	ctx := context.Background()
 	f := &kindFixture{t: t, db: db, customerID: uuid.New(), productID: uuid.New(), sku: "KIND-" + uuid.NewString()[:8]}
-	branch := `(SELECT value::uuid FROM system_settings WHERE key = 'default_branch_id')`
+	// The branch the fixture owns: a locations row of its own carrying the
+	// rate the order needs. The draft payload names it, so the draft and the
+	// order it promotes to stand on a branch no other package's fixture
+	// writes and no other package's fixture can move.
+	f.branchID = testutil.OwnBranch(t, db, "0.088750")
 	if _, err := db.Pool.Exec(ctx, `INSERT INTO customers (id, name, account_number, primary_branch_id)
-		VALUES ($1, 'Order Kind Co', $2, `+branch+`)`, f.customerID, "OKIND-"+uuid.NewString()[:8]); err != nil {
+		VALUES ($1, 'Order Kind Co', $2, $3)`, f.customerID, "OKIND-"+uuid.NewString()[:8], f.branchID); err != nil {
 		t.Fatalf("seed customer: %v", err)
 	}
 	if _, err := db.Pool.Exec(ctx, `INSERT INTO products (id, sku, description, uom_primary, base_price)
 		VALUES ($1, $2, '2x4x8 SPF', 'PCS', 5.5)`, f.productID, f.sku); err != nil {
 		t.Fatalf("seed product: %v", err)
-	}
-	// The default branch's rate is shared state: read the prior value and
-	// restore it in cleanup, so this fixture's write does not leak a rate
-	// onto a neighbouring test in any package.
-	var oldRate *string
-	if err := db.Pool.QueryRow(ctx, `SELECT default_tax_rate::text FROM locations WHERE id = `+branch).Scan(&oldRate); err != nil {
-		t.Fatalf("read default branch rate: %v", err)
-	}
-	if _, err := db.Pool.Exec(ctx, `UPDATE locations SET default_tax_rate = 0.088750
-		WHERE id = `+branch); err != nil {
-		t.Fatalf("seed branch rate: %v", err)
 	}
 
 	orderSvc := order.NewService(order.NewRepository(db)).
@@ -89,14 +86,18 @@ func newKindFixture(t *testing.T, db *database.DB) *kindFixture {
 	handler := drafts.NewHandler(svc).WithFeedHandler(drafts.NewFeedHandler(svc, draftsRepo, hub, drafts.DefaultFeedSettings(), nil))
 
 	mux := http.NewServeMux()
-	branchMw := middleware.NewBranchMiddleware(db).Handler
+	branchMw := func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			ctx := branchctx.With(r.Context(), &branchctx.Context{BranchID: &f.branchID, IsAdmin: true})
+			next.ServeHTTP(w, r.WithContext(ctx))
+		})
+	}
 	order.RegisterDraftRoutes(mux, handler, orderKind, branchMw)
 	order.NewHandler(orderSvc).RegisterRoutes(mux, branchMw)
 	f.srv = httptest.NewServer(actor.Middleware(middleware.Idempotency(db)(mux)))
 
 	t.Cleanup(func() {
 		f.srv.Close()
-		_, _ = db.Pool.Exec(ctx, `UPDATE locations SET default_tax_rate = $1 WHERE id = `+branch, oldRate)
 		// Scoped to this fixture's own drafts (by the payload's customer),
 		// never by module: the drafts package's tests run in parallel and
 		// hold their own.
@@ -163,6 +164,10 @@ func (f *kindFixture) payload(qty string) map[string]any {
 		"delivery_type": "pickup",
 		"lines":         []map[string]any{{"product_id": f.productID.String(), "quantity": qty}},
 	}
+}
+
+func (f *kindFixture) editPayload(qty string) map[string]any {
+	return f.payload(qty)
 }
 
 // TestOrderKind_CreateDraftPromotesToDraftOrder pins the create path: the
@@ -232,7 +237,7 @@ func TestOrderKind_EditDraftPromotesThroughUpdateCore(t *testing.T) {
 
 	// The edit draft on it, at the order's current revision.
 	r = f.do("POST", "/api/v1/drafts/orders", map[string]any{
-		"payload": f.payload("20"), "subject_id": orderID, "subject_revision": 1})
+		"payload": f.editPayload("20"), "subject_id": orderID, "subject_revision": 1})
 	if r.status != http.StatusCreated {
 		t.Fatalf("create edit draft = %d: %s", r.status, r.raw)
 	}
@@ -255,12 +260,12 @@ func TestOrderKind_EditDraftPromotesThroughUpdateCore(t *testing.T) {
 	// A subject that moved after the draft was built on it: the promotion
 	// is stale on the subject (subject_stale), not on the draft.
 	r = f.do("POST", "/api/v1/drafts/orders", map[string]any{
-		"payload": f.payload("30"), "subject_id": orderID, "subject_revision": kindRev(t, got.body)})
+		"payload": f.editPayload("30"), "subject_id": orderID, "subject_revision": kindRev(t, got.body)})
 	if r.status != http.StatusCreated {
 		t.Fatalf("create edit draft at the current revision = %d: %s", r.status, r.raw)
 	}
 	moved := kindStr(t, r.body, "id")
-	putBody := f.payload("25")
+	putBody := f.editPayload("25")
 	putBody["revision"] = kindRev(t, got.body)
 	if rr := f.do("PUT", "/api/v1/orders/"+orderID, putBody); rr.status != http.StatusOK {
 		t.Fatalf("move the subject = %d: %s", rr.status, rr.raw)
@@ -277,7 +282,7 @@ func TestOrderKind_EditDraftPromotesThroughUpdateCore(t *testing.T) {
 		t.Fatalf("confirm the order = %d: %s", r.status, r.raw)
 	}
 	r = f.do("POST", "/api/v1/drafts/orders", map[string]any{
-		"payload": f.payload("30"), "subject_id": orderID})
+		"payload": f.editPayload("30"), "subject_id": orderID})
 	if r.status != http.StatusCreated {
 		t.Fatalf("create edit draft on the confirmed order = %d: %s", r.status, r.raw)
 	}

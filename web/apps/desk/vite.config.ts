@@ -1,10 +1,41 @@
 // SPDX-License-Identifier: LicenseRef-OpenLBM-Surface-1.0
 // SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
 
-import { defineConfig } from 'vite'
+import { createHash } from 'node:crypto'
+import { readFileSync } from 'node:fs'
+import { defineConfig, type Plugin } from 'vite'
+
+// The `/pos` service worker (ADR 0011 section 5.2) is emitted with the build's
+// own asset list, so its install precaches the whole bundle; the version is
+// taken from that list, so every deploy installs a fresh worker and cache.
+function posServiceWorker(): Plugin {
+  return {
+    name: 'gable-pos-sw',
+    apply: 'build',
+    generateBundle(_options, bundle) {
+      const assets = Object.keys(bundle)
+        .filter((name) => name.startsWith('assets/'))
+        .sort()
+        .map((name) => `/${name}`)
+      const version = createHash('sha256').update(assets.join('\n')).digest('hex').slice(0, 16)
+      const template = readFileSync(new URL('./sw/pos-sw.js', import.meta.url), 'utf8')
+      if (!template.includes("'__POS_PRECACHE_VERSION__'") || !template.includes('__POS_PRECACHE_ASSETS__;')) {
+        throw new Error('sw/pos-sw.js lost its precache placeholders')
+      }
+      this.emitFile({
+        type: 'asset',
+        fileName: 'pos-sw.js',
+        source: template
+          .replace("'__POS_PRECACHE_VERSION__'", JSON.stringify(version))
+          .replace('__POS_PRECACHE_ASSETS__;', `${JSON.stringify(assets)};`),
+      })
+    },
+  }
+}
 
 // https://vite.dev/config/
 export default defineConfig({
+  plugins: [posServiceWorker()],
   build: {
     sourcemap: false,
     target: 'es2022',

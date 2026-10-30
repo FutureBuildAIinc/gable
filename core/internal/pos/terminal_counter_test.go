@@ -172,12 +172,22 @@ func TestCounterCardNoAnswerSweepResolveDeclined(t *testing.T) {
 	if li.status != http.StatusOK {
 		t.Fatalf("the queue = %d: %s", li.status, li.raw)
 	}
+	// the queue is every branch's open items, other tests' among them: this
+	// test reads only the item of its own intent, and wants exactly one
 	items, _ := li.body["items"].([]any)
-	if len(items) != 1 {
-		t.Fatalf("the queue holds %d items, wanted 1 (%s)", len(items), li.raw)
+	var own []map[string]any
+	for _, it := range items {
+		if m, ok := it.(map[string]any); ok && m["intent_id"] == id.String() {
+			own = append(own, m)
+		}
 	}
-	item := items[0].(map[string]any)
-	itemID, _ := item["id"].(string)
+	if len(own) != 1 {
+		t.Fatalf("the queue holds %d items of this test's intent %s, wanted 1 (%s)", len(own), id, li.raw)
+	}
+	if own[0]["transaction_id"] != saleID {
+		t.Fatalf("the item names sale %v, wanted %s", own[0]["transaction_id"], saleID)
+	}
+	itemID, _ := own[0]["id"].(string)
 	rr := f.do("POST", "/api/v1/pos/terminal-lost-items/"+itemID+"/resolve",
 		map[string]any{"outcome": "declined", "reference": "read the terminal"},
 		"X-Test-Role", "cashier", "X-Test-Sub", mustUUID(t))

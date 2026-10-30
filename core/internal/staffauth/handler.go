@@ -4,6 +4,7 @@
 package staffauth
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -43,6 +44,16 @@ type Handler struct {
 	byAddress    *limiter
 	byEmail      *limiter
 	cookieSecure bool
+	// emailPasswordAllowed, when set, is consulted before any credential is
+	// read: the dealer's sign in allowlist must hold email_password.
+	emailPasswordAllowed func(ctx context.Context) bool
+}
+
+// WithEmailPasswordGuard gates the sign in on the dealer's sign in method
+// allowlist, as the portal login is gated.
+func (h *Handler) WithEmailPasswordGuard(fn func(ctx context.Context) bool) *Handler {
+	h.emailPasswordAllowed = fn
+	return h
 }
 
 // NewHandler returns the handler.
@@ -118,6 +129,10 @@ func (h *Handler) limited(w http.ResponseWriter, r *http.Request, d time.Duratio
 func (h *Handler) SignIn(w http.ResponseWriter, r *http.Request) {
 	if !h.sameSiteIntent(r) {
 		httpx.WriteError(w, r, httpx.Unauthorized(refusedMessage))
+		return
+	}
+	if h.emailPasswordAllowed != nil && !h.emailPasswordAllowed(r.Context()) {
+		httpx.WriteError(w, r, httpx.Forbidden("Sign in with email and password is not allowed for this dealer"))
 		return
 	}
 	var body struct {

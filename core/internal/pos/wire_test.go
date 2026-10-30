@@ -594,7 +594,10 @@ func TestSaleListEnvelopeAndFilters(t *testing.T) {
 		t.Errorf("items = %v, want an empty array", r.body["items"])
 	}
 	// the status filter filters; an unknown value is refused
-	r = f.do("GET", "/api/v1/pos/transactions?status=completed", nil)
+	// The list is scoped to the fixture's own register: the database holds
+	// the sales of every package's counter, and a count over the whole list
+	// would count rows this test never wrote.
+	r = f.do("GET", "/api/v1/pos/transactions?status=completed&register_id="+f.register, nil)
 	if r.status != http.StatusOK {
 		t.Fatalf("list = %d: %s", r.status, r.raw)
 	}
@@ -696,8 +699,12 @@ func (f *fixture) paymentsOf(saleID string) []paymentOf {
 // legs of their payments and applications equal their unapplied cash.
 func (f *fixture) assertARInvariants(t *testing.T) {
 	t.Helper()
-	walkIn := f.scalar(`SELECT id::text FROM customers WHERE account_number = 'WALK-IN'`).(string)
-	customers := []string{f.customerID.String(), walkIn}
+	// The invariant is over the fixture's own acts. Its own customer is the
+	// fixture's alone: every row of that customer is a row this fixture
+	// wrote. The walk-in customer is shared by every counter in the
+	// deployment, so its own total is not this test's to read; the walk-in
+	// rows the fixture's own documents made are checked below, on their own.
+	customers := []string{f.customerID.String()}
 	rows, err := f.db.Pool.Query(context.Background(), `
 		SELECT c.id, COALESCE(ROUND(c.balance_due * 100)::bigint, 0),
 			COALESCE((SELECT SUM(ROUND(ct.amount)::bigint) FROM customer_transactions ct WHERE ct.customer_id = c.id), 0),
@@ -731,15 +738,57 @@ func (f *fixture) assertARInvariants(t *testing.T) {
 	// legs of these customers' invoices, memos, payments, applications and
 	// refunds tie to the sum of their balances, and the 2200 legs to their
 	// unapplied cash.
-	docSQL := `(SELECT id::text FROM invoices WHERE customer_id = ANY($1::uuid[]))
-		UNION (SELECT id::text FROM credit_memos WHERE customer_id = ANY($1::uuid[]))
-		UNION (SELECT id::text FROM payments WHERE customer_id = ANY($1::uuid[]))
-		UNION (SELECT ap.id::text FROM ar_applications ap JOIN invoices i ON i.id = ap.invoice_id
+	// The document ids as uuid: every column the ids are compared against
+	// (customer_transactions.reference_id, gl_journal_entries.source_ref_id and
+	// reverses_entry_id) is a uuid, so the list keeps that type rather than
+	// being cast to text.
+	docSQL := `(SELECT id FROM invoices WHERE customer_id = ANY($1::uuid[]))
+		UNION (SELECT id FROM credit_memos WHERE customer_id = ANY($1::uuid[]))
+		UNION (SELECT id FROM payments WHERE customer_id = ANY($1::uuid[]))
+		UNION (SELECT ap.id FROM ar_applications ap JOIN invoices i ON i.id = ap.invoice_id
 			WHERE i.customer_id = ANY($1::uuid[]))
-		UNION (SELECT rf.id::text FROM payment_refunds rf
+		UNION (SELECT rf.id FROM payment_refunds rf
 			LEFT JOIN payments p ON p.id = rf.payment_id
 			LEFT JOIN credit_memos m ON m.id = rf.credit_memo_id
 			WHERE p.customer_id = ANY($1::uuid[]) OR m.customer_id = ANY($1::uuid[]))`
+	// The walk-in customer's own rows: the open documents at the branch the
+	// fixture owns, and the subledger rows that name them, must agree. The
+	// walk-in customer's total is not read: another counter's walk-in sale
+	// moves it, and that is another package's row.
+	//
+	// The subledger side is scoped by the same documents the open-document
+	// side reads: the walk-in customer's rows that name a document of the
+	// branch the fixture owns. The walk-in customer carries documents of
+	// every branch in the deployment, and those are other counters' rows.
+	var walkIn uuid.UUID
+	if err := f.db.Pool.QueryRow(context.Background(),
+		`SELECT id FROM customers WHERE account_number = 'WALK-IN'`).Scan(&walkIn); err != nil {
+		t.Fatal(err)
+	}
+	branchDocs := `(SELECT id FROM invoices WHERE branch_id = $2)
+		UNION (SELECT id FROM credit_memos WHERE branch_id = $2)
+		UNION (SELECT id FROM payments WHERE branch_id = $2)
+		UNION (SELECT id FROM pos_transactions WHERE branch_id = $2)
+		UNION (SELECT id FROM pos_returns WHERE branch_id = $2)
+		UNION (SELECT id FROM ar_applications WHERE invoice_id IN (SELECT id FROM invoices WHERE branch_id = $2)
+			OR payment_id IN (SELECT id FROM payments WHERE branch_id = $2)
+			OR credit_memo_id IN (SELECT id FROM credit_memos WHERE branch_id = $2))
+		UNION (SELECT id FROM payment_refunds WHERE payment_id IN (SELECT id FROM payments WHERE branch_id = $2)
+			OR credit_memo_id IN (SELECT id FROM credit_memos WHERE branch_id = $2))`
+	var walkInSubledger, walkInDocuments int64
+	if err := f.db.Pool.QueryRow(context.Background(), `
+		SELECT COALESCE((SELECT SUM(ROUND(ct.amount)::bigint) FROM customer_transactions ct
+				WHERE ct.customer_id = $1 AND ct.reference_id IN (`+branchDocs+`)), 0),
+			COALESCE((SELECT SUM(ROUND(i.amount_open * 100)::bigint) FROM invoices i
+				WHERE i.customer_id = $1 AND i.branch_id = $2 AND i.status IN ('UNPAID', 'PARTIAL', 'OVERDUE')), 0)
+			+ COALESCE((SELECT SUM(ROUND(m.amount_open * 100)::bigint) FROM credit_memos m
+				WHERE m.customer_id = $1 AND m.branch_id = $2 AND m.status IN ('OPEN', 'PARTIAL')), 0)`,
+		walkIn, f.branchID).Scan(&walkInSubledger, &walkInDocuments); err != nil {
+		t.Fatal(err)
+	}
+	if walkInSubledger != walkInDocuments {
+		t.Errorf("the walk-in customer's rows read %d in the subledger and %d in the open documents", walkInSubledger, walkInDocuments)
+	}
 	var ties bool
 	if err := f.db.Pool.QueryRow(context.Background(), `
 		SELECT (SELECT COALESCE(ROUND(SUM(c.balance_due) * 100)::bigint, 0) FROM customers c WHERE c.id = ANY($1::uuid[]))
@@ -747,8 +796,8 @@ func (f *fixture) assertARInvariants(t *testing.T) {
 				FROM gl_journal_lines l
 				JOIN gl_accounts a ON a.id = l.account_id
 				JOIN gl_journal_entries e ON e.id = l.journal_entry_id
-				WHERE a.code = '1020' AND (e.source_ref_id::text IN (`+docSQL+`)
-					OR e.reverses_entry_id::text IN (SELECT o2.id::text FROM gl_journal_entries o2 WHERE o2.source_ref_id::text IN (`+docSQL+`))))`, customers).Scan(&ties); err != nil {
+				WHERE a.code = '1020' AND (e.source_ref_id IN (`+docSQL+`)
+					OR e.reverses_entry_id IN (SELECT o2.id FROM gl_journal_entries o2 WHERE o2.source_ref_id IN (`+docSQL+`))))`, customers).Scan(&ties); err != nil {
 		t.Fatal(err)
 	}
 	if !ties {
@@ -761,8 +810,8 @@ func (f *fixture) assertARInvariants(t *testing.T) {
 				FROM gl_journal_lines l
 				JOIN gl_accounts a ON a.id = l.account_id
 				JOIN gl_journal_entries e ON e.id = l.journal_entry_id
-				WHERE a.code = '2200' AND (e.source_ref_id::text IN (`+docSQL+`)
-					OR e.reverses_entry_id::text IN (SELECT o2.id::text FROM gl_journal_entries o2 WHERE o2.source_ref_id::text IN (`+docSQL+`))))`, customers).Scan(&ties); err != nil {
+				WHERE a.code = '2200' AND (e.source_ref_id IN (`+docSQL+`)
+					OR e.reverses_entry_id IN (SELECT o2.id FROM gl_journal_entries o2 WHERE o2.source_ref_id IN (`+docSQL+`))))`, customers).Scan(&ties); err != nil {
 		t.Fatal(err)
 	}
 	if !ties {
@@ -938,16 +987,16 @@ func TestSyncOfflineRefusedByRule(t *testing.T) {
 	if code, _, _ := errorOf(t, r); code != "money_never_queues" {
 		t.Errorf("code = %q, want money_never_queues (the body: %s)", code, r.raw)
 	}
-	if got := countOf(t, f.db, `SELECT count(*) FROM pos_transactions`); got != 0 {
+	if got := f.counterSales(t); got != 0 {
 		t.Errorf("%d pos_transactions after the refused sync, want 0", got)
 	}
 	if got := f.counterInvoices(t); got != 0 {
 		t.Errorf("%d invoices after the refused sync, want 0", got)
 	}
-	if got := countOf(t, f.db, `SELECT count(*) FROM payments`); got != 0 {
+	if got := f.counterPayments(t); got != 0 {
 		t.Errorf("%d payments after the refused sync, want 0", got)
 	}
-	if got := countOf(t, f.db, `SELECT count(*) FROM pos_sync_log`); got != 0 {
+	if got := countOf(t, f.db, `SELECT count(*) FROM pos_sync_log WHERE register_id = $1`, f.register); got != 0 {
 		t.Errorf("%d pos_sync_log rows after the refused sync, want 0", got)
 	}
 }

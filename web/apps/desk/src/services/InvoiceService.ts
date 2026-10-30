@@ -91,10 +91,14 @@ export const InvoiceService = {
         return response.json();
     },
 
-    async emailInvoice(id: string): Promise<void> {
-        await expectOk(
+    /** Queues the invoice's email to its customer. The answer names the queued
+     *  delivery row, whose status is what actually happened; the 202 alone
+     *  never says the mail went out. */
+    async emailInvoice(id: string): Promise<{ status: 'queued'; delivery_id?: string }> {
+        const response = await expectOk(
             await fetchWithAuth(`${API_URL}/api/v1/invoices/${id}/email`, { method: 'POST' }),
             'Failed to email invoice',
         );
+        return response.json();
     },
 };
