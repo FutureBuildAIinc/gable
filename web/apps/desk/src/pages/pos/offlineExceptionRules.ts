@@ -52,6 +52,17 @@ export function reasonWords(code: string): string {
         sequence_gap: 'A number is missing from the register\'s run',
         sold_past_warning: 'Sold past a warning',
         one_account_leg: 'Two account payments in one sale',
+        account_unverified: 'The account was on hold or missed a rule it had',
+        clock_unverified: 'The register clock looked wrong',
+        id_unverified: 'The ID a payment needs was not recorded',
+        queue_mark_unverified: 'The register\'s count of unsent sales did not add up',
+        snapshot_unknown: 'The register copy was not one it was given',
+        stock_unverified: 'The stock figures did not match the register copy',
+        tax_unverified: 'The tax did not match the register copy',
+        tender_mismatch: 'The payments did not add up to the sale',
+        walk_in_account: 'Walk-in customer put on account',
+        payer_details_required: 'Payer details were missing',
+        tender_not_offline: 'That payment is not taken offline',
     };
-    return known[code] ?? code.replace(/_/g, ' ');
+    return known[code] ?? `Other reason (${code})`;
 }
