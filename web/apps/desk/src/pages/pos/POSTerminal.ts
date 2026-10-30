@@ -461,7 +461,7 @@ export class POSTerminal extends LitElement {
   }
 
   private _renderPasswordForm() {
-    const input = 'w-full min-h-[44px] sm:min-h-0 bg-surface-2 border border-zinc-500 rounded-lg px-3 py-2.5 sm:py-2 text-base sm:text-sm text-white focus:outline-none focus:ring-1 focus:ring-gable-green focus:border-gable-green transition-all [[data-theme=light]_&]:text-black';
+    const input = 'w-full min-h-11 rounded border border-white/10 bg-deep-space px-3 py-2 text-sm text-white outline-none focus:border-gable-green';
     const enter = (e: KeyboardEvent) => { if (e.key === 'Enter') void this._submitPassword(); };
     return html`
       <form class="flex flex-wrap items-end gap-3 border-b border-blueprint-blue/30 bg-blueprint-blue/5 px-4 py-3 text-sm" data-testid="pos-offline-pw-form" @submit=${(e: Event) => e.preventDefault()}>
@@ -4026,7 +4026,7 @@ export class POSTerminal extends LitElement {
       ${this._offlineStrip ? html`
         <div class="flex items-center justify-between gap-3 border-b border-blueprint-blue/30 bg-blueprint-blue/10 px-4 py-2 text-sm text-blueprint-blue" role="status" data-testid="pos-offline-strip">
           <span>${this._offlineStrip}</span>
-          ${this._needsSignIn ? html`<button type="button" data-testid="pos-offline-sign-in" class="min-h-11 rounded-lg bg-gable-green px-4 font-semibold text-deep-space" @click=${() => void this._signInRegister()}>${NO_SESSION_ASK}</button>` : nothing}
+          ${this._needsSignIn && !this._pwForm ? html`<button type="button" data-testid="pos-offline-sign-in" class="min-h-11 rounded-lg bg-gable-green px-4 font-semibold text-deep-space" @click=${() => void this._signInRegister()}>${NO_SESSION_ASK}</button>` : nothing}
           <button type="button" class="min-h-11 px-2 text-lg" aria-label="Dismiss" @click=${() => { this._offlineStrip = null; }}>×</button>
         </div>` : nothing}
       ${this._pwForm ? this._renderPasswordForm() : nothing}
