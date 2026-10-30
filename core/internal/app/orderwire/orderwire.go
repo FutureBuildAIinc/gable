@@ -14,6 +14,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"time"
 
 	"github.com/gablelbm/gable/internal/account"
 	"github.com/gablelbm/gable/internal/config"
@@ -144,6 +145,41 @@ func (a *PriceEngineAdapter) PriceFor(ctx context.Context, customerID, productID
 		PriceUOMQty: res.PriceUOMQty,
 		Basis:       string(res.PriceBasis),
 	}, nil
+}
+
+// SheetPrice is the offline price sheet's row (ADR 0011 section 5.4): the
+// engine with rung 2 skipped, for the customer, or for the level the
+// customer levelOf holds, at the branch and its business date, in the unit
+// asked, for a quantity of one (the rungs that answer take no quantity).
+func (a *PriceEngineAdapter) SheetPrice(ctx context.Context, customerID uuid.UUID, levelOf *uuid.UUID, productID, branch uuid.UUID,
+	uom string, on time.Time) (salesdoc.EngineAnswer, error) {
+	req := pricing.Request{CustomerID: customerID, ProductID: productID, BranchID: &branch, UOM: uom,
+		Quantity: httpx.Quantity(10_000), On: on, SkipRules: true}
+	if levelOf != nil {
+		program, err := a.Pricing.CustomerProgram(ctx, *levelOf)
+		if err != nil {
+			return salesdoc.EngineAnswer{}, fmt.Errorf("price engine: %w", err)
+		}
+		if program == nil {
+			return salesdoc.EngineAnswer{}, fmt.Errorf("price engine: the customer holds no level")
+		}
+		req.CustomerID, req.Level = uuid.Nil, program
+	}
+	res, err := a.Pricing.Resolve(ctx, req)
+	if err != nil {
+		return salesdoc.EngineAnswer{}, fmt.Errorf("price engine: %w", err)
+	}
+	return salesdoc.EngineAnswer{Price: res.UnitPrice, PriceUOM: res.PriceUOM, UOMQty: res.UOMQty,
+		PriceUOMQty: res.PriceUOMQty, Basis: string(res.PriceBasis)}, nil
+}
+
+// AccountLevel names the level the customer prices at, when it holds one.
+func (a *PriceEngineAdapter) AccountLevel(ctx context.Context, customerID uuid.UUID) (uuid.UUID, bool, error) {
+	program, err := a.Pricing.CustomerProgram(ctx, customerID)
+	if err != nil || program == nil {
+		return uuid.Nil, false, err
+	}
+	return program.LevelID, true, nil
 }
 
 // TaxProviderAdapter is the configured provider path behind the rate

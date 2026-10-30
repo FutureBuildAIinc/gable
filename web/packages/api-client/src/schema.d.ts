@@ -6889,6 +6889,70 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/pos/offline/registers/{id}/device": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * A register's device enrolment
+         * @description The register's live enrolment (its epoch, public key, the mark and chain head the server holds, the mark it confirmed), the last revoked one, and next_epoch, the epoch the next enrolment must name (ADR 0011 section 6.1). Admin, owner and finance; a register of a branch the caller may not reach is 403, an unknown register 404.
+         */
+        get: operations["posOfflineRegisterDeviceGet"];
+        put?: never;
+        /**
+         * Enrol a register's device for offline selling
+         * @description Records the shell's Ed25519 public key for the register's next epoch and revokes the previous key in the same transaction (ADR 0011 section 6.1). An owner or admin act, never a machine key: the manager proves presence with their counter PIN (the step up's own check, failure count and lock). device_epoch must be the register's next_epoch (409 epoch_moved otherwise); a key is enrolled once (409 public_key_reused). The register's latest epoch, live or already revoked, gets an unknown_tail exception over the numbers the server never recorded: the higher of the device's last reported mark and previous_epoch_mark (the mark the shell's keychain kept for that epoch), less the server's recorded mark, once per epoch. Audited as pos.register_device.enrolled (and .revoked for the replaced key).
+         */
+        post: operations["posOfflineRegisterDeviceEnrol"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pos/offline/registers/{id}/device/revoke": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Revoke a register's device
+         * @description Revokes the register's enrolment of an epoch (ADR 0011 section 6.1): the old key's later sales go to the exception queue as device_revoked. An owner or admin act with the counter PIN, never a machine key; audited as pos.register_device.revoked. sessions says what was done to the web sessions signed in on the register's shell: supported false where the sign in method cannot end them from the server.
+         */
+        post: operations["posOfflineRegisterDeviceRevoke"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pos/offline/snapshot": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The register's offline snapshot
+         * @description What the register may sell on offline (ADR 0011 section 5.4), for its enrolled epoch and its open till session: the policy, the branch rate, the products with their unit sets, the cached accounts with their room at issue, and the price sheet (the engine's answer with rung 2 skipped, at the session's business date: the walk-in's rows, each account's own rows, each account level's rows). Stored so a signed sale can name it. high_seq is the highest sequence the register has assigned: above the server's recorded mark, or with an open bad copy of the epoch, the take is refused 409 queue_not_drained. The ETag is the document's digest; a take whose content has not moved answers the stored snapshot, and If-None-Match with it answers 304. The person signed in at the counter, never a machine key; a register of a branch the caller may not reach is 403.
+         */
+        get: operations["posOfflineSnapshotGet"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/pos/end-of-day": {
         parameters: {
             query?: never;
@@ -18845,6 +18909,205 @@ export interface components {
             /** Format: int64 */
             queue_total_cap_cents?: number;
             max_queued?: number;
+        };
+        PosRegisterDevice: {
+            register_id: string;
+            /** Format: int64 */
+            device_epoch: number;
+            /** @description The device's Ed25519 public key, 64 hex characters. */
+            public_key: string;
+            /** @description The staff id of the manager whose PIN proved the enrolment. */
+            enrolled_by: string;
+            /** Format: date-time */
+            enrolled_at: string;
+            revoked_by: string | null;
+            /** Format: date-time */
+            revoked_at: string | null;
+            revoke_reason: string | null;
+            /** Format: int64 */
+            high_seq: number;
+            chain_head: string;
+            /** Format: int64 */
+            confirmed_seq: number;
+            /** Format: int64 */
+            reported_seq: number;
+        };
+        PosRegisterSessionsEnded: {
+            supported: boolean;
+            ended: number;
+            message: string;
+        };
+        PosRegisterEnrolment: {
+            register_id: string;
+            /** Format: uuid */
+            branch_id: string;
+            /** Format: int64 */
+            next_epoch: number;
+            device: components["schemas"]["PosRegisterDevice"] | null;
+            previous: components["schemas"]["PosRegisterDevice"] | null;
+            /** Format: uuid */
+            unknown_tail_exception_id: string | null;
+            sessions: components["schemas"]["PosRegisterSessionsEnded"] | null;
+        };
+        PosEnrolDeviceRequest: {
+            /**
+             * Format: int64
+             * @description The register's next_epoch, the epoch the shell made its key for.
+             */
+            device_epoch: number;
+            /** @description The device's Ed25519 public key, 64 hex characters. */
+            public_key: string;
+            /** @description The manager's staff id, staff number or email. */
+            manager: string;
+            /** @description The manager's counter PIN. */
+            pin: string;
+            previous_epoch_mark?: {
+                /** Format: int64 */
+                device_epoch: number;
+                /** Format: int64 */
+                last_seq: number;
+            };
+        };
+        PosRevokeDeviceRequest: {
+            /** Format: int64 */
+            device_epoch: number;
+            reason: string;
+            manager: string;
+            pin: string;
+        };
+        PosOfflineSnapshot: {
+            /** Format: uuid */
+            snapshot_id: string;
+            register_id: string;
+            /** Format: uuid */
+            branch_id: string;
+            /** Format: int64 */
+            device_epoch: number;
+            /** Format: date-time */
+            issued_at: string;
+            till_session: {
+                /** Format: uuid */
+                id: string;
+                /** Format: uuid */
+                cashier_id: string;
+                /** Format: date-time */
+                opened_at: string;
+                /** Format: date */
+                business_date: string;
+                /** Format: int64 */
+                opening_float_cents: number;
+            };
+            policy: {
+                enabled: boolean;
+                /** Format: int64 */
+                max_sale_cents: number;
+                /** Format: int64 */
+                max_check_cents: number;
+                /** Format: int64 */
+                default_check_limit_cents: number | null;
+                /** Format: int64 */
+                account_cap_cents: number;
+                /** Format: int64 */
+                max_queue_count: number;
+                /** Format: int64 */
+                max_queue_total_cents: number;
+                allowed_tenders: components["schemas"]["PosOfflineTender"][];
+                require_id_for_tenders: string[];
+                /** @enum {string} */
+                cash_rounding_mode: "OFF" | "NEAREST_5_CENTS";
+            };
+            tax: {
+                /** @description The branch's rate as a decimal string. */
+                branch_rate: string;
+                provider_configured: boolean;
+            };
+            walk_in_customer: {
+                /** Format: uuid */
+                id: string;
+                currency: string;
+            };
+            price_sheet: {
+                /** Format: uuid */
+                product_id: string;
+                /** @description walkin, customer:<id> or level:<id>. */
+                price_key: string;
+                /** @description The unit the engine answered in. */
+                price_uom: string;
+                /** @description The exact pair the product's sale unit takes to price_uom, its sale side. */
+                uom_qty: string;
+                /** @description The pair's price side. */
+                price_uom_qty: string;
+                /** Format: int64 */
+                unit_price_ten_thousandths: number;
+                /** @description The rung that won, lowercase. */
+                price_source: string;
+                price_basis: string | null;
+            }[];
+            products: {
+                /** Format: uuid */
+                id: string;
+                sku: string;
+                description: string;
+                taxable: boolean;
+                is_kit: boolean;
+                random_length: boolean;
+                board_thickness_in: string | null;
+                board_width_in: string | null;
+                stock_uom: string;
+                sale_uom: string;
+                price_uom: string;
+                unit_set: {
+                    uom: string;
+                    unit_qty: string;
+                    stock_qty: string;
+                    sell: boolean;
+                    price: boolean;
+                }[];
+                barcode: string | null;
+                category: string;
+                /** @description On hand less allocated at the register's branch, in the stocking unit. */
+                in_stock: string;
+            }[];
+            accounts: {
+                /** Format: uuid */
+                customer_id: string;
+                account_number: string;
+                name: string;
+                currency: string;
+                tax_exempt: boolean;
+                po_required: boolean;
+                buyer_roster_required: boolean;
+                credit_hold: boolean;
+                /**
+                 * Format: int64
+                 * @description The limit; for an account with none, its open receivable plus the account cap, so the limit less the open receivable is the cap.
+                 */
+                credit_limit_cents: number;
+                /** Format: int64 */
+                open_receivable_cents: number;
+                /**
+                 * Format: int64
+                 * @description The room at issue: the least of the credit room and the account cap, less this register's open account exceptions on the account.
+                 */
+                offline_room_cents: number;
+                /** Format: int64 */
+                check_limit_cents: number | null;
+                price_key: string;
+                level_key: string | null;
+                buyers: {
+                    /** Format: uuid */
+                    contact_id: string;
+                    name: string;
+                    /** Format: int64 */
+                    per_purchase_cap_cents: number | null;
+                }[];
+                jobs: {
+                    /** Format: uuid */
+                    id: string;
+                    code: string;
+                    name: string;
+                }[];
+            }[];
         };
         PosSettings: {
             /**
@@ -36513,6 +36776,153 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["ForbiddenEither"];
             404: components["responses"]["WireNotFound"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    posOfflineRegisterDeviceGet: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The register's enrolment. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PosRegisterEnrolment"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["ConflictEither"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    posOfflineRegisterDeviceEnrol: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PosEnrolDeviceRequest"];
+            };
+        };
+        responses: {
+            /** @description The register's enrolment now in force. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PosRegisterEnrolment"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["ConflictEither"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    posOfflineRegisterDeviceRevoke: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PosRevokeDeviceRequest"];
+            };
+        };
+        responses: {
+            /** @description The register's enrolment after the revocation. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PosRegisterEnrolment"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["ConflictEither"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    posOfflineSnapshotGet: {
+        parameters: {
+            query: {
+                register_id: string;
+                high_seq: number;
+            };
+            header?: {
+                "If-None-Match"?: string;
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The register's snapshot. */
+            200: {
+                headers: {
+                    /** @description The snapshot's digest in quotes. Send it back as If-None-Match. */
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PosOfflineSnapshot"];
+                };
+            };
+            /** @description The snapshot has not moved since the ETag sent. */
+            304: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["ConflictEither"];
             500: components["responses"]["InternalError"];
         };
     };
