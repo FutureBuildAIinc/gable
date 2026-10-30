@@ -7,12 +7,13 @@ import { icon } from '../../lib/icons.ts';
 import { router } from '../../lib/router.ts';
 import { ToastService } from '../../lib/toast-service.ts';
 import { fetchAuthedBlobUrl } from '../../lib/authedPdf.ts';
-import { FileText, Download, ArrowLeft, ShoppingCart, Send, Check, X, ListChecks, Eye, Map, Package, AlertTriangle, ShieldAlert, Truck, TrendingUp, Pencil } from 'lucide';
+import { FileText, Download, ArrowLeft, ShoppingCart, Send, Check, X, ListChecks, Eye, Map, Package, AlertTriangle, ShieldAlert, Truck, TrendingUp, Pencil, History } from 'lucide';
 import { QuoteService, QuoteApiError, quoteErrorMessage } from '../../services/QuoteService.ts';
-import type { Quote, QuoteStatus, ParseMapItem } from '../../types/quote.ts';
+import type { Quote, QuoteRevision, QuoteStatus, ParseMapItem } from '../../types/quote.ts';
 import { formatCents, formatPrice4 } from '../../lib/utils.ts';
 import { extensionCents, dollarsToCents, floatDollarsToTenThousandths } from '../../lib/money.ts';
 import { isQuoteExpired, quoteExpiredWords } from './quoteExpiry.ts';
+import { canRevise, changedLines, versionLabel } from './quoteRevisions.ts';
 import { formatDate, formatDateTime } from '../../lib/dates.ts';
 import '../../components/quotes/exposure-banner.ts';
 
@@ -37,6 +38,8 @@ export class GableQuoteDetail extends LitElement {
     @state() private originalText: { quoteId: string; text: string | null } | null = null;
     /** The stored original of an image or pdf as a blob url, fetched with the token. */
     @state() private originalFile: { quoteId: string; url: string | null } | null = null;
+    /** The quote's sent versions, oldest first; null until the read answers. */
+    @state() private revisions: QuoteRevision[] | null = null;
 
     private stateColors: Record<string, string> = {
         draft: 'bg-voice-fill/20 text-voice-text border-voice-fill/30',
@@ -62,9 +65,15 @@ export class GableQuoteDetail extends LitElement {
     private async loadQuote(quoteId: string) {
         // another quote's original is let go as soon as this one is asked for
         this.releaseOriginal(quoteId);
+        this.revisions = null;
         try {
             const data = await QuoteService.get(quoteId);
             this.quote = data;
+            // The revision history rides along: a quote that was never sent has none,
+            // and a failed read leaves the panel hidden, never the page broken.
+            void QuoteService.revisionsOldestFirst(data.id).then(revs => {
+                if (this.quote?.id === data.id) this.revisions = revs;
+            }).catch(() => { /* the history stays hidden */ });
             // The Original Upload tab can already be open (a route change): load this quote's text now.
             if (this.activeTab === 'original') void this.loadOriginalText(data);
         } catch (error) {
@@ -208,6 +217,22 @@ export class GableQuoteDetail extends LitElement {
         }
     }
 
+    /** Revise the quote as its next version (same number, same id) and open it in the builder. */
+    private async handleRevise() {
+        if (!this.quote) return;
+        this.processing = true;
+        try {
+            const updated = await QuoteService.revise(this.quote.id, this.quote.revision);
+            ToastService.show(`Quote ${updated.number} is now version ${updated.version_number}`, 'success');
+            router.navigate(`/quotes/${updated.id}/edit`);
+        } catch (error) {
+            if (await this.handleStale(error)) return;
+            ToastService.show(`Failed: ${quoteErrorMessage(error, 'Unknown error')}`, 'error');
+        } finally {
+            this.processing = false;
+        }
+    }
+
     private async handleConvert() {
         if (!this.quote) return;
         this.processing = true;
@@ -238,6 +263,56 @@ export class GableQuoteDetail extends LitElement {
                 <div class="w-2 h-2 rounded-full bg-gable-green/60"></div>
                 <span class="text-zinc-400 w-20">${label}</span>
                 <span class="text-white font-mono text-xs">${formatDateTime(date)}</span>
+            </div>
+        `;
+    }
+
+    /** One line change's words, as a salesperson reads them. */
+    private revisionChangeWords(c: ReturnType<typeof changedLines>[number]): string {
+        switch (c.change) {
+            case 'added': return `Added at ${c.toQuantity}`;
+            case 'removed': return `Removed, was ${c.fromQuantity}`;
+            case 'quantity': return `Quantity ${c.fromQuantity} to ${c.toQuantity}`;
+            case 'price': return `Price ${formatPrice4(c.fromPrice ?? 0)} to ${formatPrice4(c.toPrice ?? 0)}`;
+            default: return `Quantity ${c.fromQuantity} to ${c.toQuantity}, price ${formatPrice4(c.fromPrice ?? 0)} to ${formatPrice4(c.toPrice ?? 0)}`;
+        }
+    }
+
+    /** The sent versions of the quote, oldest first, each with its total and the lines that changed from the version before. */
+    private renderRevisionHistory() {
+        const revisions = this.revisions ?? [];
+        if (revisions.length === 0) return nothing;
+        return html`
+            <div class="bg-slate-steel border border-white/10 rounded-lg p-6" data-testid="quote-revision-history">
+                <div class="flex items-center gap-2 mb-4">
+                    ${icon(History, 16, 'w-4 h-4 text-zinc-400')}
+                    <h3 class="text-sm font-medium text-zinc-400 uppercase tracking-wider">Revision history</h3>
+                </div>
+                <div class="space-y-3">
+                    ${revisions.map((rev, i) => {
+                        const changes = changedLines(i > 0 ? revisions[i - 1] : undefined, rev);
+                        return html`
+                            <div class="border border-white/5 rounded-lg p-4" data-testid="quote-revision-row">
+                                <div class="flex items-center justify-between mb-2">
+                                    <span class="font-mono font-bold text-white">v${rev.version_number}</span>
+                                    <span class="text-zinc-500 text-xs font-mono">Sent ${formatDateTime(rev.created_at)}</span>
+                                </div>
+                                <div class="text-sm text-zinc-300 font-mono mb-2">Total ${formatCents(rev.snapshot.total_cents)}</div>
+                                ${changes.length > 0 ? html`
+                                    <div class="space-y-1">
+                                        ${changes.map(c => html`
+                                            <div class="flex items-baseline gap-2 text-xs" data-testid="quote-revision-change">
+                                                <span class="font-mono text-zinc-300">${c.sku}</span>
+                                                <span class="text-zinc-500 truncate">${c.description}</span>
+                                                <span class="text-blue-400 shrink-0">${this.revisionChangeWords(c)}</span>
+                                            </div>
+                                        `)}
+                                    </div>
+                                ` : html`<div class="text-xs text-zinc-600">The first version</div>`}
+                            </div>
+                        `;
+                    })}
+                </div>
             </div>
         `;
     }
@@ -380,6 +455,8 @@ export class GableQuoteDetail extends LitElement {
                         ${quote.rejected_at ? this.renderTimelineEntry('Rejected', quote.rejected_at) : nothing}
                     </div>
                 </div>
+
+                ${this.renderRevisionHistory()}
 
                 <!-- Line Items -->
                 <div class="bg-slate-steel border border-white/10 rounded-lg overflow-hidden">
@@ -607,7 +684,7 @@ export class GableQuoteDetail extends LitElement {
                             ${icon(ArrowLeft, 14)} Back to Quotes
                         </button>
                         <div class="flex items-center gap-4 mb-2">
-                            <h1 class="text-3xl font-bold font-mono text-white">Quote ${quote.number}</h1>
+                            <h1 class="text-3xl font-bold font-mono text-white" data-testid="quote-number-version">Quote ${versionLabel(quote.number, quote.version_number)}</h1>
                             <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border uppercase ${this.stateColors[quote.status] || ''}">
                                 ${quote.status}
                             </span>
@@ -624,6 +701,13 @@ export class GableQuoteDetail extends LitElement {
                         </p>
                     </div>
                     <div class="flex gap-2">
+                        ${canRevise(quote.status) ? html`
+                            <button @click=${() => this.handleRevise()} ?disabled=${this.processing}
+                                class="bg-amber-600 text-plate px-4 py-2 rounded hover:bg-amber-500 transition-colors flex items-center gap-2 text-sm font-medium disabled:opacity-50"
+                                data-testid="quote-revise" title="Revise as the next version, keeping this quote's number">
+                                ${icon(Pencil, 14)} Revise
+                            </button>
+                        ` : nothing}
                         ${quote.status === 'expired' ? html`
                             <button @click=${() => this.handleReopen()} ?disabled=${this.processing}
                                 class="bg-amber-600 text-plate px-4 py-2 rounded hover:bg-amber-500 transition-colors flex items-center gap-2 text-sm font-medium disabled:opacity-50">

@@ -6,6 +6,8 @@ import type {
     QuoteAnalytics,
     QuotePage,
     QuoteRequest,
+    QuoteRevision,
+    QuoteRevisionPage,
     QuoteStatus,
     QuoteTransitionRequest,
 } from '../types/quote';
@@ -117,6 +119,37 @@ export const QuoteService = {
             'Failed to convert quote to order',
         );
         return response.json();
+    },
+
+    /** The revise takes a sent, rejected or expired quote back to draft as its
+     * next version (QE-01-b): same number, same id, the live share link revoked. */
+    async revise(id: string, revision: number, reason?: string): Promise<Quote> {
+        const body: Record<string, unknown> = { revision };
+        if (reason) body.reason = reason;
+        const response = await expectOk(
+            await fetchWithAuth(`${API_URL}/api/v1/quotes/${id}/revise`, {
+                method: 'POST',
+                headers: { ...JSON_HEADERS, 'If-Match': ifMatch(revision) },
+                body: JSON.stringify(body),
+            }),
+            'Failed to revise quote',
+        );
+        return response.json();
+    },
+
+    /** The quote's sent versions with their snapshots, newest first. */
+    async revisions(id: string, limit = 50): Promise<QuoteRevisionPage> {
+        const response = await expectOk(
+            await fetchWithAuth(`${API_URL}/api/v1/quotes/${id}/revisions?limit=${limit}`),
+            'Failed to load quote revisions',
+        );
+        return response.json();
+    },
+
+    /** The sent versions as a list oldest first, ready for the history panel. */
+    async revisionsOldestFirst(id: string, limit = 50): Promise<QuoteRevision[]> {
+        const page = await this.revisions(id, limit);
+        return [...(page.items ?? [])].reverse();
     },
 
     async analytics(): Promise<QuoteAnalytics> {

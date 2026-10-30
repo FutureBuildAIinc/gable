@@ -9156,6 +9156,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/quotes/{id}/revise": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Revise a quote as its next version
+         * @description Takes a sent, rejected or expired quote back to draft as its next version (same number, same id): version_number goes up by one, any live share link of the quote is revoked so the contractor cannot accept a version the dealer took back, the lifecycle stamps of the old version clear, and the builder gets the quote as a draft. An accepted or converted quote cannot be revised (409 invalid_state_transition, plain words); a draft is refused the same way because it is already editable. An expired quote revises, and still needs a new Valid until before it sends. The act, the link revocation, the audit row and the quote.revised event are one transaction. The optional body carries a plain words reason and the revision beside If-Match.
+         */
+        post: operations["quoteRevise"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/quotes/{id}/revisions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the quote's sent versions with their snapshots
+         * @description The sent versions of one quote, newest first, in the list envelope of ADR 0001 section 1. Each item carries its immutable snapshot: the quote's own body exactly as sent (the header and the lines, money in the integer units of the wire), written by the send inside its own transaction; a re-send of the same version adds no row. Behind the quote's own branch wall; a cursor minted for another ordering, or a parameter the route does not declare, is a 400.
+         */
+        get: operations["quoteRevisions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/quotes/exposure": {
         parameters: {
             query?: never;
@@ -21275,6 +21315,8 @@ export interface components {
              * @description Starts at 1 and moves on every write; the client sends it back as If-Match or in the body.
              */
             revision: number;
+            /** @description The quote's version; 1 until the first revise moves it (same number, same id, next version). */
+            version_number: number;
             /** Format: int64 */
             total_cents: number;
             /** Format: int64 */
@@ -21321,6 +21363,8 @@ export interface components {
              * @description Starts at 1 and moves on every write; the client sends it back as If-Match or in the body.
              */
             revision: number;
+            /** @description The quote's version; 1 until the first revise moves it (same number, same id, next version). */
+            version_number: number;
             /** Format: int64 */
             total_cents: number;
             /** Format: int64 */
@@ -21471,6 +21515,38 @@ export interface components {
             /** Format: int64 */
             unit_price_ten_thousandths: number;
             tally?: components["schemas"]["TallyRequest"];
+        };
+        /** @description The optional body of POST /quotes/{id}/revise. */
+        QuoteReviseRequest: {
+            /** @description Why the dealer revised, in plain words; kept with the act's audit row. */
+            reason?: string;
+            /**
+             * Format: int64
+             * @description The revision precondition, beside If-Match.
+             */
+            revision?: number;
+        };
+        /** @description One sent version of a quote, kept and readable; the immutable snapshot row the send wrote. */
+        QuoteRevision: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            quote_id: string;
+            version_number: number;
+            snapshot: components["schemas"]["Quote"];
+            /** @description The caller whose send wrote the row; empty when the sender is not a signed in user. */
+            created_by: string;
+            /** Format: date-time */
+            created_at: string;
+            /** @description Reserved; empty on every row today (a send writes the row, and a send carries no reason). */
+            reason: string;
+        };
+        /** @description The list envelope of ADR 0001 section 1 over the quote's sent versions, newest first. */
+        QuoteRevisionPage: {
+            items: components["schemas"]["QuoteRevision"][];
+            /** @description Opaque; pass it back verbatim as cursor. Null on the last page. */
+            next_cursor: string | null;
+            limit: number;
         };
         QuoteTransitionRequest: {
             to: components["schemas"]["QuoteStatus"];
@@ -41925,6 +42001,85 @@ export interface operations {
             413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
             428: components["responses"]["WirePreconditionRequired"];
+            500: components["responses"]["InternalErrorEither"];
+        };
+    };
+    quoteRevise: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description The document revision the client read, in quotes ("3"; the weak form W/"3" is accepted too). The body's revision field is the alternative; a write carrying neither is 428, a stale one 409 stale_revision, and * or a list of tags is a 400. */
+                "If-Match"?: components["parameters"]["IfMatch"];
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["QuoteReviseRequest"];
+            };
+        };
+        responses: {
+            /** @description The quote at its new version, back in draft. */
+            200: {
+                headers: {
+                    /** @description The quote's revision in quotes, for example "3". Send it back as If-Match. */
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Quote"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["WireConflict"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
+            428: components["responses"]["WirePreconditionRequired"];
+            500: components["responses"]["InternalErrorEither"];
+        };
+    };
+    quoteRevisions: {
+        parameters: {
+            query?: {
+                /** @description Page size of a converted list, 1 to 200, default 50. Anything else is a 400 naming limit (ADR 0001 section 2); it is never clamped. */
+                limit?: components["parameters"]["PageLimit"];
+                /** @description The opaque cursor of the previous page's next_cursor, passed back verbatim. A malformed cursor, or one minted for another ordering, is a 400 naming cursor. */
+                cursor?: components["parameters"]["Cursor"];
+            };
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The page of sent versions. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QuoteRevisionPage"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["WireNotFound"];
             500: components["responses"]["InternalErrorEither"];
         };
     };

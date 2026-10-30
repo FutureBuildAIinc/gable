@@ -13,6 +13,7 @@ import { formatCents } from '../../lib/utils.ts';
 import { onBranchChanged } from '../../lib/branch-listener.ts';
 import { formatDate } from '../../lib/dates.ts';
 import { isQuoteExpired } from './quoteExpiry.ts';
+import { versionLabel } from './quoteRevisions.ts';
 
 @customElement('gable-quote-view-tabs')
 export class GableQuoteViewTabs extends LitElement {
@@ -240,7 +241,7 @@ export class GableQuoteList extends LitElement {
                                 const expired = isQuoteExpired(quote);
                                 return html`
                                     <tr class="hover:bg-white/5 transition-colors cursor-pointer" @click=${() => router.navigate(`/quotes/${quote.id}`)}>
-                                        <td class="p-4 font-mono text-white/80">${quote.number}</td>
+                                        <td class="p-4 font-mono text-white/80" data-testid="quote-number-version">${versionLabel(quote.number, quote.version_number)}</td>
                                         <td class="p-4 text-white/80">${formatDate(quote.created_at)}</td>
                                         <td class="p-4 text-white/80" data-testid="quote-valid-until">
                                             ${quote.expires_at ? formatDate(quote.expires_at) : html`<span class="text-zinc-500">No date</span>`}
