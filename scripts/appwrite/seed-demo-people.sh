@@ -9,8 +9,12 @@
 # setup.sh, which writes the config file this reads (endpoint, project, team,
 # server key). Idempotent: a user or membership that exists is left alone.
 #
-# Usage: seed-demo-people.sh --config FILE
+# Usage: DEMO_PEOPLE_PASSWORD=... seed-demo-people.sh --config FILE
 # Needs: bash, curl, jq.
+#
+# The demo people's password comes from DEMO_PEOPLE_PASSWORD in the
+# environment only (FROM-PRINCIPAL item 329): the script holds no default and
+# refuses to run without one of at least 12 characters. It is never printed.
 #
 # What it does not do: it does not link a user to its Gable staff row or to the
 # yard grants in user_locations. Those key on the Appwrite user id and wait on
@@ -27,11 +31,12 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 [[ -n "$CONFIG" && -f "$CONFIG" ]] || { echo "seed-demo-people.sh: --config FILE (setup.sh's output) is required" >&2; exit 64; }
+PASSWORD="${DEMO_PEOPLE_PASSWORD:-}"
+(( ${#PASSWORD} >= 12 )) || { echo "seed-demo-people.sh: DEMO_PEOPLE_PASSWORD (at least 12 characters) must be set in the environment" >&2; exit 64; }
 command -v curl >/dev/null || { echo "seed-demo-people.sh: curl not found" >&2; exit 69; }
 command -v jq >/dev/null || { echo "seed-demo-people.sh: jq not found" >&2; exit 69; }
 
-# Invented, on a reserved domain. Not a credential for anything real.
-PASSWORD="demo-people-not-a-real-password"
+# Invented, on a reserved domain.
 DOMAIN="demo.gable.example"
 
 ENDPOINT="$(jq -r .endpoint "$CONFIG")"
