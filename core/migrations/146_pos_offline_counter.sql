@@ -15,8 +15,8 @@
 --      snapshots issued to enrolled registers per epoch.
 --   4. pos_offline_exceptions: the manager's offline replay exception queue,
 --      with partial unique indexes on sale_id and (register_id, device_epoch,
---      device_seq) that exclude sequence_reused, bad_signature and
---      replay_mismatch rows so duplicate or tampered replay attempts can be
+--      device_seq) that exclude sequence_reused, bad_signature,
+--      replay_mismatch, sequence_gap and unknown_tail rows so duplicate or tampered replay attempts can be
 --      recorded without displacing the original sale or exception. The
 --      warning_alert_id column holds the first customer warning a sale was sold
 --      past offline and warning_alert_ids every one of them (the CP-13 OW
@@ -140,11 +140,11 @@ CREATE TABLE IF NOT EXISTS pos_offline_exceptions (
 
 CREATE UNIQUE INDEX IF NOT EXISTS uq_pos_offline_exceptions_sale_id
     ON pos_offline_exceptions (sale_id)
-    WHERE reason_code NOT IN ('sequence_reused', 'bad_signature', 'replay_mismatch');
+    WHERE reason_code NOT IN ('sequence_reused', 'bad_signature', 'replay_mismatch', 'sequence_gap', 'unknown_tail');
 
 CREATE UNIQUE INDEX IF NOT EXISTS uq_pos_offline_exceptions_register_epoch_seq
     ON pos_offline_exceptions (register_id, device_epoch, device_seq)
-    WHERE reason_code NOT IN ('sequence_reused', 'bad_signature', 'replay_mismatch');
+    WHERE reason_code NOT IN ('sequence_reused', 'bad_signature', 'replay_mismatch', 'sequence_gap', 'unknown_tail');
 
 CREATE INDEX IF NOT EXISTS idx_pos_offline_exceptions_branch_status
     ON pos_offline_exceptions (branch_id, status, created_at DESC);

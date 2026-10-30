@@ -220,7 +220,9 @@ repeat a used sequence by definition), `bad_signature` rows (whose
 sequence and `id` are not proven, so the true sale of that number and `id`
 can still be recorded) and `replay_mismatch` rows (whose sequence and `id`
 differ from the sale already on file, so the row cannot take the same
-keys; the unique `sale_id` is partial the same way), and the check above
+keys; the unique `sale_id` is partial the same way) and `sequence_gap` and
+unknown tail rows (which name a range and sit at a number a `late_after_gap` row
+may hold, and two of one epoch may share one), and the check above
 reads both before either insert. A `sequence_reused` item
 that a manager accepts posts with its device sequence left null on the sale
 row and kept on its exception row, so the posting never collides with the
