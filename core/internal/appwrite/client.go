@@ -15,7 +15,6 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"strconv"
 	"strings"
 )
 
@@ -183,9 +182,18 @@ func (c *Client) GetUser(ctx context.Context, id string) (User, error) {
 // an error, never a definite miss. Memberships of an API created team carry
 // the confirm flag as set at creation.
 func (c *Client) ListMemberships(ctx context.Context, teamID, userID string) (m Membership, found bool, err error) {
+	// Appwrite 1.5 and later take each query as a JSON object.
+	byUser, err := json.Marshal(map[string]any{"method": "equal", "attribute": "userId", "values": []string{userID}})
+	if err != nil {
+		return Membership{}, false, err
+	}
+	pageSize, err := json.Marshal(map[string]any{"method": "limit", "values": []int{25}})
+	if err != nil {
+		return Membership{}, false, err
+	}
 	q := url.Values{}
-	q.Add("queries[]", `equal("userId", [`+strconv.Quote(userID)+`])`)
-	q.Add("queries[]", "limit(25)")
+	q.Add("queries[]", string(byUser))
+	q.Add("queries[]", string(pageSize))
 	raw, err := c.do(ctx, http.MethodGet, "/v1/teams/"+url.PathEscape(teamID)+"/memberships?"+q.Encode(), nil, true, "")
 	if err != nil {
 		return Membership{}, false, err
