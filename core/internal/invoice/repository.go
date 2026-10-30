@@ -93,9 +93,9 @@ func wall(alias string, branch, grants int) string {
 }
 
 // overdueExpr is the computed is_overdue flag: open and due before the
-// branch's today.
-const overdueExpr = `(i.status IN ('UNPAID', 'PARTIAL') AND i.due_date IS NOT NULL
-	AND i.due_date < (NOW() AT TIME ZONE COALESCE((SELECT lc.timezone FROM locations lc WHERE lc.id = i.branch_id), 'UTC'))::date)`
+// branch's today. It is the shared expression, so the portal reads the desk's
+// rule and the two cannot answer differently about the same invoice.
+var overdueExpr = OverdueExpr("i")
 
 // openExpr is the open amount in cents, stored by the AR core: the total less
 // the live applications, zero when paid, written off or void.
@@ -103,7 +103,7 @@ const openExpr = `ROUND(i.amount_open * 100)::bigint`
 
 // summaryColumns is the one invoice header projection: a list item and the
 // head of the full document both read it.
-const summaryColumns = `
+var summaryColumns = `
 	i.id, i.number, i.branch_id, i.customer_id, COALESCE(c.name, ''), i.order_id, i.project_id, i.ship_to_id,
 	i.status, i.revision, i.currency, i.origin, i.delivery_type, i.picked_up_by, i.delivery_id,
 	to_char(i.invoice_date, 'YYYY-MM-DD'), to_char(i.due_date, 'YYYY-MM-DD'), i.payment_terms_id,

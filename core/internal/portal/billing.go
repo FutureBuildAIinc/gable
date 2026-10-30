@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/gablelbm/gable/internal/account"
+	"github.com/gablelbm/gable/internal/invoice"
 	"github.com/gablelbm/gable/pkg/branchctx"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -168,11 +169,49 @@ func (s *Service) computeCustomerAging(ctx context.Context, customerID uuid.UUID
 	return out, nil
 }
 
+// customerBranchDay is the calendar day of the branch the customer belongs
+// to, which is the day an invoice falls due on: the house rule for money.
+// The aging is read on that day, so the billing summary's tiles and the
+// desk's aging answer alike, and a branch west of UTC gets the same answer
+// the desk gives it instead of the session's day.
+//
+// The branch is the customer's own primary branch, and the day is read
+// through the AR core's LocalDate, the way a portal payment dates itself
+// (payments.go). A customer with no branch to read falls back to the
+// session's day, as the aging always did.
+func (s *Service) customerBranchDay(ctx context.Context, customerID uuid.UUID) (time.Time, error) {
+	now := s.now().UTC()
+	if s.accountSvc == nil {
+		return now, nil
+	}
+	pgRepo, ok := s.pgRepo()
+	if !ok || pgRepo == nil {
+		return now, nil
+	}
+	var branchID uuid.UUID
+	err := pgRepo.db.GetExecutor(ctx).QueryRow(ctx,
+		`SELECT primary_branch_id FROM customers WHERE id = $1`, customerID).Scan(&branchID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return now, nil
+		}
+		return time.Time{}, fmt.Errorf("failed to read the customer's branch: %w", err)
+	}
+	day, err := s.accountSvc.LocalDate(ctx, branchID, now)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("failed to read the branch's day: %w", err)
+	}
+	return day, nil
+}
+
 // GetBillingSummary returns balance tiles, receivable aging buckets, and
 // per-project financial/delivery summaries in integer cents.
 func (s *Service) GetBillingSummary(ctx context.Context, customerID uuid.UUID) (*PortalBillingSummaryDTO, error) {
-	now := time.Now().UTC()
-	aging, err := s.computeCustomerAging(ctx, customerID, now)
+	asOf, err := s.customerBranchDay(ctx, customerID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read the customer's branch day: %w", err)
+	}
+	aging, err := s.computeCustomerAging(ctx, customerID, asOf)
 	if err != nil {
 		return nil, fmt.Errorf("failed to compute aging: %w", err)
 	}
@@ -215,10 +254,10 @@ func (s *Service) GetBillingSummary(ctx context.Context, customerID uuid.UUID) (
 		exec := pgRepo.db.GetExecutor(ctx)
 		if err := exec.QueryRow(ctx, `
 			SELECT
-				COUNT(*) FILTER (WHERE status IN ('UNPAID', 'PARTIAL')),
-				COUNT(*) FILTER (WHERE status IN ('UNPAID', 'PARTIAL') AND due_date < CURRENT_DATE)
-			FROM invoices
-			WHERE customer_id = $1
+				COUNT(*) FILTER (WHERE i.status IN ('UNPAID', 'PARTIAL')),
+				COUNT(*) FILTER (WHERE `+invoice.OverdueExpr("i")+`)
+			FROM invoices i
+			WHERE i.customer_id = $1
 		`, customerID).Scan(&tiles.OpenInvoiceCount, &tiles.OverdueInvoiceCount); err != nil {
 			return nil, fmt.Errorf("failed to count open invoices: %w", err)
 		}

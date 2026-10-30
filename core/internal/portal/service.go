@@ -37,6 +37,11 @@ type Service struct {
 	orderSvc     *order.Service
 	productSvc   *product.Service
 
+	// now is the service's clock: the instant the portal dates its money on.
+	// A test moves it, so a branch's own day can be read on both sides of
+	// its midnight.
+	now func() time.Time
+
 	// quoteSvc owns the quote LIFECYCLE. The portal never writes a state
 	// transition itself — accept and decline go through
 	// quote.Service.UpdateState so quote.validateStateTransition stays the
@@ -81,6 +86,7 @@ func NewService(
 		inventorySvc: inventorySvc,
 		orderSvc:     orderSvc,
 		productSvc:   productSvc,
+		now:          time.Now,
 	}
 }
 
@@ -91,6 +97,11 @@ func (s *Service) WithQuoteService(quoteSvc *quote.Service) *Service {
 	s.quoteSvc = quoteSvc
 	return s
 }
+
+// WithClockForTest sets the clock the portal reads its business day on (the
+// service reads time.Now otherwise). The portal dates money on the branch's
+// own day, so a test that moves the clock moves that day with it.
+func (s *Service) WithClockForTest(now func() time.Time) *Service { s.now = now; return s }
 
 // WithParsingService wires Gable's material list and photo intake service.
 func (s *Service) WithParsingService(parsingSvc *parsing.Service) *Service {

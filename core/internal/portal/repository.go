@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/gablelbm/gable/internal/customer/customerlink"
+	"github.com/gablelbm/gable/internal/invoice"
 	"github.com/gablelbm/gable/internal/quote"
 	"github.com/gablelbm/gable/pkg/database"
 	"github.com/google/uuid"
@@ -209,13 +210,13 @@ func (r *PostgresRepository) GetCustomerARSummary(ctx context.Context, customerI
 		return 0, 0, 0, fmt.Errorf("failed to get current balance: %w", err)
 	}
 
-	// Past due: subset of the balance whose due_date is already in the past.
+	// Past due: subset of the balance whose due_date is already in the past,
+	// read on the branch's own day, the same rule the desk reads.
 	pastDueQuery := `
-		SELECT COALESCE(SUM(total_amount), 0)::float8
-		FROM invoices
-		WHERE customer_id = $1
-		  AND status IN ('UNPAID', 'PARTIAL')
-		  AND due_date < CURRENT_DATE
+		SELECT COALESCE(SUM(i.total_amount), 0)::float8
+		FROM invoices i
+		WHERE i.customer_id = $1
+		  AND ` + invoice.OverdueExpr("i") + `
 	`
 	err = r.db.GetExecutor(ctx).QueryRow(ctx, pastDueQuery, customerID).Scan(&pastDue)
 	if err != nil {
@@ -306,7 +307,7 @@ func (r *PostgresRepository) GetInvoiceByIDAndCustomer(ctx context.Context, invo
 	query := `
 		SELECT i.id, i.order_id, i.status, i.total_amount, i.subtotal, i.tax_amount,
 		       (SELECT pt.code FROM payment_terms pt WHERE pt.id = i.payment_terms_id), i.due_date, i.paid_at, i.created_at,
-		       i.number, (i.status IN ('UNPAID', 'PARTIAL') AND i.due_date < CURRENT_DATE)
+		       i.number, ` + invoice.OverdueExpr("i") + `
 		FROM invoices i
 		WHERE i.id = $1 AND i.customer_id = $2
 	`
