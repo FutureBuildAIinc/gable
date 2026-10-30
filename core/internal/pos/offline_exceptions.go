@@ -298,8 +298,6 @@ func (s *Service) ResolveOfflineException(ctx context.Context, id uuid.UUID, in 
 			if dev == nil {
 				return conflict("resolution_not_allowed", "no enrolment holds the sale's epoch: write it off")
 			}
-			// the row leaves the open queue first, so the account room
-			// the sale is judged against does not count it twice
 			if err := s.repo.ResolveOfflineExceptionRow(ctx, e.ID, "resolved", in.Action, in.Reason, actor, nil); err != nil {
 				return err
 			}
@@ -531,10 +529,10 @@ type resolvedInsert struct {
 	restated       []restatedLine
 }
 
-// postResolvedSale writes the sale row with the client's id, its provenance
-// and its lines as recorded (or restated), settles the replaced cart in id
-// order (ADR 0011 3.2 step 1), then runs the completion's body with the
-// verdict.
+// postResolvedSale settles the replaced cart and takes the body's locks in
+// the sync's order (ADR 0011 3.2 step 1, ADR 0005 section 11), writes the
+// sale row with the client's id, its provenance and its lines as recorded
+// (or restated), then runs the completion's body with the verdict.
 func (s *Service) postResolvedSale(ctx context.Context, it *offlineItem, v *offlineVerdict, ins resolvedInsert, actor string) (*Sale, error) {
 	id := uuid.MustParse(it.Sale.ClientID)
 	walkInID, defaultCurrency, err := s.repo.WalkInCustomer(ctx)
@@ -558,21 +556,20 @@ func (s *Service) postResolvedSale(ctx context.Context, it *offlineItem, v *offl
 		r := uuid.MustParse(*it.Sale.ReplacesSaleID)
 		replaced = &r
 	}
-	if replaced != nil && replaced.String() < id.String() {
-		if err := s.settleReplacedCart(ctx, it, *replaced); err != nil {
-			return nil, err
-		}
+	// the sync's order (PR 235): the cart, 1b (none under a late post, whose
+	// sale names no session) and 1a, all before the insert
+	lockSession := &session
+	if v.latePost {
+		lockSession = nil
+	}
+	if err := s.lockBeforeOfflineInsert(ctx, it, replaced, lockSession, sale.CustomerID); err != nil {
+		return nil, err
 	}
 	if err := s.repo.CreateSale(ctx, sale); err != nil {
 		return nil, err
 	}
 	if err := s.repo.MarkResolvedOfflineSale(ctx, id, it, v.snapshotID, ins.seq, ins.offlineSession); err != nil {
 		return nil, err
-	}
-	if replaced != nil && replaced.String() >= id.String() {
-		if err := s.settleReplacedCart(ctx, it, *replaced); err != nil {
-			return nil, err
-		}
 	}
 	lines, err := s.offlineLines(ctx, it)
 	if err != nil {

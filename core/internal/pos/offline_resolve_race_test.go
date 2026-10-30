@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/gablelbm/gable/internal/pos"
@@ -292,6 +293,64 @@ func TestOfflineResolve_TheDayCloseBesideTwoLatePosts(t *testing.T) {
 			JOIN till_day_closes c ON c.branch_id = $1 AND c.business_date = i.invoice_date AND c.closed_at < i.created_at
 			WHERE t.id IN ($2, $3)`, f.branchID, s1.ClientID, s2.ClientID); n != 0 {
 			t.Errorf("round %d: %d late posts dated into a day closed before them", round, n)
+		}
+	}
+}
+
+// RULE (ADR 0011 3.2 step 1 and ADR 0005 section 11, MONEY-CHECKLIST 3, PR
+// 239 fix round 1): a manager's retry of a named customer's sale beside two
+// live completions of that customer at once. Each live side holds 1a and
+// then takes the customer row FOR UPDATE (step 7); the resolution takes 1a
+// before its insert's FOR KEY SHARE on that row. Nothing deadlocks or
+// faults, every sale posts once, and the stored stock moved by exactly the
+// three sales.
+func TestOfflineResolve_ANamedRetryBesideLiveCompletionsOfTheCustomer(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	f := newFixture(t, testutil.RequireDBMaxConns(t, 4))
+	offlinePolicyOn(t, f)
+	for round := 0; round < 8; round++ {
+		b := newOfflineBench(t, f, "REG-OXN-"+uuid.NewString()[:8])
+		mustExec(t, f.db, `UPDATE inventory SET quantity = 100, allocated = 0 WHERE product_id = $1`, f.productID)
+		raw, sale := b.build(t, saleSpec{customer: uuidPtr(f.customerID), lines: []offlineLine{line(f.productID, "101")}})
+		id := *wantOutcome(t, b.sync(t, raw), sale, pos.OfflineRefused, "insufficient_stock").ExceptionID
+		mustExec(t, f.db, `UPDATE inventory SET quantity = quantity + 101 WHERE product_id = $1`, f.productID)
+		live1, total1 := f.cartOf("1", &f.customerID)
+		live2, total2 := f.cartOf("2", &f.customerID)
+		rev1 := num(t, f.getSale(t, live1), "revision")
+		rev2 := num(t, f.getSale(t, live2), "revision")
+		_, rev, _ := exceptionState(t, f, id)
+		before := storedStock(t, f)
+
+		var retryErr error
+		var r1, r2 resp
+		race(
+			func() { _, retryErr = resolveAt(f, id, pos.ResolveRetry, offlineManager, rev) },
+			// the live sides start a little later each round, sweeping the
+			// resolution's window between its insert and the body
+			func() {
+				time.Sleep(time.Duration(round) * 12 * time.Millisecond)
+				r1 = f.completeSaleWithRevision(live1, rev1, tender("account", total1))
+			},
+			func() {
+				time.Sleep(time.Duration(round) * 15 * time.Millisecond)
+				r2 = f.completeSaleWithRevision(live2, rev2, tender("account", total2))
+			},
+		)
+		if retryErr != nil {
+			t.Fatalf("round %d: the retry failed: %v", round, retryErr)
+		}
+		if r1.status != http.StatusOK || r2.status != http.StatusOK {
+			t.Fatalf("round %d: live completions = %d %s, %d %s", round, r1.status, r1.raw, r2.status, r2.raw)
+		}
+		if n := countOf(t, f.db, `SELECT count(*) FROM pos_transactions WHERE id IN ($1, $2, $3) AND status = 'COMPLETED'
+			AND customer_id = $4`, sale.ClientID, live1, live2, f.customerID); n != 3 {
+			t.Errorf("round %d: %d of the three sales completed on the customer, want 3", round, n)
+		}
+		if moved := before - storedStock(t, f); moved != 104 {
+			t.Errorf("round %d: stock moved %d, want 104", round, moved)
+		}
+		if st, _, _ := exceptionState(t, f, id); st != "resolved" {
+			t.Errorf("round %d: the retried row is %s, want resolved", round, st)
 		}
 	}
 }
