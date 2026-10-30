@@ -64,11 +64,12 @@ func (h *Handler) ShellSignIn(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, r, httpx.Unauthorized(refusedMessage))
 		return
 	}
-	email, password, ok := h.passwordAttempt(w, r)
+	email, password, begun, ok := h.passwordAttempt(w, r)
 	if !ok {
 		return
 	}
 	t, err := h.svc.ShellSignIn(r.Context(), email, password)
+	h.holdFloor(r, begun)
 	if err != nil {
 		h.shellFailure(w, r, err)
 		return

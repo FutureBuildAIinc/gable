@@ -35,7 +35,16 @@ type HandlerConfig struct {
 	// Insecure drops the Secure attribute of the session cookie. It exists
 	// only for tests that run over plain http.
 	Insecure bool
+	// SignInFloor is the least time a password answer (200, 401 or 503) takes
+	// from the start of the attempt. Zero uses DefaultSignInFloor; negative
+	// turns the floor off (tests only).
+	SignInFloor time.Duration
 }
+
+// DefaultSignInFloor sits above Appwrite's slow path (a password hash), so an
+// unknown address, which Appwrite answers without hashing, takes as long as a
+// wrong password.
+const DefaultSignInFloor = time.Second
 
 // Handler serves the staff sign in, refresh and sign out routes.
 type Handler struct {
@@ -152,10 +161,17 @@ func (h *Handler) limited(w http.ResponseWriter, r *http.Request, d time.Duratio
 // answer alike: the dealer's allowlist before any credential is read, the
 // body, then one budget per client address and per email across both doors.
 // It answers the refusal itself and reports false.
-func (h *Handler) passwordAttempt(w http.ResponseWriter, r *http.Request) (email, password string, ok bool) {
+//
+// On success it also returns the attempt's start, taken at its end: past the
+// guard, the body and both limits, right before the service call. The floor
+// that start feeds must not be run out by work before it, or a client that
+// sends its body late would wait out the floor before the credential check
+// begins. The allowlist 403, the 400 and the 429 answer before Appwrite and
+// are the same for every address, so they carry no floor.
+func (h *Handler) passwordAttempt(w http.ResponseWriter, r *http.Request) (email, password string, begun time.Time, ok bool) {
 	if h.emailPasswordAllowed != nil && !h.emailPasswordAllowed(r.Context()) {
 		httpx.WriteError(w, r, httpx.Forbidden("Sign in with email and password is not allowed for this dealer"))
-		return "", "", false
+		return "", "", time.Time{}, false
 	}
 	var body struct {
 		Email    string `json:"email"`
@@ -164,17 +180,40 @@ func (h *Handler) passwordAttempt(w http.ResponseWriter, r *http.Request) (email
 	r.Body = http.MaxBytesReader(w, r.Body, 8<<10)
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		httpx.WriteError(w, r, httpx.BadRequest("request body must be {email, password}"))
-		return "", "", false
+		return "", "", time.Time{}, false
 	}
 	if ok, d := h.byAddress.allow(h.cfg.Trusted.Of(r)); !ok {
 		h.limited(w, r, d)
-		return "", "", false
+		return "", "", time.Time{}, false
 	}
 	if ok, d := h.byEmail.allow(strings.ToLower(strings.TrimSpace(body.Email))); !ok {
 		h.limited(w, r, d)
-		return "", "", false
+		return "", "", time.Time{}, false
 	}
-	return body.Email, body.Password, true
+	return body.Email, body.Password, time.Now(), true
+}
+
+// holdFloor waits until the sign in floor has passed since begun, so every
+// password answer takes at least that long. It never shortens a slower one
+// and gives up if the request is cancelled.
+func (h *Handler) holdFloor(r *http.Request, begun time.Time) {
+	floor := h.cfg.SignInFloor
+	if floor == 0 {
+		floor = DefaultSignInFloor
+	}
+	if floor < 0 {
+		return
+	}
+	wait := floor - time.Since(begun)
+	if wait <= 0 {
+		return
+	}
+	t := time.NewTimer(wait)
+	defer t.Stop()
+	select {
+	case <-t.C:
+	case <-r.Context().Done():
+	}
 }
 
 // SignIn is POST /api/v1/auth/signin. A presented session id is ignored and a
@@ -184,11 +223,12 @@ func (h *Handler) SignIn(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, r, httpx.Unauthorized(refusedMessage))
 		return
 	}
-	email, password, ok := h.passwordAttempt(w, r)
+	email, password, begun, ok := h.passwordAttempt(w, r)
 	if !ok {
 		return
 	}
 	id, who, err := h.svc.SignIn(r.Context(), email, password, "web")
+	h.holdFloor(r, begun)
 	switch {
 	case errors.Is(err, ErrRefused):
 		httpx.WriteError(w, r, httpx.Unauthorized(refusedMessage))

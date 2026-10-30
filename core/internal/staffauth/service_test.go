@@ -26,9 +26,20 @@ type fakeDir struct {
 	memberErr    error
 	ended        []string
 	sessionsMade int
+	// answer, when set, gives the delay and error of one password call by
+	// email, like Appwrite answering an unknown address at once and a wrong
+	// password after its hash.
+	answer func(email string) (time.Duration, error)
 }
 
 func (f *fakeDir) CreateEmailPasswordSession(ctx context.Context, email, pw string) (appwrite.Session, error) {
+	if f.answer != nil {
+		d, err := f.answer(email)
+		time.Sleep(d)
+		if err != nil {
+			return appwrite.Session{}, err
+		}
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.signInErr != nil {

@@ -135,3 +135,42 @@ func TestLoad_OutboxRetentionDays(t *testing.T) {
 		t.Errorf("the cap itself must pass unchanged: %d, %v", cfg.OutboxRetentionDays, err)
 	}
 }
+
+// The sign in timing floor (the password doors of ADR 0012): every password
+// answer waits it out, so the setting must stay above Appwrite's password
+// hash cost. The default is one second; a malformed value or one outside the
+// accepted band refuses the boot instead of quietly weakening the floor, and
+// the typed value is never echoed back anywhere.
+func TestLoad_StaffSigninFloorMS(t *testing.T) {
+	t.Setenv("FB_BRAIN_ENABLED", "false")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.StaffSigninFloorMS != 1000 {
+		t.Errorf("default floor = %d ms, want 1000", cfg.StaffSigninFloorMS)
+	}
+	t.Setenv("STAFF_SIGNIN_FLOOR_MS", "2000")
+	if cfg, err = Load(); err != nil || cfg.StaffSigninFloorMS != 2000 {
+		t.Errorf("Load() with STAFF_SIGNIN_FLOOR_MS=2000 = %d (%v), want 2000", cfg.StaffSigninFloorMS, err)
+	}
+	t.Setenv("STAFF_SIGNIN_FLOOR_MS", "")
+	if cfg, err = Load(); err != nil || cfg.StaffSigninFloorMS != 1000 {
+		t.Errorf("Load() with an empty STAFF_SIGNIN_FLOOR_MS = %d (%v), want the 1000 default", cfg.StaffSigninFloorMS, err)
+	}
+	// Every refusal reads the same, so none can carry the typed value.
+	var first string
+	for _, v := range []string{"249", "0", "-1", "-1000", "10001", "1s", "500ms"} {
+		t.Setenv("STAFF_SIGNIN_FLOOR_MS", v)
+		cfg, err := Load()
+		if err == nil || !strings.Contains(err.Error(), "STAFF_SIGNIN_FLOOR_MS") {
+			t.Errorf("Load() with STAFF_SIGNIN_FLOOR_MS=%q = (%v, %v), want an error naming the variable", v, cfg, err)
+			continue
+		}
+		if first == "" {
+			first = err.Error()
+		} else if err.Error() != first {
+			t.Errorf("the refusal for %q differs from the others, so it may echo the typed value: %q", v, err.Error())
+		}
+	}
+}

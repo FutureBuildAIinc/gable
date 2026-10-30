@@ -95,7 +95,7 @@ func newRedirectRig(t *testing.T, d *fakeDir, maxConns int, allowed ...string) *
 	for _, m := range allowed {
 		ok[m] = true
 	}
-	h := NewHandler(svc, HandlerConfig{Origin: ownOrigin}).WithAllowed(func(_ context.Context, m string) bool { return ok[m] })
+	h := NewHandler(svc, HandlerConfig{SignInFloor: -1, Origin: ownOrigin}).WithAllowed(func(_ context.Context, m string) bool { return ok[m] })
 	mux := http.NewServeMux()
 	h.RegisterRoutes(mux)
 	return &redirectRig{dir: dir, svc: svc, clk: clk, mux: mux, h: h}
