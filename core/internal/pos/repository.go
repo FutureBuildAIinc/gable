@@ -350,7 +350,7 @@ type Repository interface {
 	OfflineSnapshotByID(ctx context.Context, id uuid.UUID) (*offlineSnapshotRow, error)
 	OfflineSessionFacts(ctx context.Context, id uuid.UUID) (*offlineSessionFacts, error)
 	BranchDayClosedOn(ctx context.Context, branch uuid.UUID, date time.Time) (bool, error)
-	OfflineAccountUsedSince(ctx context.Context, register string, customer uuid.UUID, since time.Time) (int64, error)
+	OfflineAccountUsedSince(ctx context.Context, register string, customer uuid.UUID, since time.Time, sale uuid.UUID) (int64, error)
 
 	// The manager step up (CP-04 slice 3)
 	FindStepUpManager(ctx context.Context, manager string) (*StepUpManager, bool, error)

@@ -527,7 +527,10 @@ func (r *PostgresRepository) BranchDayClosedOn(ctx context.Context, branch uuid.
 // OfflineAccountUsedSince sums the offline account tenders of a register on
 // an account the server recorded after a time (ADR 0011 6.2): posted sales
 // and verified exception rows, each sale once, whatever snapshot it names.
-func (r *PostgresRepository) OfflineAccountUsedSince(ctx context.Context, register string, customer uuid.UUID, since time.Time) (int64, error) {
+// The sale being judged is left out: a re-offered held sale's own held row
+// is not counted against it.
+func (r *PostgresRepository) OfflineAccountUsedSince(ctx context.Context, register string, customer uuid.UUID, since time.Time,
+	sale uuid.UUID) (int64, error) {
 	var used int64
 	err := r.ex(ctx).QueryRow(ctx, `SELECT
 		COALESCE((SELECT SUM(ROUND(tn.amount * 100))::bigint FROM pos_tenders tn JOIN pos_transactions t ON t.id = tn.transaction_id
@@ -536,8 +539,9 @@ func (r *PostgresRepository) OfflineAccountUsedSince(ctx context.Context, regist
 		+ COALESCE((SELECT SUM(e.account_cents) FROM pos_offline_exceptions e
 			WHERE e.register_id = $1 AND e.customer_id = $2 AND e.created_at > $3
 			AND e.reason_code NOT IN ('bad_signature', 'replay_mismatch', 'sequence_gap', 'sold_past_warning')
+			AND e.sale_id <> $4
 			AND NOT EXISTS (SELECT 1 FROM pos_transactions p WHERE p.id = e.sale_id)), 0)`,
-		register, customer, since).Scan(&used)
+		register, customer, since, sale).Scan(&used)
 	if err != nil {
 		return 0, fmt.Errorf("failed to read the account's offline room: %w", err)
 	}

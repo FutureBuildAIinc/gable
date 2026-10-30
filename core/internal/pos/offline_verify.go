@@ -367,7 +367,8 @@ func (s *Service) verifyOfflineSale(ctx context.Context, branch uuid.UUID, dev *
 		// account the server recorded after the snapshot was issued.
 		room := min64(acct.OfflineRoomCents, max64(acct.CreditLimitCents-acct.OpenReceivableCents, 0))
 		room = max64(min64(room, snap.Policy.AccountCapCents), 0)
-		used, err := s.repo.OfflineAccountUsedSince(ctx, sale.RegisterID, uuid.MustParse(acct.CustomerID), snapRow.CreatedAt)
+		used, err := s.repo.OfflineAccountUsedSince(ctx, sale.RegisterID, uuid.MustParse(acct.CustomerID), snapRow.CreatedAt,
+			uuid.MustParse(sale.ClientID))
 		if err != nil {
 			return nil, err
 		}
