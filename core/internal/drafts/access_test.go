@@ -56,21 +56,18 @@ func newAccessFixture(t *testing.T, db *database.DB) *accessFixture {
 	t.Setenv("AUTH_MODE", "dev")
 	ctx := context.Background()
 	f := &accessFixture{t: t, db: db, customerID: uuid.New(), productID: uuid.New(), sku: "ACC-" + uuid.NewString()[:8]}
-	branch := `(SELECT value::uuid FROM system_settings WHERE key = 'default_branch_id')`
-	if err := db.Pool.QueryRow(ctx, `SELECT value::uuid FROM system_settings WHERE key = 'default_branch_id'`).Scan(&f.branchID); err != nil {
-		t.Fatal(err)
-	}
+	// The branch the fixture owns: a locations row of its own carrying its
+	// own tax rate. The quotes and orders it creates name it, so they stand
+	// on a branch no other package's fixture writes and no other package's
+	// fixture can move.
+	f.branchID = testutil.OwnBranch(t, db, "0.088750")
 	if _, err := db.Pool.Exec(ctx, `INSERT INTO customers (id, name, account_number, primary_branch_id)
-		VALUES ($1, 'Access Wire Co', $2, `+branch+`)`, f.customerID, "ACC-"+uuid.NewString()[:8]); err != nil {
+		VALUES ($1, 'Access Wire Co', $2, $3)`, f.customerID, "ACC-"+uuid.NewString()[:8], f.branchID); err != nil {
 		t.Fatalf("seed customer: %v", err)
 	}
 	if _, err := db.Pool.Exec(ctx, `INSERT INTO products (id, sku, description, uom_primary, base_price)
 		VALUES ($1, $2, '2x4x8 SPF', 'PCS', 5.5)`, f.productID, f.sku); err != nil {
 		t.Fatalf("seed product: %v", err)
-	}
-	if _, err := db.Pool.Exec(ctx, `UPDATE locations SET default_tax_rate = 0.088750
-		WHERE id = `+branch); err != nil {
-		t.Fatalf("seed branch rate: %v", err)
 	}
 
 	orderSvc := order.NewService(order.NewRepository(db)).

@@ -63,6 +63,8 @@ export function locationUpdateFromLocation(loc: Location): LocationUpdate {
         default_tax_rate: loc.default_tax_rate,
         cash_rounding_mode: loc.cash_rounding_mode,
         timezone: loc.timezone,
+        // The walk-in identity floor (CP-17a): null is the branch country default.
+        walk_in_identity_cents: loc.walk_in_identity_cents,
         active: loc.active,
     };
 }

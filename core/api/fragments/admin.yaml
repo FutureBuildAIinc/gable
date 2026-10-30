@@ -768,8 +768,78 @@ paths:
         "413": { $ref: "#/components/responses/PayloadTooLarge" }
         "422": { $ref: "#/components/responses/UnprocessableEntity" }
         "500": { $ref: "#/components/responses/InternalError" }
+  /api/v1/admin/large-cash/settings:
+    get:
+      operationId: adminGetLargeCashSettings
+      tags: [admin]
+      summary: The dealer's large cash settings
+      description: >-
+        The dealer's default country and the Canadian dealer threshold
+        (CP-17a): on or off and its amount. The Canadian threshold is a
+        dealer policy, never a legal duty, and it never produces a FINTRAC
+        report. Admin or owner.
+      responses:
+        "200":
+          description: The dealer's large cash settings.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminLargeCashSettings"
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "500": { $ref: "#/components/responses/InternalError" }
+    put:
+      operationId: adminSaveLargeCashSettings
+      tags: [admin]
+      summary: Save the dealer's large cash settings
+      description: >-
+        Writes the dealer's default country and the Canadian dealer
+        threshold (on or off, amount) as system_settings rows, one
+        transaction (CP-17a). Admin or owner. Omitted fields keep their
+        stored value.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminLargeCashSettings"
+      responses:
+        "200":
+          description: The saved settings.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminLargeCashSettings"
+        "400": { $ref: "#/components/responses/BadRequestEither" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409": { $ref: "#/components/responses/ConflictEither" }
+        "413": { $ref: "#/components/responses/PayloadTooLarge" }
+        "422": { $ref: "#/components/responses/UnprocessableEntity" }
+        "500": { $ref: "#/components/responses/InternalError" }
 components:
   schemas:
+    AdminLargeCashSettings:
+      type: object
+      required: [ca_default_threshold_cents, ca_enabled, ca_threshold_cents, country_default]
+      description: >-
+        The dealer's large cash settings (CP-17a): the default country a
+        branch with none of its own falls back to, and the Canadian dealer
+        threshold, off by default.
+      properties:
+        country_default:
+          type: string
+          description: The dealer's default country, two letters, or empty when unset.
+        ca_enabled:
+          type: boolean
+        ca_threshold_cents:
+          type: integer
+          format: int64
+        ca_default_threshold_cents:
+          type: integer
+          format: int64
     ApiKey:
       type: object
       required: [id, name, prefix, scopes, branch_id, created_at, last_used_at, revoked_at]

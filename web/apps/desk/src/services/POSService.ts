@@ -12,6 +12,7 @@ import type {
     SaleSummary,
     QuickSearchResult,
     TenderMethod,
+    ExchangeTenderMethod,
     CounterReturn,
     RefundMethod,
     TillSession,
@@ -48,7 +49,9 @@ import type {
     ReturnFigures,
     StepUpManager,
     StepUpApproval,
+    LargeCashPreview,
 } from '../types/pos.ts';
+export type { LargeCashPreview };
 import { fetchWithAuth } from './fetchClient';
 import { parseApiError, ifMatch } from './apiError';
 import { openAuthedPdf } from '../lib/authedPdf';
@@ -113,6 +116,20 @@ export interface TenderIn {
     /** The cashier looked at the payer's ID (a check or a charge); the number is never taken. */
     id_checked?: boolean;
     id_type?: IdType;
+    /** The kind of check the tender is (CP-17a): personal_check, cashiers_check, bank_draft, travelers_check or money_order. */
+    instrument?: string;
+}
+
+/** The payer identity a large cash crossing captures at the counter (CP-17a); the sensitive values are sealed at rest. */
+export interface PayerCaptureIn {
+    name: string;
+    address: string;
+    occupation: string;
+    date_of_birth: string;
+    id_type: string;
+    id_number: string;
+    taxpayer_id: string;
+    third_party_payer: boolean;
 }
 
 /** One returned line of a return or an exchange. */
@@ -134,6 +151,12 @@ export interface ExchangeIn {
     sale_lines: Array<{ product_id: string; quantity: string }>;
     tenders?: TenderIn[];
     acknowledged_alert_ids?: string[];
+    /** The payer's details the counter captured for a large cash crossing (CP-17a). */
+    payer?: PayerCaptureIn;
+    /** The manager's suspected avoidance mark (CP-17a). */
+    suspected_avoidance?: boolean;
+    /** The preview only: the method the counter will tender for the difference. */
+    tender_method?: ExchangeTenderMethod;
 }
 
 export const posService = {
@@ -181,12 +204,14 @@ export const posService = {
         return response.json();
     },
 
-    /** Sends the completed sale's receipt to the account's contact; a refusal carries the server's words. */
-    async emailReceipt(saleId: string): Promise<void> {
-        await expectOk(
+    /** Sends the completed sale's receipt to the account's contact; a refusal carries the server's words.
+     *  The answer names the queued delivery row, whose status is what actually happened. */
+    async emailReceipt(saleId: string): Promise<{ status: 'queued'; delivery_id?: string }> {
+        const response = await expectOk(
             await fetchWithAuth(`${API_URL}/api/v1/pos/transactions/${saleId}/receipt/email`, { method: 'POST' }),
             'Failed to email the receipt',
         );
+        return response.json();
     },
 
     async addItem(saleId: string, productID: string, quantity: string, uom?: string): Promise<Sale> {
@@ -197,6 +222,34 @@ export const posService = {
                 body: JSON.stringify({ line: { product_id: productID, quantity, uom } }),
             }),
             'Failed to add the item',
+        );
+        return response.json();
+    },
+
+    /** Adds the product with a tint attached (row CP-16), or replaces an open cart line in one act when lineId is given. */
+    async addItemTint(
+        saleId: string,
+        productID: string,
+        tint: Record<string, unknown>,
+        quantity = '1',
+        uom?: string,
+        lineId?: string,
+    ): Promise<Sale> {
+        const response = await expectOk(
+            await fetchWithAuth(`${API_URL}/api/v1/pos/transactions/${saleId}/items`, {
+                method: 'POST',
+                headers: JSON_HEADERS,
+                body: JSON.stringify({
+                    line: {
+                        ...(lineId ? { id: lineId } : {}),
+                        product_id: productID,
+                        quantity,
+                        ...(uom ? { uom } : {}),
+                        tint,
+                    },
+                }),
+            }),
+            'Failed to add the tinted item',
         );
         return response.json();
     },
@@ -226,16 +279,63 @@ export const posService = {
      * The money moment: the tenders in cents on the sale's revision. The
      * acknowledged alerts are the customer's counter alerts the clerk read and
      * said so about; a warning that asks to be acknowledged and is not named
-     * here is refused with 409 alert_unacknowledged.
+     * here is refused with 409 alert_unacknowledged. The payer capture and
+     * the manager's avoidance mark ride along when the counter holds them
+     * (CP-17a).
      */
-    async completeSale(saleId: string, revision: number, tenders: TenderIn[], acknowledgedAlertIds: string[] = []): Promise<Sale> {
+    async completeSale(
+        saleId: string,
+        revision: number,
+        tenders: TenderIn[],
+        acknowledgedAlertIds: string[] = [],
+        extras?: { payer?: PayerCaptureIn; suspected_avoidance?: boolean; payer_declined?: boolean },
+    ): Promise<Sale> {
+        const body: Record<string, unknown> = { tenders, acknowledged_alert_ids: acknowledgedAlertIds };
+        if (extras?.payer) body.payer = extras.payer;
+        if (extras?.suspected_avoidance !== undefined) body.suspected_avoidance = extras.suspected_avoidance;
+        if (extras?.payer_declined !== undefined) body.payer_declined = extras.payer_declined;
         const response = await expectOk(
             await fetchWithAuth(`${API_URL}/api/v1/pos/transactions/${saleId}/complete`, {
                 method: 'POST',
                 headers: { ...JSON_HEADERS, 'If-Match': ifMatch(revision) },
-                body: JSON.stringify({ tenders, acknowledged_alert_ids: acknowledgedAlertIds }),
+                body: JSON.stringify(body),
             }),
             'Failed to complete the sale',
+        );
+        return response.json();
+    },
+
+    /**
+     * What the branch country's large cash rule asks of this payment before Pay
+     * (CP-17a): the server classifies the tenders against the sale it holds,
+     * so the screen never decides a rule on its own. Writes nothing. The
+     * identity the counter already holds for this payer rides along, so the
+     * preview keys the same person the completion will.
+     */
+    async largeCashPreview(
+        saleId: string,
+        tenders: TenderIn[],
+        suspectedAvoidance = false,
+        payer?: PayerCaptureIn,
+    ): Promise<LargeCashPreview> {
+        const wireTenders = tenders.map((t) => {
+            const out: Record<string, unknown> = { method: t.method, amount_cents: t.amount_cents };
+            if (t.instrument) out.instrument = t.instrument;
+            return out;
+        });
+        const body: Record<string, unknown> = {
+            transaction_id: saleId,
+            suspected_avoidance: suspectedAvoidance,
+            tenders: wireTenders,
+        };
+        if (payer) body.payer = payer;
+        const response = await expectOk(
+            await fetchWithAuth(`${API_URL}/api/v1/pos/large-cash/preview`, {
+                method: 'POST',
+                headers: JSON_HEADERS,
+                body: JSON.stringify(body),
+            }),
+            'Failed to check the large cash rule',
         );
         return response.json();
     },

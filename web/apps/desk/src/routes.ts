@@ -13,6 +13,7 @@ import { appRoutes } from './apps/registry.ts';
 export const routes: RouteConfig[] = [
   // ── POS (no layout) ─────────────────────────────────────────────
   { path: '/pos/lost-answers', load: () => import('./pages/pos/TerminalLostAnswers.ts'), layout: 'erp' },
+  { path: '/pos/large-cash', load: () => import('./pages/pos/LargeCashWorklist.ts'), layout: 'erp' },
   { path: '/pos/refund-intents', load: () => import('./pages/pos/RefundIntents.ts'), layout: 'erp' },
   { path: '/pos', load: () => import('./pages/pos/POSTerminal.ts'), layout: 'none' },
 

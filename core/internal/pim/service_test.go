@@ -24,6 +24,10 @@ import (
 
 // --- test doubles ---
 
+func (r *stubProductRepo) UpdateConsumerDurable(ctx context.Context, id uuid.UUID, consumerDurable bool, revision int64) (int64, error) {
+	return revision + 1, nil
+}
+
 type stubProductRepo struct{ p *product.Product }
 
 func (r *stubProductRepo) CreateProduct(context.Context, *product.Product) error { return nil }

@@ -44,6 +44,7 @@ tags:
   - name: integration
   - name: inventory
   - name: invoice
+  - name: large-cash
   - name: links
   - name: location
   - name: marketIndex
@@ -64,6 +65,7 @@ tags:
   - name: sales-team
   - name: scheduling
   - name: tax
+  - name: tint
   - name: units
   - name: uploads
   - name: vendors
@@ -1796,6 +1798,51 @@ paths:
               schema:
                 $ref: "#/components/schemas/AdminExposureScanResult"
         "400": {$ref: "#/components/responses/IdempotencyBadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "409": {$ref: "#/components/responses/ConflictEither"}
+        "413": {$ref: "#/components/responses/PayloadTooLarge"}
+        "422": {$ref: "#/components/responses/UnprocessableEntity"}
+        "500": {$ref: "#/components/responses/InternalError"}
+  /api/v1/admin/large-cash/settings:
+    get:
+      operationId: adminGetLargeCashSettings
+      tags: [admin]
+      summary: The dealer's large cash settings
+      description: >-
+        The dealer's default country and the Canadian dealer threshold (CP-17a): on or off and its amount. The Canadian threshold is a dealer policy, never a legal duty, and it never produces a FINTRAC report. Admin or owner.
+      responses:
+        "200":
+          description: The dealer's large cash settings.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminLargeCashSettings"
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "500": {$ref: "#/components/responses/InternalError"}
+    put:
+      operationId: adminSaveLargeCashSettings
+      tags: [admin]
+      summary: Save the dealer's large cash settings
+      description: >-
+        Writes the dealer's default country and the Canadian dealer threshold (on or off, amount) as system_settings rows, one transaction (CP-17a). Admin or owner. Omitted fields keep their stored value.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminLargeCashSettings"
+      responses:
+        "200":
+          description: The saved settings.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminLargeCashSettings"
+        "400": {$ref: "#/components/responses/BadRequestEither"}
         "401": {$ref: "#/components/responses/Unauthorized"}
         "403": {$ref: "#/components/responses/Forbidden"}
         "409": {$ref: "#/components/responses/ConflictEither"}
@@ -6462,7 +6509,7 @@ paths:
       tags: [documents]
       summary: Email a customer statement
       description: >-
-        Renders the statement as the print route does and sends it to the customer's email address from a background task, answering 202 at once. The send is recorded in email_deliveries (GET /api/v1/email-deliveries) with the sender's answer or its error. A customer with no email address is a 400 naming customer. Same parameters, roles and branch rules as the print route.
+        Renders the statement as the print route does and sends it to the customer's email address from a background task, answering 202 at once with the queued delivery row's delivery_id. The send resolves that row in email_deliveries (GET /api/v1/email-deliveries) to sent, logged or failed, with the sender's answer or its error. A customer with no email address is a 400 naming customer. Same parameters, roles and branch rules as the print route.
       security:
         - BearerJWT: []
       parameters:
@@ -6542,7 +6589,7 @@ paths:
       tags: [documents]
       summary: Email a quote to its customer
       description: >-
-        Renders the quote as the print route does and sends it to the customer's email address from a background task, answering 202 at once. The send is recorded in email_deliveries. A customer with no email address is a 400 naming customer.
+        Renders the quote as the print route does and sends it to the customer's email address from a background task, answering 202 at once with the queued delivery row's delivery_id. The send resolves that row in email_deliveries to sent, logged or failed. A customer with no email address is a 400 naming customer.
       security:
         - BearerJWT: []
       parameters:
@@ -7496,7 +7543,7 @@ paths:
           required: false
           schema:
             type: string
-            enum: [sent, failed]
+            enum: [queued, sent, logged, failed]
         - name: document_id
           in: query
           required: false
@@ -9153,7 +9200,7 @@ paths:
       tags:
         - invoice
       summary: Email invoice to customer
-      description: Queues an email to the customer with the invoice PDF attached, sent through the configured sender (SMTP when SMTP_HOST is set, otherwise the log sender). Returns 202 Accepted immediately; the email is dispatched asynchronously and its outcome, the sender's answer or its error, is written to email_deliveries (GET /api/v1/email-deliveries). Fails if the customer has no email address on file.
+      description: Queues an email to the customer with the invoice PDF attached, sent through the configured sender (SMTP when SMTP_HOST is set, otherwise the log sender, which records the mail without sending it). Returns 202 Accepted immediately with the id of the queued delivery row; the email is dispatched asynchronously and resolves that row to sent (the SMTP server took it), logged (the log sender took it, nothing left the process) or failed, with the sender's answer or its error (GET /api/v1/email-deliveries). Fails if the customer has no email address on file.
       parameters:
         - name: id
           in: path
@@ -9524,6 +9571,156 @@ paths:
         '428':
           $ref: '#/components/responses/WirePreconditionRequired'
         '500': *id004
+  /api/v1/large-cash/worklist:
+    get:
+      operationId: largeCashWorklist
+      tags: [large-cash]
+      summary: The manager's large cash worklist
+      description: >-
+        Every crossing the dealer owes a filing on, one row per crossing, in the order the manager should work them. The severity ranks by the deadline first and the amount second, so a small filing due tomorrow sits above a large filing due in ten days, and the recommended action is the ladder: capture the payer's details, then file, then chase a filing past its deadline, then issue the customer statement. A row that is not reportable (a Canadian record, an identity declined crossing) offers no filing; the identity declined row says so in words and asks a manager to look at it. The deadline is computed as a rule, the receipt anchor plus 15 days, and the row carries whether it is past. The row never carries the payer's taxpayer identification number. A branch scoped caller sees only the crossings its branch received cash for or contributed cash to; the aggregate each row carries is the dealer's central one.
+      parameters:
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: The ranked worklist.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LargeCashWorklist"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/v1/large-cash/events/{id}/filing:
+    post:
+      operationId: largeCashRecordFiling
+      tags: [large-cash]
+      summary: Record the filing of a Form 8300 for a crossing
+      description: >-
+        The manager's record of the Form 8300 they filed for this crossing: the day they filed it, the BSA E-Filing acknowledgement number they typed and who recorded it. Every reportable crossing is over the threshold, so its filing is required: a request for a voluntary filing (a below threshold report) is answered 409. The crossing's filing row is taken in place: two managers recording a filing on one crossing at the same time cannot both land, and the one that loses is answered 409 (the crossing is already filed). A Canadian crossing and an identity declined crossing are not filings at all and are answered 409. The act is a manager's, so a machine key is refused 403.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: The crossing the filing is for.
+          schema: {type: string, format: uuid}
+        - $ref: "#/components/parameters/XBranchId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LargeCashFilingRequest"
+      responses:
+        "200":
+          description: The recorded filing.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LargeCashFiling"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "409":
+          $ref: "#/components/responses/WireConflict"
+  /api/v1/large-cash/events/{id}/form-8300:
+    get:
+      operationId: largeCashForm8300
+      tags: [large-cash]
+      summary: The Form 8300 data set for a crossing
+      description: >-
+        The data set the filer types into BSA E-Filing: the payer's name, address, taxpayer identification number, date of birth and occupation, the amount and the dates of the cash, and the branch the filing is made for. This is the one surface that carries the taxpayer identification number, because the IRS form cannot be completed without it, so the route is the dealer's own and admin's only and a machine key is refused 403. The export is audited without the number in the audit body. Gable does not file: the export carries the sentence that says so.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: The crossing the form is for.
+          schema: {type: string, format: uuid}
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: The Form 8300 data set.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LargeCashForm8300"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "409":
+          $ref: "#/components/responses/WireConflict"
+  /api/v1/large-cash/statements:
+    get:
+      operationId: largeCashStatements
+      tags: [large-cash]
+      summary: The customer statements for a year
+      description: >-
+        The customer statements for a year, one per payer who had reportable cash in it: the business name and address, the contact name and telephone number, the aggregate amount of reportable cash received in the year, and the sentence that says the information was furnished to the IRS. The statement is a separate obligation from the filing and runs on its own clock: it is due on or before the last day of the first month of the year after the cash was received. The statement never carries the payer's taxpayer identification number and never says the dealer noted the transaction was suspicious. A branch scoped caller sees the payers whose crossings touched its branch; the aggregate each statement carries is the dealer's whole year for that payer, because the United States aggregation is deliberately central.
+      parameters:
+        - name: year
+          in: query
+          required: false
+          description: The year the cash was received. The current year when it is absent.
+          schema: {type: integer, minimum: 2000, maximum: 2100}
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: The year's statements.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LargeCashStatements"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/v1/large-cash/events/{id}/statement:
+    post:
+      operationId: largeCashIssueStatement
+      tags: [large-cash]
+      summary: Issue the customer statement for a crossing's payer
+      description: >-
+        The customer statement for the crossing's payer and the year the cash was received, issued once. A statement says the information was furnished to the IRS, so it is issued only for a reportable crossing whose Form 8300 is recorded as filed (409 otherwise). The generator also refuses to carry the dealer's suspicion of the transaction on the customer's statement and refuses a voluntary filing; these are rules in the code rather than a training note. Of several managers issuing one statement exactly one is answered 200 and the rest 409. The act is a manager's, so a machine key is refused 403.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: The crossing whose payer the statement is for.
+          schema: {type: string, format: uuid}
+        - $ref: "#/components/parameters/XBranchId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LargeCashStatementRequest"
+      responses:
+        "200":
+          description: The issued statement.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LargeCashStatement"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "409":
+          $ref: "#/components/responses/WireConflict"
   /api/v1/links/quotes/{id}:
     get:
       operationId: linksQuoteResolve
@@ -14269,7 +14466,7 @@ paths:
       tags: [pos]
       summary: Email the sale's receipt
       description: >-
-        Sends the sale's invoice to the account's contact exactly as the invoice email route does (the same service call, the same words, 202 and {"status":"queued"}; the outcome is written to email_deliveries), under the counter's own roles admin, owner and cashier. The sale is read as the sale read reads it (404 for a sale the caller cannot read). A sale that is not completed or has no invoice answers 409 with the blocker no_receipt; a walk in sale (no customer, or the shared walk in customer, whatever address that row holds), or an account with no email address on file, answers 409 with the blocker no_contact and words the card can show. Nothing is sent for any refusal.
+        Sends the sale's invoice to the account's contact exactly as the invoice email route does (the same service call, the same words, 202 and {"status":"queued"} with the queued delivery row's delivery_id; the send resolves that row to sent, logged or failed in email_deliveries), under the counter's own roles admin, owner and cashier. The sale is read as the sale read reads it (404 for a sale the caller cannot read). A sale that is not completed or has no invoice answers 409 with the blocker no_receipt; a walk in sale (no customer, or the shared walk in customer, whatever address that row holds), or an account with no email address on file, answers 409 with the blocker no_contact and words the card can show. Nothing is sent for any refusal.
       parameters:
         - name: id
           in: path
@@ -14619,6 +14816,36 @@ paths:
           $ref: "#/components/responses/InternalError"
         "503":
           $ref: "#/components/responses/ServiceUnavailable"
+  /api/v1/pos/large-cash/preview:
+    post:
+      operationId: posLargeCashPreview
+      tags: [pos]
+      summary: What the large cash rule asks of this payment
+      description: >-
+        The counter's look before Pay (CP-17a): the server classifies the named tenders against the sale it holds under the branch's country rule (the United States Form 8300 family, or the Canadian dealer threshold when the dealer has it on) and answers whether the payer's details will be required and which fields the rule needs. The branch's walk-in identity floor rides the same answer: over the floor the counter asks a walk-in who paid cash to identify themselves, so their cash sales are counted together, and the identity the counter already holds may be carried here so the preview and the completion key the same person. Writes nothing; the completion's own capture is the authority.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PosLargeCashPreviewRequest"
+      responses:
+        "200":
+          description: The rule family's view of this payment.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PosLargeCashPreview"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
   /api/v1/pos/transactions/{id}/void:
     post:
       operationId: posTransactionVoid
@@ -18867,6 +19094,62 @@ paths:
           $ref: '#/components/responses/WirePreconditionRequired'
         '500':
           $ref: '#/components/responses/InternalError'
+  /api/v1/products/{id}/consumer-durable:
+    patch:
+      operationId: productUpdateConsumerDurable
+      tags: [product]
+      summary: Set or clear the consumer durable flag
+      description: >-
+        The Form 8300 designated reporting transaction flag (CP-17a): the counter's large cash classifier counts a qualifying negotiable instrument only for a sale line of a flagged product priced over the threshold. The default is false; the flagged exceptions are the big ticket consumer goods.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - name: If-Match
+          in: header
+          required: false
+          schema:
+            type: string
+          description: The quoted revision; required unless the body carries it.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProductConsumerDurableUpdate'
+      responses:
+        '200':
+          description: The product with the new revision and its ETag.
+          headers:
+            ETag:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductView'
+        '400':
+          $ref: '#/components/responses/BadRequestEither'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/WireNotFound'
+        '409':
+          $ref: '#/components/responses/WireConflict'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '428':
+          $ref: '#/components/responses/WirePreconditionRequired'
+        '500':
+          $ref: '#/components/responses/InternalError'
   /api/v1/products/{id}/units:
     get:
       operationId: productUnitSetGet
@@ -21337,6 +21620,436 @@ paths:
         "413": {$ref: "#/components/responses/PayloadTooLarge"}
         "422": {$ref: "#/components/responses/UnprocessableEntity"}
         "500": {$ref: "#/components/responses/InternalError"}
+  /api/v1/tint/systems:
+    get:
+      operationId: tintSystemList
+      tags: [tint]
+      summary: List tint systems
+      description: Every tinting system the dealer runs, with the dispense denominator that makes its colourant amount columns meaningful.
+      responses:
+        '200':
+          description: The tint systems.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TintSystemPage'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    post:
+      operationId: tintSystemCreate
+      tags: [tint]
+      summary: Create a tint system
+      description: One manufacturer's tinting system. The unit_denominator is one of the trade's dispense increments (32, 48, 64, 128, 192, 384, 1024).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TintSystemCreate'
+      responses:
+        '201':
+          description: The created system.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TintSystem'
+        '400':
+          $ref: '#/components/responses/BadRequestEither'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/v1/tint/bases:
+    get:
+      operationId: tintBaseList
+      tags: [tint]
+      summary: List bases
+      description: The base paints, optionally filtered to a tint system or to the bases whose product link is a given products row.
+      parameters:
+        - name: tint_system_id
+          in: query
+          description: Filter by tint system.
+          schema: {type: string, format: uuid}
+        - name: product_id
+          in: query
+          description: Only the bases whose product link names this product.
+          schema: {type: string, format: uuid}
+      responses:
+        '200':
+          description: The bases.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TintBasePage'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    post:
+      operationId: tintBaseCreate
+      tags: [tint]
+      summary: Create a base
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TintBaseCreate'
+      responses:
+        '201':
+          description: The created base.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TintBase'
+        '400':
+          $ref: '#/components/responses/BadRequestEither'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/v1/tint/colorants:
+    get:
+      operationId: tintColorantList
+      tags: [tint]
+      summary: List colorants
+      parameters:
+        - name: tint_system_id
+          in: query
+          description: Filter by tint system.
+          schema: {type: string, format: uuid}
+      responses:
+        '200':
+          description: The colorants.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TintColorantPage'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    post:
+      operationId: tintColorantCreate
+      tags: [tint]
+      summary: Create a colorant
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TintColorantCreate'
+      responses:
+        '201':
+          description: The created colorant.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TintColorant'
+        '400':
+          $ref: '#/components/responses/BadRequestEither'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/v1/tint/colors:
+    get:
+      operationId: tintColorList
+      tags: [tint]
+      summary: List colours
+      description: The colours, by name or manufacturer code fragment. A manufacturer code is an attribute, never a key.
+      parameters:
+        - name: tint_system_id
+          in: query
+          description: Filter by tint system.
+          schema: {type: string, format: uuid}
+        - name: q
+          in: query
+          description: A name or manufacturer code fragment.
+          schema: {type: string}
+      responses:
+        '200':
+          description: The colours.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TintColorPage'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    post:
+      operationId: tintColorCreate
+      tags: [tint]
+      summary: Create a colour
+      description: A colour of a book (manufacturer_code set) or a store match (is_custom true, no manufacturer code, optionally the customer it was matched for).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TintColorCreate'
+      responses:
+        '201':
+          description: The created colour.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TintColor'
+        '400':
+          $ref: '#/components/responses/BadRequestEither'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/v1/tint/formulas:
+    get:
+      operationId: tintFormulaList
+      tags: [tint]
+      summary: List formulas
+      description: The formulas, optionally filtered to a colour, a base and a container size code, with their components in guide order.
+      parameters:
+        - name: color_id
+          in: query
+          description: Filter by colour.
+          schema: {type: string, format: uuid}
+        - name: base_id
+          in: query
+          description: Filter by base.
+          schema: {type: string, format: uuid}
+        - name: container_size_code
+          in: query
+          description: Filter by container size code.
+          schema: {type: string}
+      responses:
+        '200':
+          description: The formulas.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TintFormulaPage'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    post:
+      operationId: tintFormulaCreate
+      tags: [tint]
+      summary: Create a formula
+      description: One formula of a colour in a base at a container size. Every component's unit_denominator must be the one the colour's tint system declares.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TintFormulaCreate'
+      responses:
+        '201':
+          description: The created formula.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TintFormula'
+        '400':
+          $ref: '#/components/responses/BadRequestEither'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/v1/tint/formulas/{id}:
+    get:
+      operationId: tintFormulaGet
+      tags: [tint]
+      summary: Read a formula
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      responses:
+        '200':
+          description: The formula with its components.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TintFormula'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/v1/tint/formulas/{id}/rescale:
+    post:
+      operationId: tintFormulaRescale
+      tags: [tint]
+      summary: Rescale a formula to another container size
+      description: Each component is multiplied by the exact volume ratio and rounded independently to a whole count of its own dispense unit, half up; any_rounded reports whether at least one component was rounded, so the counter can see the value is a derived approximation and override it.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TintRescaleRequest'
+      responses:
+        '200':
+          description: The source formula, the rescaled components and the rounding flag.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TintRescale'
+        '400':
+          $ref: '#/components/responses/BadRequestEither'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/v1/tint/saved-colors:
+    get:
+      operationId: tintSavedColorList
+      tags: [tint]
+      summary: List saved colours
+      description: "The store's record of a customer's colours, optionally filtered by the free text job note (a room or a jobsite). The saved colours are customer rows, so the read is walled to the customers the caller may see: a customer of another branch reads as missing, and a key bound to a branch reads only the saved colours of the customers that hold its pin."
+      parameters:
+        - name: customer_id
+          in: query
+          description: Filter by customer.
+          schema: {type: string, format: uuid}
+        - name: job_note
+          in: query
+          description: A job note fragment.
+          schema: {type: string}
+      responses:
+        '200':
+          description: The saved colours.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TintSavedColorPage'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    post:
+      operationId: tintSavedColorCreate
+      tags: [tint]
+      summary: Save a colour for a customer
+      description: "The name is unique per customer, so a customer cannot accumulate two identical names. The counter dialogue offers saving a colour, so the cashier may write one; the write is walled to the customer it names, and a key bound to a branch reaches it only while that customer holds its pin."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TintSavedColorCreate'
+      responses:
+        '201':
+          description: The saved colour.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TintSavedColor'
+        '400':
+          $ref: '#/components/responses/BadRequestEither'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/v1/tint/saved-colors/{id}:
+    delete:
+      operationId: tintSavedColorDelete
+      tags: [tint]
+      summary: Delete a saved colour
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      responses:
+        '204':
+          description: The saved colour is gone.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/v1/tint/charge:
+    get:
+      operationId: tintChargeGet
+      tags: [tint]
+      summary: The dealer's tint charge
+      description: "The dealer's tint charge rule (row CP-16) as the counter shows it: the charge for a tint with the colorant total and the base tier given. The rule follows the tint, not only the container: a tier covers the base tier it names and the colorant floor it names, and the flat figure covers the rest. A request with no numbers answers the flat figure, the dealer's default."
+      parameters:
+        - name: colorant_units
+          in: query
+          description: The tint's colorant total in the system's whole dispense units.
+          schema: {type: integer, minimum: 0}
+        - name: unit_denominator
+          in: query
+          description: The dispense grid the tint's units are counted on (the colour system's unit denominator).
+          schema: {type: integer, minimum: 1}
+        - name: base_tier
+          in: query
+          description: "The base tier the tint is mixed in: flat is the ordinary base of a system, deep is the deepest one."
+          schema: {type: string, enum: [flat, deep]}
+      responses:
+        '200':
+          description: The charge in cents.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TintCharge'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
   /api/v1/units:
     get:
       operationId: unitList
@@ -22885,6 +23598,23 @@ components:
         limit:
           type: integer
         total:
+          type: integer
+          format: int64
+    AdminLargeCashSettings:
+      type: object
+      required: [ca_default_threshold_cents, ca_enabled, ca_threshold_cents, country_default]
+      description: >-
+        The dealer's large cash settings (CP-17a): the default country a branch with none of its own falls back to, and the Canadian dealer threshold, off by default.
+      properties:
+        country_default:
+          type: string
+          description: The dealer's default country, two letters, or empty when unset.
+        ca_enabled:
+          type: boolean
+        ca_threshold_cents:
+          type: integer
+          format: int64
+        ca_default_threshold_cents:
           type: integer
           format: int64
     ApiKey:
@@ -26711,6 +27441,10 @@ components:
         status:
           type: string
           enum: [queued]
+        delivery_id:
+          type: string
+          format: uuid
+          description: The queued email_deliveries row, already written; read its status (sent, logged or failed) from GET /api/v1/email-deliveries. Absent only when the row could not be written.
     OrdersDraftStatus:
       type: string
       enum: [open, promoted, discarded]
@@ -27048,7 +27782,9 @@ components:
           description: The document's number; the account number for a statement.
         status:
           type: string
-          enum: [sent, failed]
+          enum: [queued, sent, logged, failed]
+          description: >-
+            queued the moment the sending route answers 202, then sent (the SMTP server took it), logged (a log sender took it: nothing left the process, email is not set up on this server) or failed (the send errored).
         sender_answer:
           type: [string, "null"]
           description: The sender's own answer; the SMTP server's reply, or a note that the log sender logged and did not send.
@@ -28723,6 +29459,7 @@ components:
         - stock_uom
         - stock_quantity
         - tally
+        - tint
         - unit_price_ten_thousandths
         - priced_unit_price_ten_thousandths
         - price_source
@@ -28833,6 +29570,11 @@ components:
             - $ref: '#/components/schemas/Tally'
             - type: 'null'
           description: The pieces by length a random length line carries (ADR 0006 section 4); null on every other line.
+        tint:
+          oneOf:
+            - $ref: '#/components/schemas/LineTint'
+            - type: 'null'
+          description: The paint line's tint record (row CP-16); null on every other line.
         unit_price_ten_thousandths:
           type:
             - integer
@@ -29018,6 +29760,7 @@ components:
           description: Required by a void.
     InvoiceEmailResponse:
       type: object
+      description: The queued send. The 202 alone never says the mail went out; the delivery row the delivery_id names is where the outcome lands.
       required:
         - status
       properties:
@@ -29025,6 +29768,10 @@ components:
           type: string
           enum:
             - queued
+        delivery_id:
+          type: string
+          format: uuid
+          description: The queued email_deliveries row, already written; read its status (sent, logged or failed) from GET /api/v1/email-deliveries. Absent only when the row could not be written.
     CreditMemoSummary:
       type: object
       description: A credit memo header, used as a list item and as the head of the full document.
@@ -29323,6 +30070,7 @@ components:
         - stock_uom
         - stock_quantity
         - tally
+        - tint
         - unit_price_ten_thousandths
         - priced_unit_price_ten_thousandths
         - price_source
@@ -29434,6 +30182,11 @@ components:
             - $ref: '#/components/schemas/Tally'
             - type: 'null'
           description: The pieces by length a random length line carries (ADR 0006 section 4); null on every other line.
+        tint:
+          oneOf:
+            - $ref: '#/components/schemas/LineTint'
+            - type: 'null'
+          description: The paint line's tint record (row CP-16); null on every other line.
         unit_price_ten_thousandths:
           type:
             - integer
@@ -29757,6 +30510,183 @@ components:
             - 'null'
         limit:
           type: integer
+    LargeCashWorklist:
+      type: object
+      required: [items, count, generated_at]
+      properties:
+        items:
+          type: array
+          items: {$ref: "#/components/schemas/LargeCashWorklistRow"}
+        count: {type: integer}
+        generated_at: {type: string, format: date-time}
+    LargeCashWorklistRow:
+      type: object
+      required: [event_id, payer_key, payer_name, branch_id, branch_name, branch_address, contributed_branch_ids, currency, total_cents, rule_family, threshold_cents, transaction_count, tender_count, event_state, filing_state, past_deadline, statement_state, payer_details_captured, severity_score, recommended_action, adviser_note]
+      properties:
+        event_id: {type: string, format: uuid}
+        payer_key:
+          type: string
+          description: >-
+            The aggregation key: the named customer's id, else the captured identity's digest. It is a digest, never the taxpayer identification number.
+        payer_name: {type: string, description: The customer's name, else the name captured at the counter.: ''}
+        customer_id: {type: [string, "null"], format: uuid}
+        customer_account: {type: string}
+        branch_id: {type: string, format: uuid}
+        branch_name: {type: string}
+        branch_address: {type: string}
+        contributed_branch_ids:
+          type: array
+          description: Every branch that contributed to the aggregate.
+          items: {type: string, format: uuid}
+        currency: {type: string}
+        total_cents: {type: integer, format: int64, description: The reportable cash total since the last report.}
+        rule_family: {type: string, enum: [US_8300, CA_DEALER]}
+        threshold_cents: {type: integer, format: int64}
+        transaction_count: {type: integer, description: The cash transactions in the aggregate.}
+        tender_count: {type: integer, description: The cash tenders counted in the aggregate.}
+        first_date: {type: [string, "null"], format: date-time, description: The first cash in the aggregate.}
+        last_date: {type: [string, "null"], format: date-time, description: The most recent cash in the aggregate.}
+        event_state: {type: string, enum: [reportable, recorded, identity declined]}
+        filing_state:
+          type: string
+          enum: [not_reportable, reportable, filed, voluntary]
+          description: >-
+            Not yet reportable, reportable and not filed, filed, or voluntary (the payer asked not to be reported).
+        filing_deadline:
+          type: [string, "null"]
+          format: date-time
+          description: The receipt anchor plus 15 days. Null when there is no filing to make.
+        past_deadline: {type: boolean}
+        filed_date: {type: [string, "null"], format: date-time}
+        acknowledgement_no: {type: string}
+        statement_state: {type: string, enum: [not_issued, issued]}
+        statement_issued_date: {type: [string, "null"], format: date-time}
+        payer_details_captured: {type: boolean}
+        severity_score: {type: integer, format: int64}
+        recommended_action:
+          type: string
+          enum: [capture_payer_details, file, chase_filing, issue_statement, manager_review, dealer_record]
+        note: {type: string, description: The plain sentence that says what the row is.}
+        adviser_note: {type: string, description: The dealer confirms each filing with its own adviser.}
+    LargeCashFilingRequest:
+      type: object
+      properties:
+        filed_date:
+          type: string
+          format: date
+          description: The day the Form 8300 was filed. The server's day when it is absent.
+        acknowledgement_no:
+          type: string
+          maxLength: 64
+          description: >-
+            The BSA E-Filing acknowledgement number the manager typed. Required for a filing.
+        voluntary:
+          type: boolean
+          description: >-
+            Always refused with 409 on a reportable crossing: every reportable crossing is over the threshold, so its filing is required.
+    LargeCashFiling:
+      type: object
+      required: [event_id, state, recorded_by, recorded_at, past_deadline]
+      properties:
+        event_id: {type: string, format: uuid}
+        state: {type: string, enum: [filed, voluntary]}
+        filed_date: {type: [string, "null"], format: date-time}
+        acknowledgement_no: {type: string}
+        recorded_by: {type: string}
+        recorded_at: {type: string, format: date-time}
+        past_deadline: {type: boolean}
+    LargeCashForm8300:
+      type: object
+      required: [event_id, form, currency, amount_cents, transaction_count, tender_count, first_date, last_date, received_at, filing_deadline, payer, filer, note, adviser_note]
+      properties:
+        event_id: {type: string, format: uuid}
+        form: {type: string, description: The IRS form the data set is for.}
+        currency: {type: string}
+        amount_cents: {type: integer, format: int64}
+        transaction_count: {type: integer}
+        tender_count: {type: integer}
+        first_date: {type: string, format: date-time}
+        last_date: {type: string, format: date-time}
+        received_at: {type: string, format: date-time}
+        filing_deadline: {type: string, format: date-time}
+        payer:
+          type: object
+          description: "Form 8300 Part I: the payer as the form takes it."
+          required: [name, address, taxpayer_id]
+          properties:
+            name: {type: string}
+            address: {type: string}
+            taxpayer_id:
+              type: string
+              description: >-
+                The payer's taxpayer identification number, in full. This is the one surface that carries it.
+            date_of_birth: {type: string}
+            occupation: {type: string}
+        third_party_payer:
+          type: [object, "null"]
+          description: "Form 8300 Part II: the person on whose behalf the transaction was conducted."
+          properties:
+            name: {type: string}
+        filer:
+          type: object
+          description: "The legal person the filing is made for: the branch that received the cash."
+          required: [branch_id, branch_name]
+          properties:
+            branch_id: {type: string, format: uuid}
+            branch_name: {type: string}
+            address: {type: string}
+        note: {type: string, 'description:"Gable does not file': the filer types these figures into BSA E-Filing."}
+        adviser_note: {type: string, description: The dealer confirms each filing with its own adviser.}
+        taxpayer_id_hint:
+          type: [string, "null"]
+          description: The masked hint of the taxpayer identification number, for the filer to check.
+    LargeCashStatements:
+      type: object
+      required: [year, items, count]
+      properties:
+        year: {type: integer}
+        items:
+          type: array
+          items: {$ref: "#/components/schemas/LargeCashStatement"}
+        count: {type: integer}
+    LargeCashStatement:
+      type: object
+      required: [payer_key, year, payer_name, payer_address, business_name, business_address, contact_name, telephone, aggregate_cents, currency, crossing_count, state, due_date, note, adviser_note]
+      properties:
+        payer_key: {type: string, 'description:"The aggregation key': the payer the statement is for."}
+        year: {type: integer}
+        payer_name: {type: string, description: The addressee.}
+        payer_address: {type: string, description: The addressee's address.}
+        business_name: {type: string, description: The dealer's name, from the dealer profile or the receiving branch.: ''}
+        business_address: {type: string, description: The dealer's information contact address, the receiving branch's.: ''}
+        contact_name: {type: string, description: The dealer's information contact, the receiving branch.: ''}
+        telephone: {type: string, description: The dealer's information contact telephone.}
+        aggregate_cents:
+          type: integer
+          format: int64
+          description: >-
+            The payer's counted cash received in the calendar year in the receiving branch's own zone, summed from the counted tenders.
+        currency: {type: string}
+        crossing_count: {type: integer}
+        first_date: {type: [string, "null"], format: date-time}
+        last_date: {type: [string, "null"], format: date-time}
+        state: {type: string, enum: [not_issued, issued]}
+        issued_date: {type: [string, "null"], format: date-time}
+        issued_by: {type: string}
+        due_date:
+          type: string
+          format: date-time
+          description: >-
+            The statement's own deadline: the last day of the first month of the year after the cash was received.
+        note: {type: string, description: The information was furnished to the IRS.}
+        adviser_note: {type: string, description: The dealer confirms each filing with its own adviser.}
+    LargeCashStatementRequest:
+      type: object
+      properties:
+        include_suspicion:
+          type: boolean
+          description: >-
+            Asks the generator to put the dealer's suspicion of the transaction on the customer's statement. The generator refuses.
     LinkAnswer:
       type: object
       description: >-
@@ -29805,7 +30735,7 @@ components:
       type: object
       description: >-
         A node of the hierarchy; the type is lowercase on the wire and the optional metadata is present with null (ADR 0001 sections 6 and 12).
-      required: [id, parent_id, path, type, code, description, name, address, city, state, zip, phone, tax_jurisdiction_code, default_tax_rate, cash_rounding_mode, timezone, active, branch_id, revision, created_at, updated_at]
+      required: [id, parent_id, path, type, code, description, name, address, city, state, zip, phone, tax_jurisdiction_code, default_tax_rate, cash_rounding_mode, timezone, country_code, walk_in_identity_cents, active, branch_id, revision, created_at, updated_at]
       properties:
         id:
           type: string
@@ -29841,6 +30771,15 @@ components:
           $ref: "#/components/schemas/CashRoundingMode"
         timezone:
           type: [string, "null"]
+        country_code:
+          type: [string, "null"]
+          description: >-
+            The branch's country, two letters (CP-17a): the country picks the branch's large cash rule. Null falls back to the dealer's country.default; a branch with neither cannot be saved.
+        walk_in_identity_cents:
+          type: [integer, "null"]
+          format: int64
+          description: >-
+            The branch's floor for asking a walk-in's identity on a cash sale over it (CP-17a), so the walk-in's cash sales are counted together. Null is the branch country's default: 3,000 dollars on a United States branch, off on a Canadian one. Zero is the dealer saying off.
         active:
           type: boolean
         branch_id:
@@ -29900,6 +30839,15 @@ components:
           $ref: "#/components/schemas/CashRoundingMode"
         timezone:
           type: [string, "null"]
+        country_code:
+          type: [string, "null"]
+          description: >-
+            The branch's country, two letters (CP-17a): the country picks the branch's large cash rule. Null falls back to the dealer's country.default; a branch with neither cannot be saved.
+        walk_in_identity_cents:
+          type: [integer, "null"]
+          format: int64
+          description: >-
+            The branch's floor for asking a walk-in's identity on a cash sale over it (CP-17a), so the walk-in's cash sales are counted together. Null is the branch country's default: 3,000 dollars on a United States branch, off on a Canadian one. Zero is the dealer saying off.
         active:
           type: boolean
         revision:
@@ -29941,6 +30889,14 @@ components:
           $ref: "#/components/schemas/CashRoundingMode"
         timezone:
           type: string
+        country_code:
+          type: [string, "null"]
+          description: The branch's country, two letters (CP-17a); null falls back to the dealer's country.default.
+        walk_in_identity_cents:
+          type: [integer, "null"]
+          format: int64
+          description: >-
+            The branch's floor for asking a walk-in's identity on a cash sale over it (CP-17a), so the walk-in's cash sales are counted together. Null is the branch country's default: 3,000 dollars on a United States branch, off on a Canadian one. Zero is the dealer saying off.
         active:
           type: [boolean, "null"]
           description: Defaults to true when absent; an explicit false is honored.
@@ -30313,6 +31269,7 @@ components:
         - stock_uom
         - stock_quantity
         - tally
+        - tint
         - unit_price_ten_thousandths
         - priced_unit_price_ten_thousandths
         - price_source
@@ -30420,6 +31377,11 @@ components:
             - $ref: '#/components/schemas/Tally'
             - type: 'null'
           description: The pieces by length a random length line carries (ADR 0006 section 4); null on every other line.
+        tint:
+          oneOf:
+            - $ref: '#/components/schemas/LineTint'
+            - type: 'null'
+          description: The paint line's tint record (row CP-16); null on every other line.
         unit_price_ten_thousandths:
           type:
             - integer
@@ -30572,6 +31534,7 @@ components:
         - stock_uom
         - stock_quantity
         - tally
+        - tint
         - unit_price_ten_thousandths
         - priced_unit_price_ten_thousandths
         - price_source
@@ -30683,6 +31646,11 @@ components:
             - $ref: '#/components/schemas/Tally'
             - type: 'null'
           description: The pieces by length a random length line carries (ADR 0006 section 4); null on every other line.
+        tint:
+          oneOf:
+            - $ref: '#/components/schemas/LineTint'
+            - type: 'null'
+          description: The paint line's tint record (row CP-16); null on every other line.
         unit_price_ten_thousandths:
           type:
             - integer
@@ -31197,7 +32165,7 @@ components:
         balance_due_after_deposits_cents:
           type: integer
           format: int64
-          description: 'The order total less everything taken on it: what the customer still owes on the order.'
+          description: 'The order total less everything taken on it and less what its invoices were already paid otherwise: what the customer still owes on the order.'
         deposits:
           type: array
           description: 'The posted payments taken against this order (deposits), oldest first, each with the invoices it settled.'
@@ -31729,6 +32697,7 @@ components:
         order_id: {type: string, format: uuid, description: "A deposit against this order."}
         job_id: {type: string, format: uuid}
         till_session_id: {type: string, format: uuid, description: "The open counter till session a cash or check counter deposit rides."}
+        id_checked: {type: boolean, description: "A check taken on a till session: the clerk looked at the payer's ID. The counter's ID rule asks for it."}
         applications:
           type: array
           items: {$ref: "#/components/schemas/PaymentApplicationRequest"}
@@ -33556,6 +34525,22 @@ components:
             $ref: "#/components/schemas/PosTenderRequest"
         picked_up_by: {type: [string, "null"], description: "Who collected the basket, at most 200 characters."}
         revision: {type: integer, format: int64, minimum: 1, description: "The sale's revision; or send If-Match."}
+        payer: {$ref: "#/components/schemas/PosPayerCapture", description: "The payer's details the counter captured for a large cash crossing (CP-17a); required when this payment takes the payer over the branch's threshold, refused 409 payer_details_required without them."}
+        payer_declined: {type: boolean, description: "The counter's record that the walk-in declined to identify over the branch's walk-in identity floor (CP-17a); the sale goes ahead and the fact is recorded for the manager's worklist as an identity declined."}
+        suspected_avoidance: {type: boolean, description: "The manager's mark that an instrument may be being used to avoid reporting (CP-17a); it makes a qualifying instrument count as cash whatever was sold."}
+    PosPayerCapture:
+      type: object
+      description: >-
+        The payer identity a large cash crossing captures at the counter (CP-17a). The taxpayer identification number and the ID number are sensitive: sealed at rest, never logged, never printed on a receipt and never in an audit row's body.
+      properties:
+        name: {type: string, description: "The payer's name."}
+        address: {type: string, description: "The payer's address."}
+        occupation: {type: string, description: "The payer's occupation, or the nature of a sole proprietor's principal business."}
+        date_of_birth: {type: string, description: "The payer's date of birth, as YYYY-MM-DD."}
+        id_type: {type: string, enum: [drivers_license, state_id, passport, military_id, other], description: "The kind of identification looked at."}
+        id_number: {type: string, description: "The identification number; sealed at rest."}
+        taxpayer_id: {type: string, description: "The taxpayer identification number (the United States rule); sealed at rest."}
+        third_party_payer: {type: boolean, description: "Whether the person paying acts on behalf of someone else."}
         acknowledged_alert_ids:
           type: array
           description: >-
@@ -33571,6 +34556,44 @@ components:
         token_id: {type: [string, "null"], description: "The card token a card tender charges."}
         id_checked: {type: [boolean, "null"], description: "The cashier looked at the payer's ID; on a check or an account tender only. The ID's number is never taken."}
         id_type: {type: [string, "null"], enum: [drivers_license, state_id, passport, military_id, other, null], description: "The kind of ID looked at; needs id_checked true."}
+        instrument: {type: [string, "null"], enum: [personal_check, cashiers_check, bank_draft, travelers_check, money_order, null], description: "The kind of check the tender is (CP-17a); on a check tender only. A personal check never counts as cash; a cashier's check, bank draft, traveler's check or money order at or under the threshold face value counts only for a consumer durable sale line or under the suspected avoidance mark."}
+    PosLargeCashPreviewRequest:
+      type: object
+      required: [transaction_id, tenders]
+      properties:
+        transaction_id: {type: string, format: uuid, description: "The sale the payment panel holds."}
+        suspected_avoidance: {type: boolean, description: "The manager's suspected avoidance mark."}
+        payer: {$ref: "#/components/schemas/PosPayerCapture", description: "The identity the counter already holds for this payer (the walk-in identified earlier in this till session). The preview keys the same person the completion will, so the two agree on whose cash this is."}
+        tenders:
+          type: array
+          items:
+            type: object
+            required: [method, amount_cents]
+            properties:
+              method: {type: string, description: "The tender method: cash, check, card, account or store_credit."}
+              instrument: {type: [string, "null"], enum: [personal_check, cashiers_check, bank_draft, travelers_check, money_order, null]}
+              amount_cents: {type: integer, format: int64, minimum: 1}
+    PosLargeCashPreview:
+      type: object
+      required: [country, rule_family, counted_cents, aggregate_cents, threshold_cents, comparator, asks_details, fields, walk_in_floor_cents, asks_floor, walk_in_aggregated, threshold_crossed]
+      description: >-
+        What the counter asks before Pay (CP-17a): the branch's country and rule family, this sale's counted cash, the aggregate it comes to, the threshold with its comparator shape, whether the payer's details are required and the fields the rule needs. A Canadian branch carries the note that the capture is for the dealer's own records and is not a FINTRAC report. The walk-in floor is the branch's own amount over which the counter asks a walk-in who paid cash to identify themselves; a branch with it off says on the counter that the walk-in's cash is not aggregated.
+      properties:
+        country: {type: string, description: "The branch's country, two letters."}
+        rule_family: {type: string, enum: ["", US_8300, CA_DEALER]}
+        counted_cents: {type: integer, format: int64}
+        aggregate_cents: {type: integer, format: int64}
+        threshold_cents: {type: integer, format: int64}
+        comparator: {type: string, enum: [greater, at_or_above]}
+        asks_details: {type: boolean}
+        fields: {type: array, items: {type: string}}
+        note: {type: string}
+        dealer_threshold: {type: boolean, description: "True for the Canadian dealer policy threshold (never a legal duty)."}
+        walk_in_floor_cents: {type: integer, format: int64, description: "The branch's walk-in identity floor in cents; zero when the branch has it off."}
+        asks_floor: {type: boolean, description: "True when this walk-in's cash sale passes the branch's floor and no identity is captured yet: the counter asks before Pay."}
+        walk_in_aggregated: {type: boolean, description: "True when the branch counts a walk-in's cash sales together once the walk-in is identified."}
+        walk_in_note: {type: string, description: "The plain sentence the counter shows when the branch's floor is off: the walk-in's cash is not aggregated."}
+        threshold_crossed: {type: boolean, description: "True when this sale's counted cash crosses the rule's threshold: the payer's details are required and no decline answers it."}
     PosVoidRequest:
       type: object
       required: [reason]
@@ -33674,7 +34697,7 @@ components:
     PosReturnReasonCode:
       type: string
       description: "The closed lowercase list of return reasons; an absent reason is other."
-      enum: [defective, damaged, wrong_item, ordered_wrong, changed_mind, overbought, other]
+      enum: [defective, damaged, wrong_item, ordered_wrong, changed_mind, overbought, mis_tint, other]
     PosWayForward:
       type: object
       required: [kind, available, message]
@@ -33819,6 +34842,10 @@ components:
           description: >-
             The customer's counter alerts the clerk read and acknowledged before taking the exchange's replacement sale. A warning that asks to be acknowledged must be named here, or the exchange is refused with 409 alert_unacknowledged and nothing is written.
           items: {type: string, format: uuid}
+        payer: {$ref: "#/components/schemas/PosPayerCapture", description: "The payer's details the counter captured for a large cash crossing (CP-17a); required when this exchange's cash difference takes the payer over the branch's threshold, refused 409 payer_details_required without them."}
+        payer_declined: {type: boolean, description: "The counter's record that the walk-in declined to identify over the branch's walk-in identity floor (CP-17a); the exchange goes ahead and the fact is recorded for the manager's worklist as an identity declined."}
+        suspected_avoidance: {type: boolean, description: "The manager's suspected avoidance mark (CP-17a); it makes a qualifying instrument count as cash whatever was sold."}
+        tender_method: {type: string, enum: [cash, check, card], description: "The preview only: the method the counter will tender for the difference, so the server can say what the branch's large cash rule needs of this exchange before it is rung. The exchange takes the tender itself in tenders."}
     PosReturnFigures:
       type: object
       required: [subtotal_cents, tax_cents, restocking_fee_cents, total_cents, refund_cents, lines]
@@ -33848,6 +34875,7 @@ components:
         restocking_fee_cents: {type: integer, format: int64}
         replacement_cents: {type: integer, format: int64, description: "The replacement sale's total with its tax."}
         difference_cents: {type: integer, format: int64, description: "Replacement less return: positive is what the customer pays, negative what goes back."}
+        large_cash: {$ref: "#/components/schemas/PosLargeCashPreview", description: "The branch country's large cash answer for this exchange (CP-17a): whether the payer's details are required and which fields the rule needs."}
     PosExchange:
       type: object
       required: [return, sale, returned_cents, restocking_fee_cents, replacement_cents, difference_cents, refunded_cents]
@@ -33920,6 +34948,11 @@ components:
         discount_percent: {type: [string, "null"], description: "A percent or a cents amount, never both."}
         discount_cents: {type: [integer, "null"], format: int64}
         discount_reason: {type: [string, "null"]}
+        tint:
+          oneOf:
+            - $ref: "#/components/schemas/LineTint"
+            - type: "null"
+          description: The paint line's tint record (row CP-16), null or omitted on every other line.
     PosTransactionSummary:
       type: object
       description: A sale's head, a list item.
@@ -34037,7 +35070,7 @@ components:
       type: object
       description: >-
         A sale line in the shared shape of ADR 0005 section 2.2: product, kit (with its component lines), charge and text lines, the priced fields null on a text line, the extension rounded once.
-      required: [id, position, line_type, parent_line_id, product_id, charge_code_id, charge_code, sku, description, quantity, uom, price_uom, uom_qty, price_uom_qty, stock_uom, stock_quantity, tally, unit_price_ten_thousandths, priced_unit_price_ten_thousandths, price_source, price_basis, override_reason, discount_percent, discount_cents, discount_reason, price_adjusted_by, line_total_cents, taxable, revenue_account_code, is_special_order, vendor_id, special_order_unit_cost_ten_thousandths, weight_source, weight_gross_lb, weight_tare_lb, weight_net_lb, weight_net_basis, scale_device_id, scale_ticket_id, scale_ticket_number, manual_weight_reason, weight_captured_by, weight_captured_at, created_at]
+      required: [id, position, line_type, parent_line_id, product_id, charge_code_id, charge_code, sku, description, quantity, uom, price_uom, uom_qty, price_uom_qty, stock_uom, stock_quantity, tally, tint, unit_price_ten_thousandths, priced_unit_price_ten_thousandths, price_source, price_basis, override_reason, discount_percent, discount_cents, discount_reason, price_adjusted_by, line_total_cents, taxable, revenue_account_code, is_special_order, vendor_id, special_order_unit_cost_ten_thousandths, weight_source, weight_gross_lb, weight_tare_lb, weight_net_lb, weight_net_basis, scale_device_id, scale_ticket_id, scale_ticket_number, manual_weight_reason, weight_captured_by, weight_captured_at, created_at]
       properties:
         id: {type: string, format: uuid}
         position: {type: integer}
@@ -34071,6 +35104,11 @@ components:
         is_special_order: {type: boolean}
         vendor_id: {type: [string, "null"], format: uuid}
         special_order_unit_cost_ten_thousandths: {type: [integer, "null"], format: int64}
+        tint:
+          oneOf:
+            - $ref: "#/components/schemas/LineTint"
+            - type: "null"
+          description: The paint line's tint record (row CP-16), null on every other line.
         weight_source: {oneOf: [{type: string, enum: [scale, manual]}, {type: "null"}], description: "Where the line's weight came from; null on a line that was not weighed (CP-19)."}
         weight_gross_lb: {type: [string, "null"], description: "The gross reading in pounds, a decimal string."}
         weight_tare_lb: {type: [string, "null"], description: "The tare used: the weigh in's gross on a double draft ticket."}
@@ -34265,7 +35303,7 @@ components:
     PosReturnLine:
       type: object
       description: One returned line, its quantity and extension negative.
-      required: [id, position, product_id, description, quantity, uom, unit_price_ten_thousandths, line_total_cents, restock, reason_code, restocking_fee_cents]
+      required: [id, position, product_id, description, quantity, uom, unit_price_ten_thousandths, line_total_cents, restock, reason_code, restocking_fee_cents, mis_tint, tinted_return]
       properties:
         id: {type: string, format: uuid}
         position: {type: integer}
@@ -34278,6 +35316,8 @@ components:
         restock: {type: boolean}
         reason_code: {$ref: "#/components/schemas/PosReturnReasonCode"}
         restocking_fee_cents: {type: integer, format: int64, description: "The fee this line's reason withheld from its refund, half even to the cent."}
+        mis_tint: {type: boolean, description: "The mis tint return (row CP-16): the store mixed the wrong colour, so the tinted line returned."}
+        tinted_return: {type: boolean, description: "A returned line whose sale carried a tint: the can goes to the mistint rack, never back into saleable stock."}
     PosTillSession:
       type: object
       description: >-
@@ -34457,7 +35497,7 @@ components:
         revision: {type: integer, format: int64, minimum: 1, description: "The settings resource's revision; a write names it (If-Match and/or the body's revision)."}
         rules:
           type: object
-          required: [check_limit_cents, check_id_required, restocking_fees, restocking_fee_defaults]
+          required: [check_limit_cents, check_id_required, restocking_fees, restocking_fee_defaults, tint_charge, tinted_no_return]
           properties:
             check_limit_cents: {type: [integer, "null"], format: int64, minimum: 0, description: "The database wide check limit; null is no limit. A customer's own limit wins over it."}
             check_id_required:
@@ -34476,6 +35516,11 @@ components:
               description: "The suggested fee for each reason, read only: what the settings screen offers a dealer who has set nothing. The reasons that are the customer's own doing carry a figure; the dealer's own and the catch all carry none. Never a fee in force until written."
               required: [defective, damaged, wrong_item, ordered_wrong, changed_mind, overbought, other]
               additionalProperties: {type: integer, minimum: 0, maximum: 10000}
+            tint_charge:
+              $ref: '#/components/schemas/TintChargeRule'
+            tinted_no_return:
+              type: boolean
+              description: "The dealer's tinted no return policy: a tinted can is not taken back. Off unless the dealer says so, because the rule is a dealer policy and not a law."
     PosSettingsRequest:
       type: object
       required: [rules]
@@ -34496,6 +35541,11 @@ components:
               description: "Every reason's fee, the whole closed list: a code outside the list, a figure outside 0 to 10000 basis points, or a reason left out is a 400 naming the field. A figure of 0 clears the reason's row (no fee)."
               required: [defective, damaged, wrong_item, ordered_wrong, changed_mind, overbought, other]
               additionalProperties: {type: integer, minimum: 0, maximum: 10000}
+            tint_charge:
+              $ref: '#/components/schemas/TintChargeRule'
+            tinted_no_return:
+              type: boolean
+              description: "The dealer's tinted no return policy. Absent is off (the rule is a dealer policy and not a law)."
         revision: {type: integer, format: int64, minimum: 1, description: "The revision this write rides; If-Match serves the same role."}
     PosEndOfDayCloseRequest:
       type: object
@@ -35721,7 +36771,7 @@ components:
       type: object
       description: >-
         The product on the wire (ADR 0006 sections 6 and 7.1): stock_uom, the scaled base price, quantities as decimal strings, and the stock totals in the stocking unit.
-      required: [id, sku, description, stock_uom, base_price_ten_thousandths, average_unit_cost_ten_thousandths, target_margin, commission_rate, vendor, vendor_id, upc, weight_lbs, length_in, width_in, height_in, stackable, geometry_source, lead_time_days, reorder_point, reorder_qty, on_hand, allocated, available, revision, created_at, updated_at, sale_uom, price_uom, purchase_uom, board_thickness_in, board_width_in, board_length_ft, random_length, units, image_url, density_lb_per_cy, density_volume_state]
+      required: [id, sku, description, stock_uom, base_price_ten_thousandths, average_unit_cost_ten_thousandths, target_margin, commission_rate, vendor, vendor_id, upc, weight_lbs, length_in, width_in, height_in, stackable, geometry_source, lead_time_days, consumer_durable, reorder_point, reorder_qty, on_hand, allocated, available, revision, created_at, updated_at, sale_uom, price_uom, purchase_uom, board_thickness_in, board_width_in, board_length_ft, random_length, units, image_url, density_lb_per_cy, density_volume_state]
       properties:
         id:
           type: string
@@ -35764,6 +36814,9 @@ components:
           type: [string, "null"]
         lead_time_days:
           type: [integer, "null"]
+        consumer_durable:
+          type: boolean
+          description: The Form 8300 designated reporting transaction flag (CP-17a); a lumber yard's default is false.
         reorder_point:
           type: string
           description: A decimal string at scale 4.
@@ -35875,6 +36928,9 @@ components:
         random_length:
           type: boolean
           description: The product is sold by tally; it stocks in LF and carries no fixed length.
+        consumer_durable:
+          type: [boolean, "null"]
+          description: The Form 8300 designated reporting transaction flag (CP-17a); false when absent.
         density_lb_per_cy:
           oneOf:
             - $ref: '#/components/schemas/Quantity'
@@ -36004,6 +37060,16 @@ components:
       properties:
         lead_time_days:
           type: [integer, "null"]
+        revision:
+          type: integer
+          format: int64
+    ProductConsumerDurableUpdate:
+      type: object
+      required: [consumer_durable]
+      properties:
+        consumer_durable:
+          type: boolean
+          description: The Form 8300 designated reporting transaction flag (CP-17a).
         revision:
           type: integer
           format: int64
@@ -38168,6 +39234,260 @@ components:
       required: [effective_to]
       properties:
         effective_to: {type: string, description: YYYY-MM-DD}
+    TintSystem:
+      type: object
+      properties:
+        id: {type: string, format: uuid}
+        code: {type: string}
+        name: {type: string}
+        manufacturer: {type: string}
+        unit_denominator: {type: integer}
+        unit_label: {type: string}
+        created_at: {type: string, format: date-time}
+    TintSystemCreate:
+      type: object
+      required: [code, name, unit_denominator]
+      properties:
+        code: {type: string}
+        name: {type: string}
+        manufacturer: {type: string}
+        unit_denominator: {type: integer, enum: [32, 48, 64, 128, 192, 384, 1024]}
+        unit_label: {type: string}
+    TintSystemPage:
+      type: object
+      properties:
+        items:
+          type: array
+          items: {$ref: '#/components/schemas/TintSystem'}
+    TintBase:
+      type: object
+      properties:
+        id: {type: string, format: uuid}
+        tint_system_id: {type: string, format: uuid}
+        code: {type: string}
+        name: {type: string}
+        manufacturer_base_code: {type: string}
+        product_id: {type: string, format: uuid, nullable: true}
+        fill_volume_oz: {type: integer}
+        is_deepest: {type: boolean}
+        created_at: {type: string, format: date-time}
+    TintBaseCreate:
+      type: object
+      required: [tint_system_id, code, name, fill_volume_oz]
+      properties:
+        tint_system_id: {type: string, format: uuid}
+        code: {type: string}
+        name: {type: string}
+        manufacturer_base_code: {type: string}
+        product_id: {type: string, format: uuid}
+        fill_volume_oz: {type: integer}
+        is_deepest: {type: boolean}
+    TintBasePage:
+      type: object
+      properties:
+        items:
+          type: array
+          items: {$ref: '#/components/schemas/TintBase'}
+    TintColorant:
+      type: object
+      properties:
+        id: {type: string, format: uuid}
+        tint_system_id: {type: string, format: uuid}
+        code: {type: string}
+        name: {type: string}
+        manufacturer_code: {type: string}
+        manufacturer_upc: {type: string, nullable: true}
+        created_at: {type: string, format: date-time}
+    TintColorantCreate:
+      type: object
+      required: [tint_system_id, code, name]
+      properties:
+        tint_system_id: {type: string, format: uuid}
+        code: {type: string}
+        name: {type: string}
+        manufacturer_code: {type: string}
+        manufacturer_upc: {type: string}
+    TintColorantPage:
+      type: object
+      properties:
+        items:
+          type: array
+          items: {$ref: '#/components/schemas/TintColorant'}
+    TintColor:
+      type: object
+      properties:
+        id: {type: string, format: uuid}
+        tint_system_id: {type: string, format: uuid}
+        manufacturer_code: {type: string, nullable: true}
+        name: {type: string}
+        is_custom: {type: boolean}
+        customer_id: {type: string, format: uuid, nullable: true}
+        note: {type: string}
+        created_at: {type: string, format: date-time}
+    TintColorCreate:
+      type: object
+      required: [tint_system_id, name]
+      properties:
+        tint_system_id: {type: string, format: uuid}
+        manufacturer_code: {type: string}
+        name: {type: string}
+        is_custom: {type: boolean}
+        customer_id: {type: string, format: uuid}
+        note: {type: string}
+    TintColorPage:
+      type: object
+      properties:
+        items:
+          type: array
+          items: {$ref: '#/components/schemas/TintColor'}
+    TintAmount:
+      type: object
+      required: [whole_oz, increments_coarse, increments_fine, unit_denominator]
+      properties:
+        whole_oz: {type: integer}
+        increments_coarse: {type: integer, description: The count of the coarse 1/32 step.}
+        increments_fine: {type: integer, description: The count of the fine 1/denominator step.}
+        unit_denominator: {type: integer, enum: [32, 48, 64, 128, 192, 384, 1024]}
+    TintComponent:
+      type: object
+      properties:
+        colorant_id: {type: string, format: uuid}
+        colorant_code: {type: string}
+        colorant_name: {type: string}
+        amount: {$ref: '#/components/schemas/TintAmount'}
+    TintFormula:
+      type: object
+      properties:
+        id: {type: string, format: uuid}
+        color_id: {type: string, format: uuid}
+        base_id: {type: string, format: uuid}
+        product_id: {type: string, format: uuid, nullable: true}
+        container_size_code: {type: string}
+        container_volume_oz: {type: integer}
+        total_colorant_oz: {type: string}
+        source: {type: string, enum: [book, match, manual]}
+        components:
+          type: array
+          items: {$ref: '#/components/schemas/TintComponent'}
+        created_at: {type: string, format: date-time}
+    TintFormulaCreate:
+      type: object
+      required: [color_id, base_id, container_size_code, container_volume_oz]
+      properties:
+        color_id: {type: string, format: uuid}
+        base_id: {type: string, format: uuid}
+        product_id: {type: string, format: uuid}
+        container_size_code: {type: string}
+        container_volume_oz: {type: integer}
+        source: {type: string, enum: [book, match, manual]}
+        components:
+          type: array
+          items:
+            type: object
+            required: [colorant_id, whole_oz, increments_coarse, increments_fine, unit_denominator]
+            properties:
+              colorant_id: {type: string, format: uuid}
+              whole_oz: {type: integer}
+              increments_coarse: {type: integer}
+              increments_fine: {type: integer}
+              unit_denominator: {type: integer, enum: [32, 48, 64, 128, 192, 384, 1024]}
+    TintFormulaPage:
+      type: object
+      properties:
+        items:
+          type: array
+          items: {$ref: '#/components/schemas/TintFormula'}
+    TintRescaleRequest:
+      type: object
+      required: [target_volume_oz]
+      properties:
+        target_volume_oz: {type: integer, description: The target container volume in whole fluid ounces.}
+    TintRescaledComponent:
+      type: object
+      properties:
+        colorant_code: {type: string}
+        colorant_name: {type: string}
+        amount: {$ref: '#/components/schemas/TintAmount'}
+        rounded: {type: boolean}
+    TintRescale:
+      type: object
+      properties:
+        formula: {$ref: '#/components/schemas/TintFormula'}
+        target_volume_oz: {type: integer}
+        components:
+          type: array
+          items: {$ref: '#/components/schemas/TintRescaledComponent'}
+        any_rounded: {type: boolean}
+    TintSavedColor:
+      type: object
+      properties:
+        id: {type: string, format: uuid}
+        customer_id: {type: string, format: uuid}
+        color_id: {type: string, format: uuid}
+        name: {type: string}
+        job_note: {type: string}
+        note: {type: string}
+        project_id: {type: string, format: uuid, nullable: true}
+        created_by: {type: string}
+        created_at: {type: string, format: date-time}
+    TintSavedColorCreate:
+      type: object
+      required: [customer_id, color_id, name]
+      properties:
+        customer_id: {type: string, format: uuid}
+        color_id: {type: string, format: uuid}
+        name: {type: string}
+        job_note: {type: string}
+        note: {type: string}
+        project_id: {type: string, format: uuid}
+    TintSavedColorPage:
+      type: object
+      properties:
+        items:
+          type: array
+          items: {$ref: '#/components/schemas/TintSavedColor'}
+    TintCharge:
+      type: object
+      properties:
+        tint_charge_cents: {type: integer}
+    TintChargeTier:
+      type: object
+      description: "One tier of the dealer's tint charge rule: the base tier it covers (empty is any base), the lowest colorant total in fluid ounces it covers (empty is any total) and the charge in cents."
+      required: [base_tier, min_colorant_oz, charge_cents]
+      properties:
+        base_tier: {type: string, enum: ['', flat, deep]}
+        min_colorant_oz: {type: string}
+        charge_cents: {type: integer, minimum: 0}
+    TintChargeRule:
+      type: object
+      description: "The dealer's tint charge rule: the flat figure per container and the tiers that may cover it."
+      required: [flat_cents, tiers]
+      properties:
+        flat_cents: {type: integer, minimum: 0}
+        tiers:
+          type: array
+          items: {$ref: '#/components/schemas/TintChargeTier'}
+    LineTint:
+      type: object
+      description: A paint line's tint record (row CP-16), the base, the colour and the formula frozen on the sale, the amounts as actually mixed.
+      required: [formula_id, color_code, color_name, base_code, container_size_code, rescaled, tint_charge_cents, components]
+      properties:
+        formula_id: {type: [string, "null"], format: uuid}
+        color_code: {type: string}
+        color_name: {type: string}
+        base_code: {type: string}
+        container_size_code: {type: string}
+        rescaled: {type: boolean, description: True when the amounts were rescaled to this size; the counter may override any of them.}
+        tint_charge_cents: {type: [integer, "null"], format: int64}
+        components:
+          type: array
+          items:
+            type: object
+            required: [colorant_code, colorant_name, amount]
+            properties:
+              colorant_code: {type: string}
+              colorant_name: {type: string}
+              amount: {$ref: '#/components/schemas/TintAmount'}
     Unit:
       type: object
       description: >-

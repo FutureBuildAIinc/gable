@@ -281,3 +281,54 @@ func strIndexOf(haystack, needle string) int {
 	}
 	return -1
 }
+
+// RULE (CP-10, debt read P2-1): naming or changing the ship to on a sale that
+// already has lines retaxes the sale, so the total the screen shows is the
+// total the completion posts. The same holds for the switch back to a pickup.
+func TestNamingTheShipToRetaxesTheLinesAlreadyRung(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	f := newFixture(t, testutil.RequireDB(t))
+	zoneFor(t, f, "98150", zonePart(taxzone.PartState, "0.050000"))
+
+	shipTo := uuid.New()
+	mustExec(t, f.db, `INSERT INTO customer_ship_tos (id, customer_id, code, name, line1, city, region, postal_code, country, is_default, is_active)
+		VALUES ($1, $2, 'SITE', 'The site', '1 Golden Way', 'Tarnwick', 'WA', '98150', 'US', TRUE, TRUE)`,
+		shipTo, f.customerID)
+	t.Cleanup(func() { mustExec(t, f.db, `DELETE FROM customer_ship_tos WHERE id = $1`, shipTo) })
+
+	f.ensureTill()
+	saleID := f.startSale(nil)
+	attach := func(body map[string]any) resp {
+		return f.do("PUT", "/api/v1/pos/transactions/"+saleID+"/customer", body, "X-Test-Role", "cashier", "X-Test-Sub", mustUUID(t))
+	}
+	if r := attach(map[string]any{"customer_id": f.customerID.String()}); r.status != http.StatusOK {
+		t.Fatalf("attach = %d: %s", r.status, r.raw)
+	}
+	if r := f.addLine(saleID, f.productLine("10")); r.status != http.StatusOK {
+		t.Fatalf("add line = %d: %s", r.status, r.raw)
+	}
+	pickupTax := num(t, f.getSale(t, saleID), "tax_cents")
+
+	r := attach(map[string]any{
+		"customer_id": f.customerID.String(), "ship_to_id": shipTo.String(), "delivery_type": "delivery",
+	})
+	if r.status != http.StatusOK {
+		t.Fatalf("attach with ship to = %d: %s", r.status, r.raw)
+	}
+	// 5500 taxable at the zone's 0.05 is 275.
+	if got := num(t, r.body, "tax_cents"); got != 275 {
+		t.Errorf("tax_cents after naming the ship to = %d, want 275", got)
+	}
+	if got := num(t, r.body, "total_cents"); got != 5500+275 {
+		t.Errorf("total_cents after naming the ship to = %d, want %d", got, 5500+275)
+	}
+
+	// Back to a pickup: the branch rate answers again.
+	r = attach(map[string]any{"customer_id": f.customerID.String()})
+	if r.status != http.StatusOK {
+		t.Fatalf("attach back to pickup = %d: %s", r.status, r.raw)
+	}
+	if got := num(t, r.body, "tax_cents"); got != pickupTax {
+		t.Errorf("tax_cents after the switch back = %d, want the pickup figure %d", got, pickupTax)
+	}
+}

@@ -898,7 +898,7 @@ func TestWire_VoidZeroBill(t *testing.T) {
 		if got, want := f.controlBalance(), f.openSum(); got != want {
 			t.Fatalf("%s: after the approve: control %d, open %d", c.number, got, want)
 		}
-		before := f.count(`SELECT count(*) FROM gl_journal_entries`)
+		before := f.entryCount()
 		v := f.void(id, 2, "entered in error")
 		if v.status != http.StatusOK {
 			t.Fatalf("%s: void the zero bill = %d, want 200: %s", c.number, v.status, v.raw)
@@ -906,7 +906,7 @@ func TestWire_VoidZeroBill(t *testing.T) {
 		if str(t, v.body, "status") != "voided" {
 			t.Errorf("%s: the zero bill = %s, want voided", c.number, v.raw)
 		}
-		if after := f.count(`SELECT count(*) FROM gl_journal_entries`); after != before {
+		if after := f.entryCount(); after != before {
 			t.Errorf("%s: %d entries were written for a void with nothing to reverse", c.number, after-before)
 		}
 		if !f.balanced() {
@@ -990,7 +990,7 @@ func TestWire_VoidLegacyApprovedBill(t *testing.T) {
 	mustExec(t, f.db, `DELETE FROM gl_journal_lines WHERE journal_entry_id IN
 		(SELECT id FROM gl_journal_entries WHERE source_ref_id = $1)`, id2)
 	mustExec(t, f.db, `DELETE FROM gl_journal_entries WHERE source_ref_id = $1`, id2)
-	before := f.count(`SELECT count(*) FROM gl_journal_entries`)
+	before := f.entryCount()
 	rv := f.void(id2, 2, "legacy bill voided")
 	if rv.status != http.StatusOK {
 		t.Fatalf("void the unlinked legacy bill = %d, want 200: %s", rv.status, rv.raw)
@@ -998,7 +998,7 @@ func TestWire_VoidLegacyApprovedBill(t *testing.T) {
 	if str(t, rv.body, "status") != "voided" {
 		t.Errorf("the unlinked legacy bill = %s, want voided", rv.raw)
 	}
-	if after := f.count(`SELECT count(*) FROM gl_journal_entries`); after != before {
+	if after := f.entryCount(); after != before {
 		t.Errorf("%d entries were written for a void with nothing to reverse", after-before)
 	}
 	if n := f.count(`SELECT count(*) FROM vendor_invoices WHERE id = $1 AND status = 'VOIDED' AND amount_open = 0.00`, id2); n != 1 {
@@ -1030,7 +1030,7 @@ func TestWire_VoidLegacyApprovedBill(t *testing.T) {
 		t.Fatal("the seeded one leg entry balances; the seed did not take")
 	}
 	controlBefore, openBefore := f.controlBalance(), f.openSum()
-	before3 := f.count(`SELECT count(*) FROM gl_journal_entries`)
+	before3 := f.entryCount()
 	bv := f.void(id3, 2, "legacy bill voided")
 	if bv.status != http.StatusConflict {
 		t.Fatalf("void a bill whose linked entry has one leg = %d, want 409: %s", bv.status, bv.raw)
@@ -1041,7 +1041,7 @@ func TestWire_VoidLegacyApprovedBill(t *testing.T) {
 	if n := f.count(`SELECT count(*) FROM vendor_invoices WHERE id = $1 AND status = 'APPROVED' AND revision = 2`, id3); n != 1 {
 		t.Error("a refused one leg void changed the bill")
 	}
-	if after := f.count(`SELECT count(*) FROM gl_journal_entries`); after != before3 {
+	if after := f.entryCount(); after != before3 {
 		t.Errorf("%d entries were written for a refused one leg void", after-before3)
 	}
 	// The tie after the refused act: the only unbalanced entry in the fixture
@@ -1077,7 +1077,7 @@ func TestWire_VoidLegacyApprovedBill(t *testing.T) {
 	mustExec(t, f.db, `UPDATE vendor_invoices SET status = 'PENDING', gl_entry_id = NULL,
 		approved_by = NULL, approved_at = NULL WHERE id = $1`, id4)
 	control4, open4 := f.controlBalance(), f.openSum()
-	before4 := f.count(`SELECT count(*) FROM gl_journal_entries`)
+	before4 := f.entryCount()
 	pv := f.void(id4, 2, "pending bill voided")
 	if pv.status != http.StatusConflict {
 		t.Fatalf("void a pending bill holding a live entry = %d, want 409: %s", pv.status, pv.raw)
@@ -1088,7 +1088,7 @@ func TestWire_VoidLegacyApprovedBill(t *testing.T) {
 	if n := f.count(`SELECT count(*) FROM vendor_invoices WHERE id = $1 AND status = 'PENDING' AND revision = 2`, id4); n != 1 {
 		t.Error("a refused void changed the bill")
 	}
-	if after := f.count(`SELECT count(*) FROM gl_journal_entries`); after != before4 {
+	if after := f.entryCount(); after != before4 {
 		t.Errorf("%d entries were written for a refused void", after-before4)
 	}
 	// The only unbalanced entry in the fixture stays the seeded legacy one
@@ -1138,7 +1138,7 @@ func TestWire_VoidHandEditedZeroTotalBill(t *testing.T) {
 		t.Fatal("the seeded one leg entry balances; the seed did not take")
 	}
 	control, open := f.controlBalance(), f.openSum()
-	before := f.count(`SELECT count(*) FROM gl_journal_entries`)
+	before := f.entryCount()
 	v := f.void(id, 2, "hand edited bill voided")
 	if v.status != http.StatusConflict {
 		t.Fatalf("void a hand edited zero total bill over a live entry = %d, want 409: %s", v.status, v.raw)
@@ -1149,7 +1149,7 @@ func TestWire_VoidHandEditedZeroTotalBill(t *testing.T) {
 	if n := f.count(`SELECT count(*) FROM vendor_invoices WHERE id = $1 AND status = 'APPROVED' AND revision = 2`, id); n != 1 {
 		t.Error("a refused hand edited void changed the bill")
 	}
-	if after := f.count(`SELECT count(*) FROM gl_journal_entries`); after != before {
+	if after := f.entryCount(); after != before {
 		t.Errorf("%d entries were written for a refused void", after-before)
 	}
 	// The tie after the refused act: the refusal moved no money, and the only
@@ -1229,7 +1229,7 @@ func TestWire_VoidRefusesUnlinkedBillWhoseReversalIsVoid(t *testing.T) {
 	if control != 5000 || open != 5000 {
 		t.Fatalf("control %d, open %d, want both 5000", control, open)
 	}
-	before := f.count(`SELECT count(*) FROM gl_journal_entries`)
+	before := f.entryCount()
 	v := f.void(id, 2, "wrong bill")
 	if v.status != http.StatusConflict {
 		t.Fatalf("void a bill whose entry's reversal is void = %d, want 409: %s", v.status, v.raw)
@@ -1240,7 +1240,7 @@ func TestWire_VoidRefusesUnlinkedBillWhoseReversalIsVoid(t *testing.T) {
 	if n := f.count(`SELECT count(*) FROM vendor_invoices WHERE id = $1 AND status = 'APPROVED' AND revision = 2`, id); n != 1 {
 		t.Error("a refused void changed the bill")
 	}
-	if after := f.count(`SELECT count(*) FROM gl_journal_entries`); after != before {
+	if after := f.entryCount(); after != before {
 		t.Errorf("%d entries were written for a refused void", after-before)
 	}
 	if n := f.count(`SELECT count(*) FROM gl_journal_entries e
@@ -1284,7 +1284,7 @@ func TestWire_VoidLinkedEntryAlreadyUndoneByGL(t *testing.T) {
 	if control1 != 0 || open1 != 3000 {
 		t.Fatalf("control %d, open %d, want 0 and 3000", control1, open1)
 	}
-	before1 := f.count(`SELECT count(*) FROM gl_journal_entries`)
+	before1 := f.entryCount()
 	v1 := f.void(id1, 2, "wrong bill")
 	if v1.status != http.StatusOK {
 		t.Fatalf("void a bill whose linked entry the GL route reversed = %d, want 200: %s", v1.status, v1.raw)
@@ -1292,7 +1292,7 @@ func TestWire_VoidLinkedEntryAlreadyUndoneByGL(t *testing.T) {
 	if str(t, v1.body, "status") != "voided" {
 		t.Errorf("the bill = %s, want voided", v1.raw)
 	}
-	if after := f.count(`SELECT count(*) FROM gl_journal_entries`); after != before1 {
+	if after := f.entryCount(); after != before1 {
 		t.Errorf("%d entries were written for a void with nothing to reverse", after-before1)
 	}
 	if !f.balanced() {
@@ -1318,7 +1318,7 @@ func TestWire_VoidLinkedEntryAlreadyUndoneByGL(t *testing.T) {
 	if control2 != 0 || open2 != 4000 {
 		t.Fatalf("control %d, open %d, want 0 and 4000", control2, open2)
 	}
-	before2 := f.count(`SELECT count(*) FROM gl_journal_entries`)
+	before2 := f.entryCount()
 	v2 := f.void(id2, 2, "wrong bill")
 	if v2.status != http.StatusOK {
 		t.Fatalf("void a bill whose linked entry the GL route voided = %d, want 200: %s", v2.status, v2.raw)
@@ -1326,7 +1326,7 @@ func TestWire_VoidLinkedEntryAlreadyUndoneByGL(t *testing.T) {
 	if str(t, v2.body, "status") != "voided" {
 		t.Errorf("the bill = %s, want voided", v2.raw)
 	}
-	if after := f.count(`SELECT count(*) FROM gl_journal_entries`); after != before2 {
+	if after := f.entryCount(); after != before2 {
 		t.Errorf("%d entries were written for a void with nothing to reverse", after-before2)
 	}
 	if !f.balanced() {
@@ -1358,7 +1358,7 @@ func TestWire_VoidLinkedEntryAlreadyUndoneByGL(t *testing.T) {
 	if control3 != 5000 || open3 != 5000 {
 		t.Fatalf("control %d, open %d, want both 5000", control3, open3)
 	}
-	before3 := f.count(`SELECT count(*) FROM gl_journal_entries`)
+	before3 := f.entryCount()
 	v3 := f.void(id3, 2, "wrong bill")
 	if v3.status != http.StatusConflict {
 		t.Fatalf("void a bill whose linked entry's reversal is void = %d, want 409: %s", v3.status, v3.raw)
@@ -1369,7 +1369,7 @@ func TestWire_VoidLinkedEntryAlreadyUndoneByGL(t *testing.T) {
 	if n := f.count(`SELECT count(*) FROM vendor_invoices WHERE id = $1 AND status = 'APPROVED' AND revision = 2`, id3); n != 1 {
 		t.Error("a refused void changed the bill")
 	}
-	if after := f.count(`SELECT count(*) FROM gl_journal_entries`); after != before3 {
+	if after := f.entryCount(); after != before3 {
 		t.Errorf("%d entries were written for a refused void", after-before3)
 	}
 	if !f.balanced() {
@@ -1404,7 +1404,7 @@ func TestWire_VoidLinkedEntryAlreadyUndoneByGL(t *testing.T) {
 	if control4 != control3 || open4 != open3+6000 {
 		t.Fatalf("control %d, open %d, want the shape's own %d more owed and no more credit (control %d, open %d)", control4, open4, 6000, control3, open3)
 	}
-	before4 := f.count(`SELECT count(*) FROM gl_journal_entries`)
+	before4 := f.entryCount()
 	v4 := f.void(id4, 2, "wrong bill")
 	if v4.status != http.StatusOK {
 		t.Fatalf("void a bill whose entry and reversal are both void = %d, want 200: %s", v4.status, v4.raw)
@@ -1412,7 +1412,7 @@ func TestWire_VoidLinkedEntryAlreadyUndoneByGL(t *testing.T) {
 	if str(t, v4.body, "status") != "voided" {
 		t.Errorf("the bill = %s, want voided", v4.raw)
 	}
-	if after := f.count(`SELECT count(*) FROM gl_journal_entries`); after != before4 {
+	if after := f.entryCount(); after != before4 {
 		t.Errorf("%d entries were written for a void with nothing to reverse", after-before4)
 	}
 	if !f.balanced() {
@@ -1495,7 +1495,7 @@ func TestWire_PaymentCurrencyFollowsTheBills(t *testing.T) {
 	}
 	payments := f.count(`SELECT count(*) FROM ap_payments WHERE vendor_id = $1`, f.vendor)
 	applications := f.count(`SELECT count(*) FROM ap_payment_applications a JOIN vendor_invoices i ON i.id = a.invoice_id WHERE i.vendor_id = $1`, f.vendor)
-	entries := f.count(`SELECT count(*) FROM gl_journal_entries`)
+	entries := f.entryCount()
 	mixed := f.pay(12000, usd, cad)
 	if mixed.status != http.StatusConflict {
 		t.Fatalf("pay bills of two currencies = %d, want 409: %s", mixed.status, mixed.raw)
@@ -1514,7 +1514,7 @@ func TestWire_PaymentCurrencyFollowsTheBills(t *testing.T) {
 	if after := f.count(`SELECT count(*) FROM ap_payment_applications a JOIN vendor_invoices i ON i.id = a.invoice_id WHERE i.vendor_id = $1`, f.vendor); after != applications {
 		t.Errorf("%d applications were written for a refused payment", after-applications)
 	}
-	if after := f.count(`SELECT count(*) FROM gl_journal_entries`); after != entries {
+	if after := f.entryCount(); after != entries {
 		t.Errorf("%d entries were written for a refused payment", after-entries)
 	}
 	if !f.balanced() {
@@ -1553,7 +1553,7 @@ func TestWire_VoidRefusesDoublePostedBill(t *testing.T) {
 	if control != 4000 || open != 2000 {
 		t.Fatalf("control %d, open %d, want 4000 and 2000", control, open)
 	}
-	before := f.count(`SELECT count(*) FROM gl_journal_entries`)
+	before := f.entryCount()
 	v := f.void(id, 2, "wrong bill")
 	if v.status != http.StatusConflict {
 		t.Fatalf("void a double posted bill = %d, want 409: %s", v.status, v.raw)
@@ -1567,7 +1567,7 @@ func TestWire_VoidRefusesDoublePostedBill(t *testing.T) {
 	if n := f.count(`SELECT count(*) FROM vendor_invoices WHERE id = $1 AND status = 'APPROVED' AND revision = 2`, id); n != 1 {
 		t.Error("a refused void changed the bill")
 	}
-	if after := f.count(`SELECT count(*) FROM gl_journal_entries`); after != before {
+	if after := f.entryCount(); after != before {
 		t.Errorf("%d entries were written for a refused void", after-before)
 	}
 	if n := f.count(`SELECT count(*) FROM gl_journal_entries r JOIN gl_journal_entries o ON o.id = r.reverses_entry_id WHERE o.source_ref_id = $1`, id); n != 0 {
@@ -1621,7 +1621,7 @@ func TestWire_VoidDecidesOnTheWholeReversalChain(t *testing.T) {
 			t.Fatalf("%s: the chain nets %d, want %d (the shape itself is wrong)", shape.name, got, wantNet)
 		}
 		control, open := f.controlBalance(), f.openSum()
-		before := f.count(`SELECT count(*) FROM gl_journal_entries`)
+		before := f.entryCount()
 		v := f.void(id, 2, "chain test")
 		switch {
 		case wantNet == 0:
@@ -1629,7 +1629,7 @@ func TestWire_VoidDecidesOnTheWholeReversalChain(t *testing.T) {
 			if v.status != http.StatusOK {
 				t.Errorf("%s: void a bill whose chain nets zero = %d, want 200: %s", shape.name, v.status, v.raw)
 			}
-			if after := f.count(`SELECT count(*) FROM gl_journal_entries`); after != before {
+			if after := f.entryCount(); after != before {
 				t.Errorf("%s: %d entries were written for a void with nothing to reverse", shape.name, after-before)
 			}
 			if got, want := f.controlBalance(), control; got != want {
@@ -1649,7 +1649,7 @@ func TestWire_VoidDecidesOnTheWholeReversalChain(t *testing.T) {
 			if v.status != http.StatusOK {
 				t.Errorf("%s: void a bill whose entry stands live = %d, want 200: %s", shape.name, v.status, v.raw)
 			}
-			if after := f.count(`SELECT count(*) FROM gl_journal_entries`); after != before+1 {
+			if after := f.entryCount(); after != before+1 {
 				t.Errorf("%s: %d entries were written for a reversing void, want 1", shape.name, after-before)
 			}
 			if got, want := f.controlBalance(), control-cents; got != want {
@@ -1669,7 +1669,7 @@ func TestWire_VoidDecidesOnTheWholeReversalChain(t *testing.T) {
 					t.Errorf("%s: the void refusal = %q %v, want reversal_not_posted", shape.name, code, blockers)
 				}
 			}
-			if after := f.count(`SELECT count(*) FROM gl_journal_entries`); after != before {
+			if after := f.entryCount(); after != before {
 				t.Errorf("%s: %d entries were written for a refused void", shape.name, after-before)
 			}
 			if n := f.count(`SELECT count(*) FROM vendor_invoices WHERE id = $1 AND status = 'APPROVED' AND revision = 2`, id); n != 1 {
@@ -1697,13 +1697,13 @@ func TestWire_VoidDecidesOnTheWholeReversalChain(t *testing.T) {
 		}
 		mustExec(t, f.db, `UPDATE vendor_invoices SET gl_entry_id = NULL WHERE id = $1`, id)
 		control, open = f.controlBalance(), f.openSum()
-		before = f.count(`SELECT count(*) FROM gl_journal_entries`)
+		before = f.entryCount()
 		v = f.void(id, 2, "chain test")
 		if wantNet == 0 {
 			if v.status != http.StatusOK {
 				t.Errorf("%s unlinked: void a bill whose chain nets zero = %d, want 200: %s", shape.name, v.status, v.raw)
 			}
-			if after := f.count(`SELECT count(*) FROM gl_journal_entries`); after != before {
+			if after := f.entryCount(); after != before {
 				t.Errorf("%s unlinked: %d entries were written for a void with nothing to reverse", shape.name, after-before)
 			}
 			if got, want := f.controlBalance(), control; got != want {
@@ -1727,7 +1727,7 @@ func TestWire_VoidDecidesOnTheWholeReversalChain(t *testing.T) {
 					t.Errorf("%s unlinked: the void refusal = %q %v, want entry_not_linked", shape.name, code, blockers)
 				}
 			}
-			if after := f.count(`SELECT count(*) FROM gl_journal_entries`); after != before {
+			if after := f.entryCount(); after != before {
 				t.Errorf("%s unlinked: %d entries were written for a refused void", shape.name, after-before)
 			}
 			if n := f.count(`SELECT count(*) FROM vendor_invoices WHERE id = $1 AND status = 'APPROVED' AND revision = 2`, id); n != 1 {
@@ -1859,13 +1859,13 @@ func TestWire_ApproveDecidesOnTheWholeReversalChain(t *testing.T) {
 				mustExec(t, f.db, `UPDATE vendor_invoices SET gl_entry_id = NULL WHERE id = $1`, id)
 			}
 			control, open := f.controlBalance(), f.openSum()
-			before := f.count(`SELECT count(*) FROM gl_journal_entries`)
+			before := f.entryCount()
 			a := f.approve(id, 2)
 			if wantNet == 0 {
 				if a.status != http.StatusOK {
 					t.Errorf("%s approve linked=%v: approve a bill whose chain nets zero = %d, want 200: %s", shape.name, linked, a.status, a.raw)
 				}
-				if after := f.count(`SELECT count(*) FROM gl_journal_entries`); after != before+1 {
+				if after := f.entryCount(); after != before+1 {
 					t.Errorf("%s approve linked=%v: %d entries were written for the approve, want 1", shape.name, linked, after-before)
 				}
 				if got, want := f.controlBalance(), control+cents; got != want {
@@ -1892,7 +1892,7 @@ func TestWire_ApproveDecidesOnTheWholeReversalChain(t *testing.T) {
 						t.Errorf("%s approve linked=%v: the refusal does not name the live entry: %s", shape.name, linked, a.raw)
 					}
 				}
-				if after := f.count(`SELECT count(*) FROM gl_journal_entries`); after != before {
+				if after := f.entryCount(); after != before {
 					t.Errorf("%s approve linked=%v: %d entries were written for a refused approve", shape.name, linked, after-before)
 				}
 				if n := f.count(`SELECT count(*) FROM vendor_invoices WHERE id = $1 AND status = 'PENDING' AND revision = 2`, id); n != 1 {

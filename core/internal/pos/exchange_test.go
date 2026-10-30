@@ -108,7 +108,7 @@ func TestAnExchangeWorthLessThanTheReplacementTendersTheDifference(t *testing.T)
 	// two returns of the same sale line cannot exceed it
 	f.entriesBalance(t, memoID, str(t, newSale, "invoice_id"))
 	f.assertARInvariants(t)
-	if n := f.scalar(`SELECT count(*) FROM pos_returns WHERE exchange_sale_id IS NOT NULL`); n.(int64) != 1 {
+	if n := f.scalar(`SELECT count(*) FROM pos_returns WHERE register_id = $1 AND exchange_sale_id IS NOT NULL`, f.register); n.(int64) != 1 {
 		t.Errorf("exchange returns = %v, want 1", n)
 	}
 }
@@ -120,13 +120,13 @@ func TestAnExchangeShortOfTheDifferenceWritesNothing(t *testing.T) {
 	f := newFixture(t, testutil.RequireDB(t))
 	f.openTill(0)
 	sale, line, _ := f.cashSaleLine(t, "2")
-	sales := f.scalar(`SELECT count(*) FROM pos_transactions`)
+	sales := f.counterSales(t)
 	r := f.exchange("", map[string]any{
 		"original_sale_id": sale, "returned_lines": []map[string]any{lineOf(line, "1", "wrong_item")},
 		"sale_lines": f.replaceWith("2"), "tenders": []map[string]any{tender("cash", 598)},
 	})
 	blockerOf(t, r, "insufficient_tender")
-	if got := f.scalar(`SELECT count(*) FROM pos_transactions`); got != sales {
+	if got := f.counterSales(t); got != sales {
 		t.Errorf("sales = %v after a refused exchange, want %v", got, sales)
 	}
 	if n := f.counterReturns(t); n != 0 {
@@ -266,7 +266,7 @@ func TestTheExchangePreviewStatesTheFiguresAndWritesNothing(t *testing.T) {
 	f := newFixture(t, testutil.RequireDB(t))
 	f.openTill(0)
 	sale, line, _ := f.cashSaleLine(t, "2")
-	sales, memos, returns, invoices := f.scalar(`SELECT count(*) FROM pos_transactions`), f.counterMemos(t), f.counterReturns(t), f.counterInvoices(t)
+	sales, memos, returns, invoices := f.counterSales(t), f.counterMemos(t), f.counterReturns(t), f.counterInvoices(t)
 	stock := f.stock()
 	r := f.exchange("/preview", map[string]any{
 		"original_sale_id": sale, "returned_lines": []map[string]any{lineOf(line, "1", "wrong_item")},
@@ -278,7 +278,7 @@ func TestTheExchangePreviewStatesTheFiguresAndWritesNothing(t *testing.T) {
 	if num(t, r.body, "returned_cents") != 599 || num(t, r.body, "replacement_cents") != 1198 || num(t, r.body, "difference_cents") != 599 {
 		t.Errorf("preview = %v, want 599, 1198 and 599", r.body)
 	}
-	if got := f.scalar(`SELECT count(*) FROM pos_transactions`); got != sales || f.counterMemos(t) != memos ||
+	if got := f.counterSales(t); got != sales || f.counterMemos(t) != memos ||
 		f.counterReturns(t) != returns || f.counterInvoices(t) != invoices || f.stock() != stock {
 		t.Errorf("the preview wrote something: sales %v, memos %d, returns %d, invoices %d, stock %s", got, f.counterMemos(t), f.counterReturns(t), f.counterInvoices(t), f.stock())
 	}
@@ -388,9 +388,10 @@ func TestAnExchangeRacingReturnsOfTheSameLineReturnsItOnce(t *testing.T) {
 	if n := f.counterReturns(t); n != 1 {
 		t.Errorf("returns = %d, want 1", n)
 	}
-	// the original sale, plus one replacement when the exchange won
-	exchanges := f.scalar(`SELECT count(*) FROM pos_returns WHERE exchange_sale_id IS NOT NULL`).(int64)
-	if got := f.scalar(`SELECT count(*) FROM pos_transactions WHERE status = 'COMPLETED'`).(int64); got != 1+exchanges {
+	// the original sale, plus one replacement when the exchange won; both
+	// counts read this register's own rows only
+	exchanges := f.scalar(`SELECT count(*) FROM pos_returns WHERE register_id = $1 AND exchange_sale_id IS NOT NULL`, f.register).(int64)
+	if got := f.scalar(`SELECT count(*) FROM pos_transactions WHERE branch_id = $1 AND status = 'COMPLETED'`, f.branchID).(int64); got != 1+exchanges {
 		t.Errorf("completed sales = %d, want %d (the original and one replacement per exchange won)", got, 1+exchanges)
 	}
 	f.assertARInvariants(t)
@@ -852,6 +853,3 @@ func TestExchangePreviewIsReadOnlyAndNeverLocksCountersCustomersOrAdvancesSequen
 		t.Errorf("invoice counter changed on preview: got %d, want %d", got, inBefore)
 	}
 }
-
-
-

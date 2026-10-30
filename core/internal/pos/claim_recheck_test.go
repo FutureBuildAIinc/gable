@@ -249,7 +249,7 @@ func TestACardReturnPastTheBookedRefundsRefusesUnderTheLock(t *testing.T) {
 	if got := f.accountBalance("1010"); got != 599 {
 		t.Errorf("card balance = %d, want 599 (the charge stands: nothing booked past the cap)", got)
 	}
-	if got := countOf(t, f.db, `SELECT count(*) FROM payment_refunds`); got != 0 {
+	if got := f.counterRefunds(t); got != 0 {
 		t.Errorf("%d refund rows, want 0 (nothing booked)", got)
 	}
 	if got := f.counterReturns(t); got != 1 {
@@ -310,7 +310,7 @@ func TestAClaimWhoseTableAmountMovedRefusesTheBooking(t *testing.T) {
 	if got := f.accountBalance("1010"); got != 599 {
 		t.Errorf("card balance = %d, want 599 (nothing booked beside a moved figure)", got)
 	}
-	if got := countOf(t, f.db, `SELECT count(*) FROM payment_refunds`); got != 0 {
+	if got := f.counterRefunds(t); got != 0 {
 		t.Errorf("%d refund rows, want 0 (nothing booked)", got)
 	}
 	gw.mu.Lock()
@@ -367,7 +367,7 @@ func TestATenderTheVoidRefundedBetweenTheFactsReadsRefusesTheBooking(t *testing.
 	if got := f.accountBalance("1010"); got != 599 {
 		t.Errorf("card balance = %d, want 599 (the tender was refunded by the void: this booking never ran)", got)
 	}
-	if got := countOf(t, f.db, `SELECT count(*) FROM payment_refunds`); got != 0 {
+	if got := f.counterRefunds(t); got != 0 {
 		t.Errorf("%d refund rows, want 0", got)
 	}
 	if got := f.counterReturns(t); got != 0 {
@@ -426,7 +426,7 @@ func TestAClaimSettledBetweenTheFactsReadsRefusesWithTheRaceNamed(t *testing.T) 
 	if got := f.accountBalance("1010"); got != 599 {
 		t.Errorf("card balance = %d, want 599 (the winner's booking is the only one)", got)
 	}
-	if got := countOf(t, f.db, `SELECT count(*) FROM payment_refunds`); got != 0 {
+	if got := f.counterRefunds(t); got != 0 {
 		t.Errorf("%d refund rows, want 0 (the stand-in settled no money)", got)
 	}
 	gw.mu.Lock()
@@ -494,7 +494,7 @@ func TestAReplayWhoseClaimWasWonUnderItAnswersTheRaceNeverTheCaps(t *testing.T) 
 	if got := countOf(t, f.db, `SELECT count(*) FROM audit_log WHERE action = 'pos.refund_outcome_unknown' AND entity_id = $1`, saleID); got != 1 {
 		t.Errorf("%d unknown outcome rows, want 1 (the stranded act's own record alone)", got)
 	}
-	if got := countOf(t, f.db, `SELECT count(*) FROM payment_refunds`); got != 0 {
+	if got := f.counterRefunds(t); got != 0 {
 		t.Errorf("%d refund rows, want 0 (the stand-in winner booked none)", got)
 	}
 	if got := f.counterReturns(t); got != 1 {
@@ -562,7 +562,7 @@ func TestAReplayUnderAVoidRefundedTenderAnswersTheTenderNeverTheCaps(t *testing.
 	if got := countOf(t, f.db, `SELECT count(*) FROM audit_log WHERE action = 'pos.refund_outcome_unknown' AND entity_id = $1`, saleID); got != 1 {
 		t.Errorf("%d unknown outcome rows, want 1 (the stranded act's own record alone)", got)
 	}
-	if got := countOf(t, f.db, `SELECT count(*) FROM payment_refunds`); got != 0 {
+	if got := f.counterRefunds(t); got != 0 {
 		t.Errorf("%d refund rows, want 0", got)
 	}
 	gw.mu.Lock()

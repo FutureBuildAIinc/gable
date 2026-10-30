@@ -34,7 +34,7 @@ func (f *fixture) postReturn(t *testing.T, saleID, method string, lines ...map[s
 func (f *fixture) walkInOpenCents(t *testing.T) int64 {
 	t.Helper()
 	return f.scalar(`SELECT ROUND(COALESCE(SUM(i.amount_open), 0) * 100)::bigint FROM invoices i
-		JOIN customers c ON c.id = i.customer_id WHERE c.account_number = 'WALK-IN'`).(int64)
+		JOIN customers c ON c.id = i.customer_id WHERE c.account_number = 'WALK-IN' AND i.branch_id = $1`, f.branchID).(int64)
 }
 
 // cashRefundedCents sums the cash the customer's credit memos paid out of
@@ -61,9 +61,9 @@ func TestSweepPR181_P1_1_WalkInExchangeRefusesAccountTender(t *testing.T) {
 	sale, line, _ := f.cashSaleLine(t, "1") // 599 in the drawer
 	r := f.exchange("", map[string]any{
 		"original_sale_id": sale, "reason": "upgrade",
-		"returned_lines":  []map[string]any{lineOf(line, "1", "wrong_item")},
-		"sale_lines":      f.replaceWith("3"), // 1796
-		"tenders":         []map[string]any{tender("account", 1197)},
+		"returned_lines": []map[string]any{lineOf(line, "1", "wrong_item")},
+		"sale_lines":     f.replaceWith("3"), // 1796
+		"tenders":        []map[string]any{tender("account", 1197)},
 	})
 	blockerOf(t, r, "walk_in_account")
 	if got := f.walkInOpenCents(t); got != 0 {
@@ -267,7 +267,7 @@ func TestSweepPR181R2_RefundMethodOverrideNeedsASecondHand(t *testing.T) {
 	// for 1 leaves a 599 surplus the cash method would pay
 	r = f.do("POST", "/api/v1/pos/exchanges", map[string]any{
 		"register_id": f.register, "original_sale_id": sale, "reason": "same hand",
-		"refund_method": "cash",
+		"refund_method":  "cash",
 		"returned_lines": []map[string]any{lineOf(line, "2", "defective")},
 		"sale_lines":     f.replaceWith("1"),
 	}, "X-Test-Role", "cashier", "X-Test-Sub", managerM1)

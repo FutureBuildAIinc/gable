@@ -85,8 +85,8 @@ const formStartAction = "/api/portal/v1/login"
 
 // Row is one stored allowed method.
 type Row struct {
-	Method       string
-	SortOrder    int
+	Method        string
+	SortOrder     int
 	OIDCIssuerURL string
 	OIDCClientID  string
 	OIDCLabel     string
@@ -105,12 +105,12 @@ type Input struct {
 // present, null when the method does not use them: the response type is
 // fixed, so a caller never has to guess whether a field is absent.
 type MethodView struct {
-	Method   string  `json:"method"`
-	Kind     string  `json:"kind"`
-	Label    string  `json:"label"`
-	StartURL *string `json:"start_url"`
+	Method    string  `json:"method"`
+	Kind      string  `json:"kind"`
+	Label     string  `json:"label"`
+	StartURL  *string `json:"start_url"`
 	IssuerURL *string `json:"issuer_url"`
-	ClientID *string `json:"client_id"`
+	ClientID  *string `json:"client_id"`
 }
 
 // viewOf builds the wire view of a stored row.

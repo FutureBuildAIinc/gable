@@ -43,10 +43,24 @@ func errText(err error) string {
 
 // --- fakes ---------------------------------------------------------------
 
+func (f *fakeRepo) SettingValue(ctx context.Context, key string) (string, bool, error) {
+	if key == "country.default" {
+		if f.noDefaultCountry {
+			return "", false, nil
+		}
+		return "US", true, nil
+	}
+	return "", false, nil
+}
+
 type fakeRepo struct {
 	locations map[uuid.UUID]*Location
 	branches  []Location
 	tree      []Location
+
+	// noDefaultCountry is the dealer with no country.default setting: the
+	// case where a branch can only be saved with a country of its own.
+	noDefaultCountry bool
 
 	created []Location
 	updated []Location

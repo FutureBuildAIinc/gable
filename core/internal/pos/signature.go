@@ -251,6 +251,7 @@ func (s *Service) ThermalReceipt(ctx context.Context, invoiceID uuid.UUID, print
 			UnitPrice:   *l.UnitPrice,
 			PriceUOM:    priceUOM,
 			LineTotal:   *l.LineTotal,
+			Tint:        thermalTintOf(l.Tint),
 		}
 		// The weighed line's marking (CP-19): the ticket on the paper, MAN
 		// WT when the weight was typed.
@@ -369,4 +370,28 @@ func (h *Handler) CaptureSignatureHandler(w http.ResponseWriter, r *http.Request
 		return
 	}
 	writeJSON(w, http.StatusCreated, sig)
+}
+
+// thermalTintOf maps a sale line's tint record (row CP-16) onto the receipt's
+// tint block: the colour, the base, the container size and each colorant's
+// amount in the manufacturer's own layout.
+func thermalTintOf(t *salesdoc.LineTint) *document.ThermalTint {
+	if t == nil {
+		return nil
+	}
+	out := &document.ThermalTint{
+		ColorCode:         t.ColorCode,
+		ColorName:         t.ColorName,
+		BaseCode:          t.BaseCode,
+		ContainerSizeCode: t.ContainerSizeCode,
+		Rescaled:          t.Rescaled,
+	}
+	if t.TintChargeCents != nil {
+		out.TintChargeCents = *t.TintChargeCents
+	}
+	for _, c := range t.Components {
+		out.Components = append(out.Components, document.ThermalTintComponent{
+			Code: c.ColorantCode, Name: c.ColorantName, Amount: c.Amount.String()})
+	}
+	return out
 }

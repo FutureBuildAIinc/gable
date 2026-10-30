@@ -27,6 +27,7 @@ function line(over: Partial<SaleLine> = {}): SaleLine {
     price_uom: 'TON',
     uom_qty: '1',
     price_uom_qty: '1',
+    tint: null,
     unit_price_ten_thousandths: 300000,
     priced_unit_price_ten_thousandths: 300000,
     price_source: 'price_list',

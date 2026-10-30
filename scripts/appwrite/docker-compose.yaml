@@ -1,0 +1,100 @@
+# SPDX-License-Identifier: LicenseRef-OpenLBM-Docs-1.0
+# SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
+#
+# ADR 0012 slice 1: local Appwrite proof stack. Self contained, loopback only,
+# dev placeholder values throughout; nothing here is a secret. Bring it up with
+#   docker compose -p s9proof -f scripts/appwrite/docker-compose.yaml up -d --wait
+# and tear it down with `down -v`. scripts/appwrite/setup.sh then seeds a
+# project, a server key, the staff team and one user per Gable role.
+
+name: s9proof
+
+services:
+  appwrite:
+    image: appwrite/appwrite:2.1.0
+    container_name: s9proof-appwrite
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:8580:80"
+    environment:
+      _APP_ENV: development
+      _APP_DOMAIN: localhost
+      _APP_OPTIONS_FORCE_HTTPS: disabled
+      # Obvious placeholder, 64 hex chars, dev stack only.
+      _APP_OPENSSL_KEY_V1: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+      _APP_USAGE_STATS: disabled
+      _APP_CONSOLE_WHITELIST_ROOT: disabled
+      _APP_REDIS_HOST: redis
+      _APP_REDIS_PORT: "6379"
+      _APP_DB_ADAPTER: postgresql
+      _APP_DB_HOST: postgres
+      _APP_DB_PORT: "5432"
+      _APP_DB_SCHEMA: appwrite
+      _APP_DB_USER: appwrite
+      _APP_DB_PASS: appwrite-proof-password
+      _APP_DB_ADAPTER_VECTORSDB: postgresql
+      _APP_DB_HOST_VECTORSDB: postgres
+      _APP_DB_PORT_VECTORSDB: "5432"
+      _APP_DB_SCHEMA_VECTORSDB: appwrite
+      _APP_DB_USER_VECTORSDB: appwrite
+      _APP_DB_PASS_VECTORSDB: appwrite-proof-password
+      # DocumentsDB runs on MongoDB only and stays disabled in this proof.
+      _APP_DOCUMENTSDB: disabled
+      # Placeholder so URL-validating endpoints (magic URL) accept requests;
+      # no mail worker runs, nothing is ever sent.
+      _APP_SMTP_HOST: maildev
+      _APP_SMTP_PORT: "1025"
+    volumes:
+      - appwrite_storage:/storage
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS -o /dev/null http://localhost/v1/health/version"]
+      interval: 5s
+      timeout: 5s
+      retries: 24
+      start_period: 120s
+
+  # Appwrite's PostgreSQL adapter requires the postgis (and vector) extensions,
+  # which the stock postgres image does not carry; this is the image the
+  # upstream 2.1.0 compose ships for exactly that reason.
+  postgres:
+    image: appwrite/postgres:0.1.0
+    container_name: s9proof-postgres
+    environment:
+      POSTGRES_DB: appwrite
+      POSTGRES_USER: appwrite
+      POSTGRES_PASSWORD: appwrite-proof-password
+    volumes:
+      - postgres_data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U appwrite -d appwrite"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+
+  redis:
+    image: redis:7-alpine
+    container_name: s9proof-redis
+    command:
+      - redis-server
+      - --maxmemory
+      - 512mb
+      - --maxmemory-policy
+      - allkeys-lru
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 5s
+
+volumes:
+  appwrite_storage:
+  postgres_data:
+  redis_data:

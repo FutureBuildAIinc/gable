@@ -226,6 +226,11 @@ func creditFromInvoiceLine(path string, d *CreditLineInput, src *InvoiceLine, am
 			BoardFeet:   src.Tally.BoardFeet,
 		}
 	}
+	if src.Tint != nil {
+		tint := *src.Tint
+		tint.Components = append([]salesdoc.TintComponent(nil), src.Tint.Components...)
+		cl.Tint = &tint
+	}
 	if src.DiscountAmount != nil {
 		dc := httpx.Cents(discount)
 		cl.DiscountAmount = &dc
@@ -254,6 +259,11 @@ func creditFromInvoiceLine(path string, d *CreditLineInput, src *InvoiceLine, am
 		if src.LineType != salesdoc.LineProduct || src.ProductID == nil {
 			return CreditLine{}, validationFailed("one or more fields failed validation",
 				httpx.FieldError{Field: path + ".restock", Message: "only a stocked product line goes back to stock"})
+		}
+		if src.Tint != nil {
+			return CreditLine{}, validationFailed("one or more fields failed validation",
+				httpx.FieldError{Field: path + ".restock",
+					Message: "a tinted can does not go back into saleable stock: it is re-tinted and put on the marked down rack"})
 		}
 		cl.Restock = true
 		cl.UnitCost = src.UnitCost

@@ -220,8 +220,10 @@ paths:
       description: >-
         Sends the sale's invoice to the account's contact exactly as the
         invoice email route does (the same service call, the same words, 202
-        and {"status":"queued"}; the outcome is written to email_deliveries),
-        under the counter's own roles admin, owner and cashier. The sale is
+        and {"status":"queued"} with the queued delivery row's delivery_id;
+        the send resolves that row to sent, logged or failed in
+        email_deliveries), under the counter's own roles admin, owner and
+        cashier. The sale is
         read as the sale read reads it (404 for a sale the caller cannot
         read). A sale that is not completed or has no invoice answers 409
         with the blocker no_receipt; a walk in sale (no customer, or the shared
@@ -677,6 +679,46 @@ paths:
           $ref: "#/components/responses/InternalError"
         "503":
           $ref: "#/components/responses/ServiceUnavailable"
+  /api/v1/pos/large-cash/preview:
+    post:
+      operationId: posLargeCashPreview
+      tags: [pos]
+      summary: What the large cash rule asks of this payment
+      description: >-
+        The counter's look before Pay (CP-17a): the server classifies the
+        named tenders against the sale it holds under the branch's country
+        rule (the United States Form 8300 family, or the Canadian dealer
+        threshold when the dealer has it on) and answers whether the
+        payer's details will be required and which fields the rule needs.
+        The branch's walk-in identity floor rides the same answer: over the
+        floor the counter asks a walk-in who paid cash to identify
+        themselves, so their cash sales are counted together, and the
+        identity the counter already holds may be carried here so the
+        preview and the completion key the same person. Writes nothing; the
+        completion's own capture is the authority.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PosLargeCashPreviewRequest"
+      responses:
+        "200":
+          description: The rule family's view of this payment.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PosLargeCashPreview"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
   /api/v1/pos/transactions/{id}/void:
     post:
       operationId: posTransactionVoid
@@ -2908,6 +2950,25 @@ components:
             $ref: "#/components/schemas/PosTenderRequest"
         picked_up_by: {type: [string, "null"], description: "Who collected the basket, at most 200 characters."}
         revision: {type: integer, format: int64, minimum: 1, description: "The sale's revision; or send If-Match."}
+        payer: {$ref: "#/components/schemas/PosPayerCapture", description: "The payer's details the counter captured for a large cash crossing (CP-17a); required when this payment takes the payer over the branch's threshold, refused 409 payer_details_required without them."}
+        payer_declined: {type: boolean, description: "The counter's record that the walk-in declined to identify over the branch's walk-in identity floor (CP-17a); the sale goes ahead and the fact is recorded for the manager's worklist as an identity declined."}
+        suspected_avoidance: {type: boolean, description: "The manager's mark that an instrument may be being used to avoid reporting (CP-17a); it makes a qualifying instrument count as cash whatever was sold."}
+    PosPayerCapture:
+      type: object
+      description: >-
+        The payer identity a large cash crossing captures at the counter
+        (CP-17a). The taxpayer identification number and the ID number are
+        sensitive: sealed at rest, never logged, never printed on a receipt
+        and never in an audit row's body.
+      properties:
+        name: {type: string, description: "The payer's name."}
+        address: {type: string, description: "The payer's address."}
+        occupation: {type: string, description: "The payer's occupation, or the nature of a sole proprietor's principal business."}
+        date_of_birth: {type: string, description: "The payer's date of birth, as YYYY-MM-DD."}
+        id_type: {type: string, enum: [drivers_license, state_id, passport, military_id, other], description: "The kind of identification looked at."}
+        id_number: {type: string, description: "The identification number; sealed at rest."}
+        taxpayer_id: {type: string, description: "The taxpayer identification number (the United States rule); sealed at rest."}
+        third_party_payer: {type: boolean, description: "Whether the person paying acts on behalf of someone else."}
         acknowledged_alert_ids:
           type: array
           description: >-
@@ -2926,6 +2987,52 @@ components:
         token_id: {type: [string, "null"], description: "The card token a card tender charges."}
         id_checked: {type: [boolean, "null"], description: "The cashier looked at the payer's ID; on a check or an account tender only. The ID's number is never taken."}
         id_type: {type: [string, "null"], enum: [drivers_license, state_id, passport, military_id, other, null], description: "The kind of ID looked at; needs id_checked true."}
+        instrument: {type: [string, "null"], enum: [personal_check, cashiers_check, bank_draft, travelers_check, money_order, null], description: "The kind of check the tender is (CP-17a); on a check tender only. A personal check never counts as cash; a cashier's check, bank draft, traveler's check or money order at or under the threshold face value counts only for a consumer durable sale line or under the suspected avoidance mark."}
+    PosLargeCashPreviewRequest:
+      type: object
+      required: [transaction_id, tenders]
+      properties:
+        transaction_id: {type: string, format: uuid, description: "The sale the payment panel holds."}
+        suspected_avoidance: {type: boolean, description: "The manager's suspected avoidance mark."}
+        payer: {$ref: "#/components/schemas/PosPayerCapture", description: "The identity the counter already holds for this payer (the walk-in identified earlier in this till session). The preview keys the same person the completion will, so the two agree on whose cash this is."}
+        tenders:
+          type: array
+          items:
+            type: object
+            required: [method, amount_cents]
+            properties:
+              method: {type: string, description: "The tender method: cash, check, card, account or store_credit."}
+              instrument: {type: [string, "null"], enum: [personal_check, cashiers_check, bank_draft, travelers_check, money_order, null]}
+              amount_cents: {type: integer, format: int64, minimum: 1}
+    PosLargeCashPreview:
+      type: object
+      required: [country, rule_family, counted_cents, aggregate_cents, threshold_cents, comparator, asks_details, fields, walk_in_floor_cents, asks_floor, walk_in_aggregated, threshold_crossed]
+      description: >-
+        What the counter asks before Pay (CP-17a): the branch's country and
+        rule family, this sale's counted cash, the aggregate it comes to,
+        the threshold with its comparator shape, whether the payer's
+        details are required and the fields the rule needs. A Canadian
+        branch carries the note that the capture is for the dealer's own
+        records and is not a FINTRAC report. The walk-in floor is the
+        branch's own amount over which the counter asks a walk-in who paid
+        cash to identify themselves; a branch with it off says on the
+        counter that the walk-in's cash is not aggregated.
+      properties:
+        country: {type: string, description: "The branch's country, two letters."}
+        rule_family: {type: string, enum: ["", US_8300, CA_DEALER]}
+        counted_cents: {type: integer, format: int64}
+        aggregate_cents: {type: integer, format: int64}
+        threshold_cents: {type: integer, format: int64}
+        comparator: {type: string, enum: [greater, at_or_above]}
+        asks_details: {type: boolean}
+        fields: {type: array, items: {type: string}}
+        note: {type: string}
+        dealer_threshold: {type: boolean, description: "True for the Canadian dealer policy threshold (never a legal duty)."}
+        walk_in_floor_cents: {type: integer, format: int64, description: "The branch's walk-in identity floor in cents; zero when the branch has it off."}
+        asks_floor: {type: boolean, description: "True when this walk-in's cash sale passes the branch's floor and no identity is captured yet: the counter asks before Pay."}
+        walk_in_aggregated: {type: boolean, description: "True when the branch counts a walk-in's cash sales together once the walk-in is identified."}
+        walk_in_note: {type: string, description: "The plain sentence the counter shows when the branch's floor is off: the walk-in's cash is not aggregated."}
+        threshold_crossed: {type: boolean, description: "True when this sale's counted cash crosses the rule's threshold: the payer's details are required and no decline answers it."}
     PosVoidRequest:
       type: object
       required: [reason]
@@ -3029,7 +3136,7 @@ components:
     PosReturnReasonCode:
       type: string
       description: "The closed lowercase list of return reasons; an absent reason is other."
-      enum: [defective, damaged, wrong_item, ordered_wrong, changed_mind, overbought, other]
+      enum: [defective, damaged, wrong_item, ordered_wrong, changed_mind, overbought, mis_tint, other]
     PosWayForward:
       type: object
       required: [kind, available, message]
@@ -3179,6 +3286,10 @@ components:
             acknowledged must be named here, or the exchange is refused with 409
             alert_unacknowledged and nothing is written.
           items: {type: string, format: uuid}
+        payer: {$ref: "#/components/schemas/PosPayerCapture", description: "The payer's details the counter captured for a large cash crossing (CP-17a); required when this exchange's cash difference takes the payer over the branch's threshold, refused 409 payer_details_required without them."}
+        payer_declined: {type: boolean, description: "The counter's record that the walk-in declined to identify over the branch's walk-in identity floor (CP-17a); the exchange goes ahead and the fact is recorded for the manager's worklist as an identity declined."}
+        suspected_avoidance: {type: boolean, description: "The manager's suspected avoidance mark (CP-17a); it makes a qualifying instrument count as cash whatever was sold."}
+        tender_method: {type: string, enum: [cash, check, card], description: "The preview only: the method the counter will tender for the difference, so the server can say what the branch's large cash rule needs of this exchange before it is rung. The exchange takes the tender itself in tenders."}
     PosReturnFigures:
       type: object
       required: [subtotal_cents, tax_cents, restocking_fee_cents, total_cents, refund_cents, lines]
@@ -3200,6 +3311,7 @@ components:
         reason_code: {type: string, description: "The line's reason from the closed list; other when the request named none."}
         line_total_cents: {type: integer, format: int64, description: "The line's refund, negative (the memo line's shape)."}
         restocking_fee_cents: {type: integer, format: int64}
+
     PosExchangeFigures:
       type: object
       required: [returned_cents, restocking_fee_cents, replacement_cents, difference_cents]
@@ -3208,6 +3320,7 @@ components:
         restocking_fee_cents: {type: integer, format: int64}
         replacement_cents: {type: integer, format: int64, description: "The replacement sale's total with its tax."}
         difference_cents: {type: integer, format: int64, description: "Replacement less return: positive is what the customer pays, negative what goes back."}
+        large_cash: {$ref: "#/components/schemas/PosLargeCashPreview", description: "The branch country's large cash answer for this exchange (CP-17a): whether the payer's details are required and which fields the rule needs."}
     PosExchange:
       type: object
       required: [return, sale, returned_cents, restocking_fee_cents, replacement_cents, difference_cents, refunded_cents]
@@ -3284,6 +3397,11 @@ components:
         discount_percent: {type: [string, "null"], description: "A percent or a cents amount, never both."}
         discount_cents: {type: [integer, "null"], format: int64}
         discount_reason: {type: [string, "null"]}
+        tint:
+          oneOf:
+            - $ref: "#/components/schemas/LineTint"
+            - type: "null"
+          description: The paint line's tint record (row CP-16), null or omitted on every other line.
     PosTransactionSummary:
       type: object
       description: A sale's head, a list item.
@@ -3403,7 +3521,7 @@ components:
         A sale line in the shared shape of ADR 0005 section 2.2: product, kit
         (with its component lines), charge and text lines, the priced fields
         null on a text line, the extension rounded once.
-      required: [id, position, line_type, parent_line_id, product_id, charge_code_id, charge_code, sku, description, quantity, uom, price_uom, uom_qty, price_uom_qty, stock_uom, stock_quantity, tally, unit_price_ten_thousandths, priced_unit_price_ten_thousandths, price_source, price_basis, override_reason, discount_percent, discount_cents, discount_reason, price_adjusted_by, line_total_cents, taxable, revenue_account_code, is_special_order, vendor_id, special_order_unit_cost_ten_thousandths, weight_source, weight_gross_lb, weight_tare_lb, weight_net_lb, weight_net_basis, scale_device_id, scale_ticket_id, scale_ticket_number, manual_weight_reason, weight_captured_by, weight_captured_at, created_at]
+      required: [id, position, line_type, parent_line_id, product_id, charge_code_id, charge_code, sku, description, quantity, uom, price_uom, uom_qty, price_uom_qty, stock_uom, stock_quantity, tally, tint, unit_price_ten_thousandths, priced_unit_price_ten_thousandths, price_source, price_basis, override_reason, discount_percent, discount_cents, discount_reason, price_adjusted_by, line_total_cents, taxable, revenue_account_code, is_special_order, vendor_id, special_order_unit_cost_ten_thousandths, weight_source, weight_gross_lb, weight_tare_lb, weight_net_lb, weight_net_basis, scale_device_id, scale_ticket_id, scale_ticket_number, manual_weight_reason, weight_captured_by, weight_captured_at, created_at]
       properties:
         id: {type: string, format: uuid}
         position: {type: integer}
@@ -3437,6 +3555,11 @@ components:
         is_special_order: {type: boolean}
         vendor_id: {type: [string, "null"], format: uuid}
         special_order_unit_cost_ten_thousandths: {type: [integer, "null"], format: int64}
+        tint:
+          oneOf:
+            - $ref: "#/components/schemas/LineTint"
+            - type: "null"
+          description: The paint line's tint record (row CP-16), null on every other line.
         weight_source: {oneOf: [{type: string, enum: [scale, manual]}, {type: "null"}], description: "Where the line's weight came from; null on a line that was not weighed (CP-19)."}
         weight_gross_lb: {type: [string, "null"], description: "The gross reading in pounds, a decimal string."}
         weight_tare_lb: {type: [string, "null"], description: "The tare used: the weigh in's gross on a double draft ticket."}
@@ -3637,7 +3760,7 @@ components:
     PosReturnLine:
       type: object
       description: One returned line, its quantity and extension negative.
-      required: [id, position, product_id, description, quantity, uom, unit_price_ten_thousandths, line_total_cents, restock, reason_code, restocking_fee_cents]
+      required: [id, position, product_id, description, quantity, uom, unit_price_ten_thousandths, line_total_cents, restock, reason_code, restocking_fee_cents, mis_tint, tinted_return]
       properties:
         id: {type: string, format: uuid}
         position: {type: integer}
@@ -3650,6 +3773,8 @@ components:
         restock: {type: boolean}
         reason_code: {$ref: "#/components/schemas/PosReturnReasonCode"}
         restocking_fee_cents: {type: integer, format: int64, description: "The fee this line's reason withheld from its refund, half even to the cent."}
+        mis_tint: {type: boolean, description: "The mis tint return (row CP-16): the store mixed the wrong colour, so the tinted line returned."}
+        tinted_return: {type: boolean, description: "A returned line whose sale carried a tint: the can goes to the mistint rack, never back into saleable stock."}
     PosTillSession:
       type: object
       description: >-
@@ -3831,7 +3956,7 @@ components:
         revision: {type: integer, format: int64, minimum: 1, description: "The settings resource's revision; a write names it (If-Match and/or the body's revision)."}
         rules:
           type: object
-          required: [check_limit_cents, check_id_required, restocking_fees, restocking_fee_defaults]
+          required: [check_limit_cents, check_id_required, restocking_fees, restocking_fee_defaults, tint_charge, tinted_no_return]
           properties:
             check_limit_cents: {type: [integer, "null"], format: int64, minimum: 0, description: "The database wide check limit; null is no limit. A customer's own limit wins over it."}
             check_id_required:
@@ -3850,6 +3975,11 @@ components:
               description: "The suggested fee for each reason, read only: what the settings screen offers a dealer who has set nothing. The reasons that are the customer's own doing carry a figure; the dealer's own and the catch all carry none. Never a fee in force until written."
               required: [defective, damaged, wrong_item, ordered_wrong, changed_mind, overbought, other]
               additionalProperties: {type: integer, minimum: 0, maximum: 10000}
+            tint_charge:
+              $ref: '#/components/schemas/TintChargeRule'
+            tinted_no_return:
+              type: boolean
+              description: "The dealer's tinted no return policy: a tinted can is not taken back. Off unless the dealer says so, because the rule is a dealer policy and not a law."
     PosSettingsRequest:
       type: object
       required: [rules]
@@ -3870,6 +4000,11 @@ components:
               description: "Every reason's fee, the whole closed list: a code outside the list, a figure outside 0 to 10000 basis points, or a reason left out is a 400 naming the field. A figure of 0 clears the reason's row (no fee)."
               required: [defective, damaged, wrong_item, ordered_wrong, changed_mind, overbought, other]
               additionalProperties: {type: integer, minimum: 0, maximum: 10000}
+            tint_charge:
+              $ref: '#/components/schemas/TintChargeRule'
+            tinted_no_return:
+              type: boolean
+              description: "The dealer's tinted no return policy. Absent is off (the rule is a dealer policy and not a law)." 
         revision: {type: integer, format: int64, minimum: 1, description: "The revision this write rides; If-Match serves the same role."}
     PosEndOfDayCloseRequest:
       type: object

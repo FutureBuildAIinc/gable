@@ -33,6 +33,7 @@ import (
 	glint "github.com/gablelbm/gable/internal/integrations/gl"
 	"github.com/gablelbm/gable/internal/inventory"
 	"github.com/gablelbm/gable/internal/invoice"
+	"github.com/gablelbm/gable/internal/largecash"
 	"github.com/gablelbm/gable/internal/location"
 	"github.com/gablelbm/gable/internal/matching"
 	"github.com/gablelbm/gable/internal/notification"
@@ -43,6 +44,7 @@ import (
 	"github.com/gablelbm/gable/internal/purchase_order"
 	"github.com/gablelbm/gable/internal/quote"
 	"github.com/gablelbm/gable/internal/testutil"
+	"github.com/gablelbm/gable/internal/tint"
 	"github.com/gablelbm/gable/internal/vendor"
 	"github.com/gablelbm/gable/pkg/audit"
 	"github.com/gablelbm/gable/pkg/database"
@@ -297,6 +299,13 @@ func newWallFixture(t *testing.T, db *database.DB, multiBranch bool) *wallFixtur
 	termLedger := payment.NewTerminalLedger(db)
 	posSvc := pos.NewService(db, pos.NewRepository(db), slog.Default()).WithAR(accountSvc).WithInventory(invSvc).WithTxRunner(db).WithTerminal(payment.NewSimulatedTerminalFromEnv("authorize", termLedger), termLedger)
 	wall.pos(mux, pos.NewHandler(posSvc), "admin", "owner", "cashier")
+	// The tint catalogue, as serve mounts it: the catalogue is dealer wide and
+	// every desk role reads it, the saved colours are customer rows and are
+	// walled to the customer they name, and the counter may save one.
+	wall.tint(mux, tint.NewService(tint.NewRepository(db)).WithTxRunner(db))
+	wall.largeCash(mux, largecash.NewHandler(largecash.NewService(db, nil, "")),
+		[]string{"admin", "owner", "finance"},
+		[]string{"admin", "owner", "cashier"})
 	f.srv = httptest.NewServer(asRole(mux))
 	t.Cleanup(f.srv.Close)
 	return f
@@ -417,7 +426,7 @@ func TestBranchWall_ServeWiring(t *testing.T) {
 		if id, ok := parent.(uuid.UUID); ok {
 			p = fmt.Sprintf("%q", id)
 		}
-		return fmt.Sprintf(`{"type":%q,"code":"c-%s","name":"wall branch","parent_id":%s}`, strings.ToLower(typ), uuid.NewString()[:8], p)
+		return fmt.Sprintf(`{"type":%q,"code":"c-%s","name":"wall branch","parent_id":%s,"country_code":"US"}`, strings.ToLower(typ), uuid.NewString()[:8], p)
 	}
 	const ok = http.StatusOK
 	const no = http.StatusForbidden
@@ -1799,6 +1808,19 @@ func TestBranchWall_FormsAndDeliveries(t *testing.T) {
 		{"finance emails the statement of a customer branch A shares", "POST", "/api/v1/ar/customers/" + shared.String() + "/statement/email", "finance", "u-a", A, http.StatusAccepted},
 		{"finance does not find a customer only branch B holds", "GET", "/api/v1/documents/print/statement/" + onlyB.String(), "finance", "u-a", A, http.StatusNotFound},
 		{"warehouse may not read deliveries", "GET", "/api/v1/email-deliveries", "warehouse", "u-a", A, http.StatusForbidden},
+		{"warehouse may not follow a send either", "GET", "/api/v1/email-deliveries?document_id=" + quoteA.String(), "warehouse", "u-a", A, http.StatusForbidden},
+		{"cashier follows the send of an invoice", "GET", "/api/v1/email-deliveries?document_type=invoice&document_id=" + quoteA.String(), "cashier", "u-a", A, ok},
+		{"cashier may not follow a send that names no document type", "GET", "/api/v1/email-deliveries?document_id=" + quoteA.String(), "cashier", "u-a", A, http.StatusForbidden},
+		{"cashier may not follow a quote's send", "GET", "/api/v1/email-deliveries?document_type=quote&document_id=" + quoteA.String(), "cashier", "u-a", A, http.StatusForbidden},
+		{"cashier may not follow a statement's send", "GET", "/api/v1/email-deliveries?document_type=statement&document_id=" + f.docCust.String(), "cashier", "u-a", A, http.StatusForbidden},
+		{"sales follows an invoice's send", "GET", "/api/v1/email-deliveries?document_type=invoice&document_id=" + quoteA.String(), "sales", "u-a", A, ok},
+		{"sales follows a quote's send", "GET", "/api/v1/email-deliveries?document_type=quote&document_id=" + quoteA.String(), "sales", "u-a", A, ok},
+		{"sales follows a statement's send", "GET", "/api/v1/email-deliveries?document_type=statement&document_id=" + f.docCust.String(), "sales", "u-a", A, ok},
+		{"sales may not follow a send that names no document type", "GET", "/api/v1/email-deliveries?document_id=" + quoteA.String(), "sales", "u-a", A, http.StatusForbidden},
+		{"sales may not follow a purchase order's send", "GET", "/api/v1/email-deliveries?document_type=purchase_order&document_id=" + f.poA.String(), "sales", "u-a", A, http.StatusForbidden},
+		{"finance follows a purchase order's send", "GET", "/api/v1/email-deliveries?document_type=purchase_order&document_id=" + f.poA.String(), "finance", "u-a", A, ok},
+		{"cashier may not read the whole delivery list", "GET", "/api/v1/email-deliveries", "cashier", "u-a", A, http.StatusForbidden},
+		{"sales may not read the whole delivery list", "GET", "/api/v1/email-deliveries?status=failed", "sales", "u-a", A, http.StatusForbidden},
 	} {
 		if got := f.call(t, c.method, c.path, "", c.role, c.sub, c.header); got != c.want {
 			t.Errorf("%s: %d, want %d", c.name, got, c.want)
@@ -1861,7 +1883,7 @@ func TestBranchWall_FormsAndDeliveries(t *testing.T) {
 	}
 	// The sends the routes made are recorded with the log sender's answer.
 	var n int
-	if err := db.Pool.QueryRow(ctx, `SELECT count(*) FROM email_deliveries WHERE document_id = $1 AND document_type = 'quote' AND status = 'sent' AND sender_answer LIKE '%not sent%'`, quoteA).Scan(&n); err != nil || n != 1 {
+	if err := db.Pool.QueryRow(ctx, `SELECT count(*) FROM email_deliveries WHERE document_id = $1 AND document_type = 'quote' AND status = 'logged' AND sender_answer LIKE '%not sent%'`, quoteA).Scan(&n); err != nil || n != 1 {
 		t.Errorf("the emailed quote left %d delivery rows (%v), want 1", n, err)
 	}
 	if err := db.Pool.QueryRow(ctx, `SELECT count(*) FROM email_deliveries WHERE document_id = $1 AND document_type = 'statement'`, f.docCust).Scan(&n); err != nil || n != 1 {
@@ -1947,3 +1969,45 @@ func TestReviewManagerRoutesUnderServeGuard(t *testing.T) {
 	}
 }
 
+// TestBranchWall_LargeCashPreviewHoldsTheSale: the preview reads a sale by id
+// from the body, so the wall holds that sale to the caller's branches. A
+// cashier granted only A previews A's sale and finds B's a missing one; a
+// preview mounted without the guard would answer for both.
+func TestBranchWall_LargeCashPreviewHoldsTheSale(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	db := testutil.RequireDB(t)
+	f := newWallFixture(t, db, true)
+	A, B := f.branchA.String(), f.branchB.String()
+	ctx := context.Background()
+	cashier := uuid.New()
+	txnA, txnB := uuid.New(), uuid.New()
+	for txn, branch := range map[uuid.UUID]uuid.UUID{txnA: f.branchA, txnB: f.branchB} {
+		if _, err := db.Pool.Exec(ctx,
+			`INSERT INTO pos_transactions (id, register_id, cashier_id, status, branch_id, currency) VALUES ($1, 'LCWALL', $2, 'OPEN', $3, 'USD')`,
+			txn, cashier, branch); err != nil {
+			t.Fatalf("seed sale: %v", err)
+		}
+	}
+	t.Cleanup(func() {
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM pos_transactions WHERE id = ANY($1)`, []uuid.UUID{txnA, txnB})
+	})
+	body := func(txn uuid.UUID) string {
+		return fmt.Sprintf(`{"transaction_id":%q,"tenders":[{"method":"cash","amount_cents":500}]}`, txn)
+	}
+	const path = "/api/v1/pos/large-cash/preview"
+	if got := f.call(t, "POST", path, body(txnA), "cashier", "u-a", A); got != http.StatusOK {
+		t.Errorf("cashier previews the sale at its own branch: %d, want 200", got)
+	}
+	if got := f.call(t, "POST", path, body(txnB), "cashier", "u-a", A); got != http.StatusNotFound {
+		t.Errorf("cashier previews a sale at another branch (header A): %d, want 404", got)
+	}
+	if got := f.call(t, "POST", path, body(txnB), "cashier", "u-a", ""); got != http.StatusNotFound {
+		t.Errorf("cashier previews a sale at another branch (no header): %d, want 404", got)
+	}
+	if got := f.call(t, "POST", path, body(txnB), "cashier", "u-a", B); got != http.StatusForbidden {
+		t.Errorf("cashier names an ungranted branch header: %d, want 403", got)
+	}
+	if got := f.call(t, "POST", path, body(txnA), "sales", "u-a", A); got != http.StatusForbidden {
+		t.Errorf("a role outside the counter's: %d, want 403", got)
+	}
+}

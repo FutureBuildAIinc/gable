@@ -15,6 +15,7 @@ import (
 	"github.com/gablelbm/gable/internal/account"
 	"github.com/gablelbm/gable/internal/gl"
 	"github.com/gablelbm/gable/internal/invoice"
+	"github.com/gablelbm/gable/internal/largecash"
 	"github.com/gablelbm/gable/internal/payment"
 	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/gablelbm/gable/internal/salesdoc"
@@ -108,9 +109,20 @@ type Service struct {
 	terminalWait   time.Duration
 	terminalCrash  func(point string) error
 	bank           BankLines
+	// largeCash is the branch country's large cash rules (CP-17a); nil
+	// keeps the completion as it was (a stack with no rules wired).
+	largeCash LargeCashCore
 	// scale is the branch scale's driver (CP-19); nil keeps the manual
 	// weight entry path, which carries its reason instead.
 	scale ScaleReader
+}
+
+// LargeCashCore is the slice of the large cash module the counter drives:
+// the preview the payment panel asks before Pay and the capture that rides
+// the completion's transaction.
+type LargeCashCore interface {
+	Preview(ctx context.Context, f *largecash.CompletionFacts) (*largecash.Preview, error)
+	Capture(ctx context.Context, f *largecash.CompletionFacts) error
 }
 
 // ARCore is the slice of the AR core the counter drives (account.Service).
@@ -131,6 +143,9 @@ type CounterInventory interface {
 	IssueQty(ctx context.Context, productID, branchID uuid.UUID, qty httpx.Quantity) error
 	RestockQty(ctx context.Context, productID, branchID uuid.UUID, qty httpx.Quantity) error
 }
+
+// WithLargeCash wires the branch country's large cash rules (CP-17a).
+func (s *Service) WithLargeCash(lc LargeCashCore) *Service { s.largeCash = lc; return s }
 
 // NewService builds the counter's service.
 func NewService(db *database.DB, repo Repository, logger *slog.Logger) *Service {
@@ -671,6 +686,53 @@ func (s *Service) priceLine(ctx context.Context, sale *Sale, pl salesdoc.ParsedL
 			cost := ref.AverageCost
 			line.CostSource, line.StockingUnitCost = &source, &cost
 		}
+
+		// A paint line's tint (row CP-16): the line price is the base price
+		// plus the dealer's tint rule. The rule follows the tint, not only
+		// the container: a tier covers the base tier it names and the
+		// colorant total it names, and the flat figure covers the rest (0
+		// when the tint is folded into the shelf price, the dominant retail
+		// model). The charge rides the tint record so the documents show it
+		// as its own amount.
+		//
+		// The dealer's rule is the only charge (money checklist item 6: the
+		// rule the screen shows is enforced on the server): the charge
+		// number the request carried is overwritten here. The base tier is
+		// read from the server's own rows when a formula is named; the
+		// colorant total is summed from the components the request sent
+		// (the clerk who mixes the can types those amounts), so the charge
+		// frozen on the record is the charge the price carries.
+		//
+		// The charge is per container, that is per sale unit, while the
+		// price is per price unit and the extension scales it by the unit
+		// ratio. The charge is therefore added as charge x uom_qty /
+		// price_uom_qty, so quantity x charge lands on the line exactly. A
+		// ratio that does not divide the charge exactly is refused.
+		if pl.Tint != nil {
+			rule, err := s.repo.TintChargeRule(ctx)
+			if err != nil {
+				return line, out, err
+			}
+			baseTier, err := s.repo.TintBaseTier(ctx, pl.Tint.FormulaID, pl.ProductID, pl.Tint.BaseCode)
+			if err != nil {
+				return line, out, err
+			}
+			charge := rule.Charge(salesdoc.TotalColorantOZ(pl.Tint.Components), baseTier)
+			c := httpx.Cents(charge)
+			pl.Tint.TintChargeCents = &c
+			if charge > 0 && line.UnitPrice != nil {
+				add, ok := tintPricePerUnit(charge, line.UOMQty, line.PriceUOMQty)
+				if !ok {
+					return line, out, invalid("line.tint",
+						"the tint charge is per container and cannot be carried exactly when this line is sold in "+
+							derefString(line.UOM)+" and priced per "+derefString(line.PriceUOM)+
+							": sell it in its price unit or remove the tint")
+				}
+				p := *line.UnitPrice + add
+				line.UnitPrice = &p
+			}
+			line.Tint = pl.Tint
+		}
 	}
 	if pl.DiscountPercent != nil {
 		pct := *pl.DiscountPercent
@@ -816,7 +878,10 @@ func (s *Service) lookups(ctx context.Context, parsed []salesdoc.ParsedLine) (ma
 }
 
 // AddLine adds one line to an open cart: priced, extended, with the audit
-// rows an override or a discount owes, all in the add's own transaction.
+// rows an override or a discount owes, all in the add's own transaction. When
+// a request line names an open line of this sale (line.id), it replaces that
+// line in place in the same transaction, keeping any override price or
+// discount already on the line so tinting a scanned can never leaves two cans.
 func (s *Service) AddLine(ctx context.Context, saleID uuid.UUID, parsed []salesdoc.ParsedLine, actor string) (*Sale, error) {
 	if err := s.holdSaleBranch(ctx, saleID); err != nil {
 		return nil, err
@@ -842,32 +907,94 @@ func (s *Service) AddLine(ctx context.Context, saleID uuid.UUID, parsed []salesd
 			}
 			sale.WalkInID = walkInID
 		}
-		var priced []salesdoc.Line
-		var audits []audit.Entry
-		for i := range parsed {
-			line, out, err := s.priceLine(ctx, sale, parsed[i], actor)
-			if err != nil {
-				return err
-			}
-			priced = append(priced, line)
-			audits = append(audits, out.overrides...)
-			audits = append(audits, out.discounts...)
-		}
-		lines, err := s.explodeAndExtend(ctx, priced)
-		if err != nil {
-			return err
-		}
 		existing, err := s.repo.GetLines(ctx, saleID)
 		if err != nil {
 			return err
 		}
-		// the new lines keep the order Explode built (a kit before its
-		// components), numbered after the cart's own
-		for i := range lines {
-			lines[i].Position = len(existing) + i
+		var appended []salesdoc.Line
+		var audits []audit.Entry
+		for i := range parsed {
+			in := parsed[i]
+			if in.ID != nil {
+				var old *salesdoc.Line
+				for j := range existing {
+					if existing[j].ID == *in.ID {
+						old = &existing[j]
+					}
+				}
+				if old == nil {
+					return httpx.NotFound("line not found on this sale")
+				}
+				if old.ParentLineID != nil {
+					return invalid("line_id", "is a kit component: change the kit line, its components follow")
+				}
+				merged := mergeReplacedLine(old, in)
+				line, pricedOut, err := s.priceLine(ctx, sale, merged, actor)
+				if err != nil {
+					return err
+				}
+				line.ID = old.ID
+				if in.UnitPrice == nil && in.DiscountPercent == nil && in.DiscountAmount == nil {
+					line.PriceAdjustedBy = old.PriceAdjustedBy
+				}
+				family, err := s.explodeAndExtend(ctx, []salesdoc.Line{line})
+				if err != nil {
+					return err
+				}
+				var places []int
+				for j := range existing {
+					if existing[j].ID == old.ID || (existing[j].ParentLineID != nil && *existing[j].ParentLineID == old.ID) {
+						places = append(places, existing[j].Position)
+					}
+				}
+				for j := range family {
+					if j < len(places) {
+						family[j].Position = places[j]
+					} else {
+						family[j].Position = places[len(places)-1] + (j - len(places) + 1)
+					}
+				}
+				if err := s.repo.RemoveLine(ctx, saleID, old.ID); err != nil {
+					return err
+				}
+				if err := s.repo.AddLines(ctx, saleID, family); err != nil {
+					return err
+				}
+				if in.UnitPrice != nil || old.PriceSource != salesdoc.PriceSourceOverride {
+					for _, e := range pricedOut.overrides {
+						e.Changes["line_id"] = old.ID
+						audits = append(audits, e)
+					}
+				}
+				if in.DiscountPercent != nil || in.DiscountAmount != nil {
+					for _, e := range pricedOut.discounts {
+						e.Changes["line_id"] = old.ID
+						audits = append(audits, e)
+					}
+				}
+				continue
+			}
+			line, out, err := s.priceLine(ctx, sale, in, actor)
+			if err != nil {
+				return err
+			}
+			appended = append(appended, line)
+			audits = append(audits, out.overrides...)
+			audits = append(audits, out.discounts...)
 		}
-		if err := s.repo.AddLines(ctx, saleID, lines); err != nil {
-			return err
+		if len(appended) > 0 {
+			lines, err := s.explodeAndExtend(ctx, appended)
+			if err != nil {
+				return err
+			}
+			// the new lines keep the order Explode built (a kit before its
+			// components), numbered after the cart's own
+			for i := range lines {
+				lines[i].Position = len(existing) + i
+			}
+			if err := s.repo.AddLines(ctx, saleID, lines); err != nil {
+				return err
+			}
 		}
 		for i := range audits {
 			if s.auditLog != nil {
@@ -886,6 +1013,61 @@ func (s *Service) AddLine(ctx context.Context, saleID uuid.UUID, parsed []salesd
 		return nil, err
 	}
 	return out, nil
+}
+
+// mergeReplacedLine overlays a line request onto the existing cart line it
+// replaces (for example tinting a scanned plain base line in place): the
+// request's tint, product, unit and quantity take effect, while an override
+// price or a discount already on the cart line stays unless the request sends
+// its own.
+func mergeReplacedLine(old *salesdoc.Line, in salesdoc.ParsedLine) salesdoc.ParsedLine {
+	qty := in.Quantity
+	if !in.HasQuantity && old.Quantity != nil {
+		qty = *old.Quantity
+	}
+	out := parsedFromLine(old, qty)
+	out.ID = in.ID
+	if in.LineType != "" {
+		out.LineType = in.LineType
+	}
+	if in.ProductID != nil {
+		out.ProductID = in.ProductID
+	}
+	if in.SKU != "" {
+		out.SKU = in.SKU
+	}
+	if in.Description != "" {
+		out.Description = in.Description
+	}
+	if in.UOM != "" {
+		out.UOM = in.UOM
+	}
+	if in.PriceUOM != "" && (in.UOMQty > 0 || in.UnitPrice != nil) {
+		out.PriceUOM = in.PriceUOM
+	}
+	if in.UOMQty > 0 && in.PriceUOMQty > 0 {
+		out.UOMQty, out.PriceUOMQty = in.UOMQty, in.PriceUOMQty
+	}
+	if in.HasQuantity {
+		out.HasQuantity = true
+		out.Quantity = in.Quantity
+	}
+	if len(in.TallyRows) > 0 {
+		out.TallyRows = in.TallyRows
+	}
+	if in.UnitPrice != nil {
+		out.UnitPrice = in.UnitPrice
+		out.OverrideReason = in.OverrideReason
+	}
+	if in.DiscountPercent != nil || in.DiscountAmount != nil {
+		out.DiscountPercent = in.DiscountPercent
+		out.DiscountAmount = in.DiscountAmount
+		out.DiscountReason = in.DiscountReason
+	}
+	if in.Tint != nil {
+		out.Tint = in.Tint
+	}
+	return out
 }
 
 // ChangeLineQuantity sets one line's quantity on an open cart. The line is
@@ -1009,6 +1191,10 @@ func (s *Service) ChangeLineQuantity(ctx context.Context, saleID, lineID uuid.UU
 // parsedFromLine turns a stored line back into the request line that made it,
 // at a new quantity: what the cashier fixed (an override price and its reason,
 // a discount, a charge's price) is carried, a list price is left to the engine.
+// A paint line's tint (row CP-16) is carried whole: the formula the customer
+// bought and the tint charge the dealer set belong to the line, not to the
+// request that first made it, so a quantity change or a customer change
+// reprices the line and keeps both.
 func parsedFromLine(l *salesdoc.Line, qty httpx.Quantity) salesdoc.ParsedLine {
 	pl := salesdoc.ParsedLine{
 		LineType:    l.LineType,
@@ -1046,6 +1232,26 @@ func parsedFromLine(l *salesdoc.Line, qty httpx.Quantity) salesdoc.ParsedLine {
 	pl.DiscountPercent = l.DiscountPercent
 	pl.DiscountAmount = l.DiscountAmount
 	pl.DiscountReason = derefString(l.DiscountReason)
+	// The tint rides the line (row CP-16). The charge the dealer set is
+	// already inside the line's price, so on an override or manual line the
+	// frozen tint charge is taken back out before priceLine runs and adds
+	// the dealer's tint charge once.
+	if l.Tint != nil {
+		if pl.UnitPrice != nil && l.Tint.TintChargeCents != nil && *l.Tint.TintChargeCents > 0 {
+			// ok cannot be false for a line this code wrote: the add put in
+			// this same charge under this same unit pair and refused any pair
+			// that could not carry it exactly.
+			add, _ := tintPricePerUnit(int64(*l.Tint.TintChargeCents), l.UOMQty, l.PriceUOMQty)
+			base := *pl.UnitPrice - add
+			if base < 0 {
+				base = 0
+			}
+			pl.UnitPrice = &base
+		}
+		tint := *l.Tint
+		tint.Components = append([]salesdoc.TintComponent(nil), l.Tint.Components...)
+		pl.Tint = &tint
+	}
 	return pl
 }
 
@@ -1198,4 +1404,27 @@ func (s *Service) ReceiptInvoice(ctx context.Context, saleID uuid.UUID) (invoice
 		return uuid.Nil, false, err
 	}
 	return *sale.InvoiceID, walkInID == *sale.CustomerID, nil
+}
+
+// tintPricePerUnit is the tint charge (cents per container) as an amount per
+// PRICE unit, in price ten-thousandths: charge x 100 x uom_qty / price_uom_qty.
+// A missing pair is 1 and 1. It answers false where the division is not
+// exact, so the extension (quantity x price x price_uom_qty / uom_qty) lands
+// the charge to the cent with no drift.
+func tintPricePerUnit(chargeCents int64, uomQty, priceUOMQty *httpx.Quantity) (httpx.Price, bool) {
+	uq, pq := int64(salesdoc.One), int64(salesdoc.One)
+	if uomQty != nil {
+		uq = int64(*uomQty)
+	}
+	if priceUOMQty != nil {
+		pq = int64(*priceUOMQty)
+	}
+	if uq <= 0 || pq <= 0 {
+		return 0, false
+	}
+	n := chargeCents * 100 * uq
+	if n%pq != 0 {
+		return 0, false
+	}
+	return httpx.Price(n / pq), true
 }

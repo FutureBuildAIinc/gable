@@ -8,6 +8,8 @@
 
 export type SaleStatus = 'open' | 'held' | 'completed' | 'voided';
 export type TenderMethod = 'cash' | 'check' | 'card' | 'account' | 'store_credit';
+/** The methods an exchange's difference can be tendered by (CP-17a). */
+export type ExchangeTenderMethod = 'cash' | 'check' | 'card';
 /** The kind of ID looked at beside a check or a charge; its number is never taken. */
 export type IdType = 'drivers_license' | 'state_id' | 'passport' | 'military_id' | 'other';
 export const ID_TYPES: Array<{ value: IdType; label: string }> = [
@@ -23,6 +25,34 @@ export type LineType = 'product' | 'kit' | 'component' | 'charge' | 'text';
 export type PriceSource = 'price_list' | 'quote' | 'override' | 'manual' | 'none';
 
 /** One line of a counter sale: the shared salesdoc shape (ADR 0005 2.2). */
+
+/** A colorant amount as the manufacturer guides print it: whole ounces, a count of the coarse 1/32 step and a count of the fine 1/denominator step. */
+export interface TintAmount {
+    whole_oz: number;
+    increments_coarse: number;
+    increments_fine: number;
+    unit_denominator: number;
+}
+
+/** One colorant of a tint. */
+export interface TintComponent {
+    colorant_code: string;
+    colorant_name: string;
+    amount: TintAmount;
+}
+
+/** A paint line's tint record (row CP-16): the base, the colour and the formula frozen on the sale. */
+export interface LineTint {
+    formula_id: string | null;
+    color_code: string;
+    color_name: string;
+    base_code: string;
+    container_size_code: string;
+    rescaled: boolean;
+    tint_charge_cents: number | null;
+    components: TintComponent[];
+}
+
 export interface SaleLine {
     id: string;
     position: number;
@@ -64,6 +94,8 @@ export interface SaleLine {
     manual_weight_reason: string | null;
     weight_captured_by: string | null;
     weight_captured_at: string | null;
+    /** The paint line's tint record, null on every other line (row CP-16). */
+    tint: LineTint | null;
     created_at: string;
 }
 
@@ -208,6 +240,24 @@ export interface CheckIDRule {
     over_cents: number | null;
 }
 
+/** One tier of the dealer's tint charge rule: the base tier it covers, the colorant floor it covers and the charge. */
+export interface TintChargeTier {
+    /** The base tier this tier covers: '' is any base, 'flat' the ordinary one, 'deep' the deepest of the system. */
+    base_tier: '' | 'flat' | 'deep';
+    /** The lowest colorant total in fluid ounces this tier covers; '' is any total. */
+    min_colorant_oz: string;
+    /** The charge for a tint this tier covers, in cents. */
+    charge_cents: number;
+}
+
+/** The dealer's tint charge rule: the flat figure per container and the tiers that may cover it. */
+export interface TintChargeRule {
+    /** The charge per container when no tier covers the tint; 0 means the tint is folded into the shelf price. */
+    flat_cents: number;
+    /** The dealer's tiers: the most specific tier that covers the tint wins. */
+    tiers: TintChargeTier[];
+}
+
 /** The counter's named dealer rules (GET/PUT /api/v1/pos/settings). */
 export interface PosRules {
     check_limit_cents: number | null;
@@ -216,6 +266,10 @@ export interface PosRules {
     restocking_fees: Record<string, number>;
     /** The suggested fee for each reason, read only (the read fills it; a write never carries it). */
     restocking_fee_defaults?: Record<string, number>;
+    /** The dealer's tint charge rule (row CP-16). */
+    tint_charge?: TintChargeRule;
+    /** The dealer's tinted no return policy: a tinted can is not taken back. */
+    tinted_no_return?: boolean;
 }
 
 /** The figures of a return before it is taken (POST /api/v1/pos/returns/preview). */
@@ -288,7 +342,7 @@ export interface ReturnLine {
 }
 
 /** The closed lowercase list of return reasons; an absent reason is other. */
-export type ReturnReasonCode = 'defective' | 'damaged' | 'wrong_item' | 'ordered_wrong' | 'changed_mind' | 'overbought' | 'other';
+export type ReturnReasonCode = 'defective' | 'damaged' | 'wrong_item' | 'ordered_wrong' | 'changed_mind' | 'overbought' | 'mis_tint' | 'other';
 
 export interface ReturnReason {
     code: ReturnReasonCode;
@@ -322,6 +376,30 @@ export interface CounterReturn {
     lines: ReturnLine[];
 }
 
+/** What the large cash preview answered (CP-17a): the rule family, the counted cash and whether the payer's details are required. */
+export interface LargeCashPreview {
+    country: string;
+    rule_family: string;
+    counted_cents: number;
+    aggregate_cents: number;
+    threshold_cents: number;
+    comparator: string;
+    asks_details: boolean;
+    fields: string[];
+    note?: string;
+    dealer_threshold: boolean;
+    /** The branch's walk-in identity floor in cents; zero when the branch has it off (CP-17a). */
+    walk_in_floor_cents: number;
+    /** True when this walk-in's cash sale passes the floor and no identity is captured yet: the counter asks before Pay. */
+    asks_floor: boolean;
+    /** True when the branch counts a walk-in's cash sales together once the walk-in is identified. */
+    walk_in_aggregated: boolean;
+    /** The plain sentence the counter shows when the branch's floor is off: the walk-in's cash is not aggregated. */
+    walk_in_note?: string;
+    /** True when this sale's counted cash crosses the rule's threshold: the payer's details are required and no decline answers it. */
+    threshold_crossed: boolean;
+}
+
 /** What an exchange comes to: the credit the return is worth, the replacement and the difference. */
 export interface ExchangeFigures {
     returned_cents: number;
@@ -329,6 +407,8 @@ export interface ExchangeFigures {
     replacement_cents: number;
     /** Replacement less return: positive is what the customer pays, negative what goes back. */
     difference_cents: number;
+    /** The branch country's large cash answer for this exchange (CP-17a): what the payer's capture needs. */
+    large_cash?: LargeCashPreview;
 }
 
 export interface Exchange extends ExchangeFigures {

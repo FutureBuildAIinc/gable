@@ -107,6 +107,42 @@ describe('Counter rules screen', () => {
     expect(q<HTMLInputElement>(el, '[data-testid="counter-rules-id-over"]').value).toBe('50.00')
   })
 
+  it('shows the tint charge rule and the no return policy the dealer saved', async () => {
+    current = {
+      revision: 9,
+      rules: {
+        ...BASE.rules,
+        tint_charge: { flat_cents: 250, tiers: [{ base_tier: 'deep', min_colorant_oz: '2.0000', charge_cents: 4000 }] },
+        tinted_no_return: true,
+      },
+    }
+    const el = await open()
+    expect(q<HTMLInputElement>(el, '[data-testid="counter-rules-tint-flat"]').value).toBe('2.50')
+    expect(q<HTMLInputElement>(el, '[data-testid="counter-rules-tint-floor-0"]').value).toBe('2.0000')
+    expect(q<HTMLInputElement>(el, '[data-testid="counter-rules-tint-charge-0"]').value).toBe('40.00')
+    expect(q<HTMLInputElement>(el, '[data-testid="counter-rules-tint-no-return"] input').checked).toBe(true)
+  })
+
+  it('writes the tint tiers and the policy with the rest of the rules', async () => {
+    const el = await open()
+    await type(el, '[data-testid="counter-rules-tint-flat"]', '2.50')
+    await click(el, '[data-testid="counter-rules-tint-add-tier"]')
+    await type(el, '[data-testid="counter-rules-tint-floor-0"]', '2')
+    await type(el, '[data-testid="counter-rules-tint-charge-0"]', '40')
+    const policy = q<HTMLInputElement>(el, '[data-testid="counter-rules-tint-no-return"] input')
+    policy.checked = true
+    policy.dispatchEvent(new Event('change'))
+    await update(el, {})
+    await click(el, '[data-testid="counter-rules-save"]')
+    expect(puts).toHaveLength(1)
+    expect(puts[0]).toMatchObject({
+      rules: {
+        tint_charge: { flat_cents: 250, tiers: [{ base_tier: '', min_colorant_oz: '2', charge_cents: 4000 }] },
+        tinted_no_return: true,
+      },
+    })
+  })
+
   it('saves the limit and the over amount rule in cents on the revision', async () => {
     const el = await open()
     await type(el, '[data-testid="counter-rules-limit"]', '100.00')

@@ -31,7 +31,7 @@ const locationColumns = `
     name, address, city, state, zip, phone,
     tax_jurisdiction_code, default_tax_rate,
     cash_rounding_mode,
-    timezone, active, branch_id,
+    timezone, country_code, walk_in_identity_cents, active, branch_id,
     revision, created_at, updated_at
 `
 
@@ -53,6 +53,9 @@ type Repository interface {
 	CountLocations(ctx context.Context, scope ListScope) (int64, error)
 	GetBranchTree(ctx context.Context, branchID uuid.UUID) ([]Location, error)
 	IsBranch(ctx context.Context, id uuid.UUID) (bool, error)
+	// SettingValue reads one system_settings value (CP-17a: the dealer's
+	// default country backs a branch that names none).
+	SettingValue(ctx context.Context, key string) (string, bool, error)
 }
 
 type PostgresRepository struct {
@@ -82,6 +85,8 @@ func scanLocation(row pgx.Row, loc *Location) error {
 		&loc.DefaultTaxRate,
 		&loc.CashRoundingMode,
 		&loc.Timezone,
+		&loc.CountryCode,
+		&loc.WalkInIdentityCents,
 		&loc.Active,
 		&loc.BranchID,
 		&loc.Revision,
@@ -100,20 +105,35 @@ func (r *PostgresRepository) CreateLocation(ctx context.Context, loc *Location) 
 		INSERT INTO locations (
 			parent_id, path, type, code, description,
 			name, address, city, state, zip, phone,
-			tax_jurisdiction_code, default_tax_rate, cash_rounding_mode, timezone, active
+			tax_jurisdiction_code, default_tax_rate, cash_rounding_mode, timezone, active, country_code,
+			walk_in_identity_cents
 		)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,COALESCE(NULLIF($14,''),'OFF'),$15,COALESCE($16,TRUE))
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,COALESCE(NULLIF($14,''),'OFF'),$15,COALESCE($16,TRUE),$17,$18)
 		RETURNING ` + locationColumns
 
 	row := r.db.GetExecutor(ctx).QueryRow(ctx, query,
 		loc.ParentID, loc.Path, loc.Type, loc.Code, loc.Description,
 		loc.Name, loc.Address, loc.City, loc.State, loc.Zip, loc.Phone,
-		loc.TaxJurisdictionCode, loc.DefaultTaxRate, loc.CashRoundingMode, tzOrDefault(loc.Timezone), loc.Active,
+		loc.TaxJurisdictionCode, loc.DefaultTaxRate, loc.CashRoundingMode, tzOrDefault(loc.Timezone), loc.Active, loc.CountryCode,
+		loc.WalkInIdentityCents,
 	)
 	if err := scanLocation(row, loc); err != nil {
 		return fmt.Errorf("create location: %w", err)
 	}
 	return nil
+}
+
+// SettingValue reads one system_settings value.
+func (r *PostgresRepository) SettingValue(ctx context.Context, key string) (string, bool, error) {
+	var v string
+	err := r.db.GetExecutor(ctx).QueryRow(ctx, `SELECT value FROM system_settings WHERE key = $1`, key).Scan(&v)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, err
+	}
+	return v, true, nil
 }
 
 // tzOrDefault is the row's timezone or the dealer default when none was sent.
@@ -155,6 +175,8 @@ func (r *PostgresRepository) UpdateLocation(ctx context.Context, loc *Location, 
 			default_tax_rate = $13,
 			cash_rounding_mode = COALESCE(NULLIF($14,''), cash_rounding_mode),
 			timezone = COALESCE(NULLIF($15,''), timezone),
+			country_code = $17,
+			walk_in_identity_cents = $18,
 			active = $16,
 			revision = revision + 1,
 			updated_at = NOW()
@@ -164,7 +186,8 @@ func (r *PostgresRepository) UpdateLocation(ctx context.Context, loc *Location, 
 	row := r.db.GetExecutor(ctx).QueryRow(ctx, query,
 		loc.ID, revision, loc.Path, loc.Code, loc.Description,
 		loc.Name, loc.Address, loc.City, loc.State, loc.Zip, loc.Phone,
-		loc.TaxJurisdictionCode, loc.DefaultTaxRate, loc.CashRoundingMode, derefString(loc.Timezone), loc.Active,
+		loc.TaxJurisdictionCode, loc.DefaultTaxRate, loc.CashRoundingMode, derefString(loc.Timezone), loc.Active, loc.CountryCode,
+		loc.WalkInIdentityCents,
 	)
 	if err := scanLocation(row, loc); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {

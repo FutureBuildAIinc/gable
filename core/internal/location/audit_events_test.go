@@ -43,7 +43,8 @@ func wired(t *testing.T, db *database.DB) *location.Service {
 
 func branchDraft() *location.Location {
 	name := "AUD-" + uuid.NewString()[:10]
-	return &location.Location{Code: name, Name: &name, Type: location.LocTypeBranch, Path: name, Active: true}
+	country := "US"
+	return &location.Location{Code: name, Name: &name, Type: location.LocTypeBranch, Path: name, Active: true, CountryCode: &country}
 }
 
 func cleanLocation(t *testing.T, db *database.DB, ids ...uuid.UUID) {
@@ -141,9 +142,10 @@ func TestLocationWrites_RecordAuditAndEvent(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer cleanLocation(t, db, created.ID)
+	updateCountry := "US"
 	if err := svc.UpdateLocation(ctx, &location.Location{
 		ID: created.ID, Code: created.Code, Name: created.Name, Type: created.Type,
-		Path: created.Path, Description: created.Description, Active: true,
+		Path: created.Path, Description: created.Description, Active: true, CountryCode: &updateCountry,
 	}, created.Revision); err != nil {
 		t.Fatal(err)
 	}

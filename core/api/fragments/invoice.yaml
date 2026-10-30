@@ -183,9 +183,11 @@ paths:
       - invoice
       summary: Email invoice to customer
       description: Queues an email to the customer with the invoice PDF attached, sent through the configured sender
-        (SMTP when SMTP_HOST is set, otherwise the log sender). Returns 202 Accepted immediately; the email is dispatched
-        asynchronously and its outcome, the sender's answer or its error, is written to email_deliveries (GET
-        /api/v1/email-deliveries). Fails if the customer has no email address on file.
+        (SMTP when SMTP_HOST is set, otherwise the log sender, which records the mail without sending it). Returns 202
+        Accepted immediately with the id of the queued delivery row; the email is dispatched asynchronously and resolves
+        that row to sent (the SMTP server took it), logged (the log sender took it, nothing left the process) or failed,
+        with the sender's answer or its error (GET /api/v1/email-deliveries). Fails if the customer has no email address
+        on file.
       parameters:
       - name: id
         in: path
@@ -1035,6 +1037,7 @@ components:
       - stock_uom
       - stock_quantity
       - tally
+      - tint
       - unit_price_ten_thousandths
       - priced_unit_price_ten_thousandths
       - price_source
@@ -1147,6 +1150,11 @@ components:
           - $ref: '#/components/schemas/Tally'
           - type: 'null'
           description: The pieces by length a random length line carries (ADR 0006 section 4); null on every other line.
+        tint:
+          oneOf:
+          - $ref: '#/components/schemas/LineTint'
+          - type: 'null'
+          description: The paint line's tint record (row CP-16); null on every other line.
         unit_price_ten_thousandths:
           type:
           - integer
@@ -1335,6 +1343,8 @@ components:
           description: Required by a void.
     InvoiceEmailResponse:
       type: object
+      description: The queued send. The 202 alone never says the mail went out; the delivery row the
+        delivery_id names is where the outcome lands.
       required:
       - status
       properties:
@@ -1342,6 +1352,11 @@ components:
           type: string
           enum:
           - queued
+        delivery_id:
+          type: string
+          format: uuid
+          description: The queued email_deliveries row, already written; read its status (sent, logged or
+            failed) from GET /api/v1/email-deliveries. Absent only when the row could not be written.
     CreditMemoSummary:
       type: object
       description: A credit memo header, used as a list item and as the head of the full document.
@@ -1645,6 +1660,7 @@ components:
       - stock_uom
       - stock_quantity
       - tally
+      - tint
       - unit_price_ten_thousandths
       - priced_unit_price_ten_thousandths
       - price_source
@@ -1758,6 +1774,11 @@ components:
           - $ref: '#/components/schemas/Tally'
           - type: 'null'
           description: The pieces by length a random length line carries (ADR 0006 section 4); null on every other line.
+        tint:
+          oneOf:
+          - $ref: '#/components/schemas/LineTint'
+          - type: 'null'
+          description: The paint line's tint record (row CP-16); null on every other line.
         unit_price_ten_thousandths:
           type:
           - integer

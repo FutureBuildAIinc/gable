@@ -5,7 +5,9 @@ package pos
 
 import (
 	"encoding/json"
+
 	"fmt"
+	"github.com/gablelbm/gable/internal/largecash"
 	"strings"
 	"time"
 
@@ -172,8 +174,10 @@ func (r *attachCustomerRequest) parse() (*AttachCustomerIn, error) {
 }
 
 // completeSaleRequest is POST /pos/transactions/{id}/complete: the tenders in
-// cents (IN-1.2), who collected the basket, and the counter alerts the
-// clerk acknowledged.
+// cents (IN-1.2), who collected the basket, the counter alerts the clerk
+// acknowledged, and the large cash capture of CP-17a (the payer's details
+// when the payment takes the payer over the threshold, and the manager's
+// suspected avoidance mark).
 type completeSaleRequest struct {
 	Tenders    []tenderRequest `json:"tenders"`
 	PickedUpBy *string         `json:"picked_up_by"`
@@ -181,7 +185,73 @@ type completeSaleRequest struct {
 	// AcknowledgedAlertIDs names the customer's alerts the clerk read and
 	// acknowledged before taking the sale. A warning that asks to be
 	// acknowledged must be named here or the sale is refused.
-	AcknowledgedAlertIDs []string `json:"acknowledged_alert_ids"`
+	AcknowledgedAlertIDs []string      `json:"acknowledged_alert_ids"`
+	Payer                *payerRequest `json:"payer"`
+	SuspectedAvoidance   *bool         `json:"suspected_avoidance"`
+	// PayerDeclined is the counter's record that the walk-in declined to
+	// identify over the branch's walk-in identity floor (CP-17a, item 296).
+	// The sale goes ahead and the fact is recorded for the manager's worklist.
+	PayerDeclined *bool `json:"payer_declined"`
+}
+
+// payerRequest is the payer identity the counter captured for a large cash
+// crossing. The taxpayer identification number and the ID number are
+// sensitive: they are sealed before storage, never logged and never in an
+// audit row's body.
+type payerRequest struct {
+	Name            *string `json:"name"`
+	Address         *string `json:"address"`
+	Occupation      *string `json:"occupation"`
+	DateOfBirth     *string `json:"date_of_birth"`
+	IDType          *string `json:"id_type"`
+	IDNumber        *string `json:"id_number"`
+	TaxpayerID      *string `json:"taxpayer_id"`
+	ThirdPartyPayer *bool   `json:"third_party_payer"`
+}
+
+// payer answers the parsed payer, nil when the request carries none.
+func (r *completeSaleRequest) payer() *largecash.PayerIn {
+	return r.Payer.payer()
+}
+
+// payer answers the parsed payer, nil when the request carries none. Every
+// route that captures a payer for a large cash crossing (the completion and
+// the exchange) reads it the same way.
+func (r *payerRequest) payer() *largecash.PayerIn {
+	if r == nil {
+		return nil
+	}
+	p := &largecash.PayerIn{
+		Name:        deref(r.Name),
+		Address:     deref(r.Address),
+		Occupation:  deref(r.Occupation),
+		DateOfBirth: deref(r.DateOfBirth),
+		IDType:      deref(r.IDType),
+		IDNumber:    deref(r.IDNumber),
+		TaxpayerID:  deref(r.TaxpayerID),
+	}
+	if r.ThirdPartyPayer != nil {
+		p.ThirdPartyPayer = *r.ThirdPartyPayer
+	}
+	return p
+}
+
+// suspectedAvoidance answers the manager's suspected avoidance mark.
+func (r *completeSaleRequest) suspectedAvoidance() bool {
+	return r.SuspectedAvoidance != nil && *r.SuspectedAvoidance
+}
+
+// payerDeclined answers the counter's record that the walk-in declined to
+// identify over the branch's walk-in identity floor (CP-17a, item 296).
+func (r *completeSaleRequest) payerDeclined() bool {
+	return r.PayerDeclined != nil && *r.PayerDeclined
+}
+
+func deref(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
 }
 
 type tenderRequest struct {
@@ -191,6 +261,10 @@ type tenderRequest struct {
 	TokenID     *string         `json:"token_id"`
 	IDChecked   *bool           `json:"id_checked"`
 	IDType      *string         `json:"id_type"`
+	// Instrument names the kind of check the tender is (CP-17a): a personal
+	// check, a cashier's check, a bank draft, a traveler's check or a money
+	// order. Empty means an ordinary check.
+	Instrument *string `json:"instrument"`
 }
 
 func parseTenders(v *httpx.Validator, prefix string, tenders []tenderRequest) []TenderIn {
@@ -230,6 +304,14 @@ func parseTenders(v *httpx.Validator, prefix string, tenders []tenderRequest) []
 		}
 		if t.IDType != nil {
 			in.IDType = *t.IDType
+		}
+		if t.Instrument != nil {
+			in.Instrument = strings.ToLower(strings.TrimSpace(*t.Instrument))
+			if in.Instrument != "" {
+				v.Enum(field("instrument"), in.Instrument, largecash.Instruments()...)
+				v.Check(in.Method == TenderCheck, field("instrument"),
+					"an instrument is named on a check tender only")
+			}
 		}
 		if in.IDChecked || in.IDType != "" {
 			v.Check(in.Method == TenderCheck || in.Method == TenderAccount, field("id_checked"),

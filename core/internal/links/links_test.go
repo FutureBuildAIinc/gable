@@ -49,6 +49,9 @@ type fixture struct {
 	customerID uuid.UUID
 	productID  uuid.UUID
 	sku        string
+	// branchID is the branch the fixture owns: a locations row of its own
+	// carrying its own tax rate, which the quotes and orders name.
+	branchID uuid.UUID
 }
 
 func newFixture(t *testing.T, db *database.DB, settings links.Settings) *fixture {
@@ -56,18 +59,18 @@ func newFixture(t *testing.T, db *database.DB, settings links.Settings) *fixture
 	t.Setenv("AUTH_MODE", "dev")
 	ctx := context.Background()
 	f := &fixture{t: t, db: db, customerID: uuid.New(), productID: uuid.New(), sku: "LINK-" + uuid.NewString()[:8]}
-	branch := `(SELECT value::uuid FROM system_settings WHERE key = 'default_branch_id')`
+	// The branch the fixture owns: a locations row of its own carrying its
+	// own tax rate. The quotes and orders it creates name it, so they stand
+	// on a branch no other package's fixture writes and no other package's
+	// fixture can move.
+	f.branchID = testutil.OwnBranch(t, db, "0.088750")
 	if _, err := db.Pool.Exec(ctx, `INSERT INTO customers (id, name, account_number, primary_branch_id)
-		VALUES ($1, 'Links Wire Co', $2, `+branch+`)`, f.customerID, "LINKC-"+uuid.NewString()[:8]); err != nil {
+		VALUES ($1, 'Links Wire Co', $2, $3)`, f.customerID, "LINKC-"+uuid.NewString()[:8], f.branchID); err != nil {
 		t.Fatalf("seed customer: %v", err)
 	}
 	if _, err := db.Pool.Exec(ctx, `INSERT INTO products (id, sku, description, uom_primary, base_price)
 		VALUES ($1, $2, '2x4x8 SPF', 'PCS', 5.5)`, f.productID, f.sku); err != nil {
 		t.Fatalf("seed product: %v", err)
-	}
-	if _, err := db.Pool.Exec(ctx, `UPDATE locations SET default_tax_rate = 0.088750
-		WHERE id = `+branch); err != nil {
-		t.Fatalf("seed branch rate: %v", err)
 	}
 
 	quoteSvc := quote.NewService(quote.NewRepository(db)).
@@ -230,6 +233,7 @@ type linkResp struct {
 func (f *fixture) quotePayload() map[string]any {
 	return map[string]any{
 		"customer_id":   f.customerID.String(),
+		"branch_id":     f.branchID.String(),
 		"delivery_type": "pickup",
 		"lines": []map[string]any{{
 			"product_id": f.productID.String(), "sku": f.sku, "description": "2x4x8 SPF",
@@ -253,7 +257,7 @@ func TestLinksResolveEveryEntity(t *testing.T) {
 	}
 	quoteID, number := linkStr(t, q.body, "id"), linkStr(t, q.body, "number")
 	o := f.do("POST", "/api/v1/orders", map[string]any{
-		"customer_id": f.customerID.String(), "delivery_type": "pickup",
+		"customer_id": f.customerID.String(), "branch_id": f.branchID.String(), "delivery_type": "pickup",
 		"lines": []map[string]any{{"product_id": f.productID.String(), "quantity": "10"}}})
 	if o.status != http.StatusCreated {
 		t.Fatalf("create order = %d: %s", o.status, o.raw)

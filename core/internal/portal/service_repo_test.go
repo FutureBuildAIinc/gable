@@ -79,14 +79,14 @@ type fakePortalRepo struct {
 	newOrderID    uuid.UUID
 
 	// the pro portal's core (M35): /me, /today, the timeline, the feeds
-	meUser        *CustomerUser
-	meRole        string
-	todayQuotes   []TodayQuoteRow
+	meUser          *CustomerUser
+	meRole          string
+	todayQuotes     []TodayQuoteRow
 	todayDeliveries []TodayDeliveryRow
-	todayInvoices []TodayInvoiceRow
-	todayOrders   []TodayOrderRow
-	deliveryState *orderDeliveryState
-	quotes        []PortalQuoteDTO
+	todayInvoices   []TodayInvoiceRow
+	todayOrders     []TodayOrderRow
+	deliveryState   *orderDeliveryState
+	quotes          []PortalQuoteDTO
 
 	// failures
 	getCartErr    error
@@ -390,6 +390,10 @@ func (f *fakeCustomerRepo) GetCustomer(_ context.Context, id uuid.UUID) (*custom
 }
 func (f *fakeCustomerRepo) GetCustomerByEmail(context.Context, string) (*customer.Customer, error) {
 	return nil, errors.New("not found")
+}
+
+func (f *fakeProductRepo) UpdateConsumerDurable(ctx context.Context, id uuid.UUID, consumerDurable bool, revision int64) (int64, error) {
+	return revision + 1, nil
 }
 
 type fakeProductRepo struct {

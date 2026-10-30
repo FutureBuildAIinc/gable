@@ -120,6 +120,7 @@ var machineKeyModules = map[string]struct{}{
 	"gl":               {},
 	"governance":       {},
 	"inventory":        {},
+	"large-cash":       {},
 	"invoices":         {},
 	"locations":        {},
 	"market-indices":   {},
@@ -142,6 +143,7 @@ var machineKeyModules = map[string]struct{}{
 	"charge-codes":     {},
 	"ship-tos":         {},
 	"tax":              {},
+	"tint":             {},
 	"units":            {},
 	"users":            {},
 	"vendors":          {},
@@ -193,8 +195,11 @@ var adminAreaScopes = map[string]string{
 	// The Market check's address and sealed webhook id are settings: the
 	// same authority that saves the AI key saves them.
 	"market-check": "admin:settings",
-	"staff":        "admin:staff",
-	"modules":      "admin:modules",
+	// The large cash settings (the default country and the Canadian dealer
+	// threshold, CP-17a) are settings the same way.
+	"large-cash": "admin:settings",
+	"staff":      "admin:staff",
+	"modules":    "admin:modules",
 }
 
 // writeScopeOverrides replaces a module's write scope name with a finer one

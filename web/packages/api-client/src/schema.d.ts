@@ -768,6 +768,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/admin/large-cash/settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The dealer's large cash settings
+         * @description The dealer's default country and the Canadian dealer threshold (CP-17a): on or off and its amount. The Canadian threshold is a dealer policy, never a legal duty, and it never produces a FINTRAC report. Admin or owner.
+         */
+        get: operations["adminGetLargeCashSettings"];
+        /**
+         * Save the dealer's large cash settings
+         * @description Writes the dealer's default country and the Canadian dealer threshold (on or off, amount) as system_settings rows, one transaction (CP-17a). Admin or owner. Omitted fields keep their stored value.
+         */
+        put: operations["adminSaveLargeCashSettings"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/ap/invoices": {
         parameters: {
             query?: never;
@@ -2697,7 +2721,7 @@ export interface paths {
         put?: never;
         /**
          * Email a customer statement
-         * @description Renders the statement as the print route does and sends it to the customer's email address from a background task, answering 202 at once. The send is recorded in email_deliveries (GET /api/v1/email-deliveries) with the sender's answer or its error. A customer with no email address is a 400 naming customer. Same parameters, roles and branch rules as the print route.
+         * @description Renders the statement as the print route does and sends it to the customer's email address from a background task, answering 202 at once with the queued delivery row's delivery_id. The send resolves that row in email_deliveries (GET /api/v1/email-deliveries) to sent, logged or failed, with the sender's answer or its error. A customer with no email address is a 400 naming customer. Same parameters, roles and branch rules as the print route.
          */
         post: operations["arStatementEmail"];
         delete?: never;
@@ -2737,7 +2761,7 @@ export interface paths {
         put?: never;
         /**
          * Email a quote to its customer
-         * @description Renders the quote as the print route does and sends it to the customer's email address from a background task, answering 202 at once. The send is recorded in email_deliveries. A customer with no email address is a 400 naming customer.
+         * @description Renders the quote as the print route does and sends it to the customer's email address from a background task, answering 202 at once with the queued delivery row's delivery_id. The send resolves that row in email_deliveries to sent, logged or failed. A customer with no email address is a 400 naming customer.
          */
         post: operations["quoteEmail"];
         delete?: never;
@@ -3915,7 +3939,7 @@ export interface paths {
         put?: never;
         /**
          * Email invoice to customer
-         * @description Queues an email to the customer with the invoice PDF attached, sent through the configured sender (SMTP when SMTP_HOST is set, otherwise the log sender). Returns 202 Accepted immediately; the email is dispatched asynchronously and its outcome, the sender's answer or its error, is written to email_deliveries (GET /api/v1/email-deliveries). Fails if the customer has no email address on file.
+         * @description Queues an email to the customer with the invoice PDF attached, sent through the configured sender (SMTP when SMTP_HOST is set, otherwise the log sender, which records the mail without sending it). Returns 202 Accepted immediately with the id of the queued delivery row; the email is dispatched asynchronously and resolves that row to sent (the SMTP server took it), logged (the log sender took it, nothing left the process) or failed, with the sender's answer or its error (GET /api/v1/email-deliveries). Fails if the customer has no email address on file.
          */
         post: operations["invoiceEmail"];
         delete?: never;
@@ -4046,6 +4070,106 @@ export interface paths {
          * @description Uses the open credit of an open or partial credit memo on invoices of the same customer and currency. No ledger entry (both sides are in 1020) and no subledger row; each application is a CREDIT_MEMO application. The precondition is the credit memo's revision. Refused with 409 exceeds_open_credit, exceeds_open_amount, invoice_void, customer_mismatch or currency_mismatch. Writes credit_memo.partial or credit_memo.applied, and invoice.partial or invoice.paid per invoice.
          */
         post: operations["creditMemoApply"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/large-cash/worklist": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The manager's large cash worklist
+         * @description Every crossing the dealer owes a filing on, one row per crossing, in the order the manager should work them. The severity ranks by the deadline first and the amount second, so a small filing due tomorrow sits above a large filing due in ten days, and the recommended action is the ladder: capture the payer's details, then file, then chase a filing past its deadline, then issue the customer statement. A row that is not reportable (a Canadian record, an identity declined crossing) offers no filing; the identity declined row says so in words and asks a manager to look at it. The deadline is computed as a rule, the receipt anchor plus 15 days, and the row carries whether it is past. The row never carries the payer's taxpayer identification number. A branch scoped caller sees only the crossings its branch received cash for or contributed cash to; the aggregate each row carries is the dealer's central one.
+         */
+        get: operations["largeCashWorklist"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/large-cash/events/{id}/filing": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Record the filing of a Form 8300 for a crossing
+         * @description The manager's record of the Form 8300 they filed for this crossing: the day they filed it, the BSA E-Filing acknowledgement number they typed and who recorded it. Every reportable crossing is over the threshold, so its filing is required: a request for a voluntary filing (a below threshold report) is answered 409. The crossing's filing row is taken in place: two managers recording a filing on one crossing at the same time cannot both land, and the one that loses is answered 409 (the crossing is already filed). A Canadian crossing and an identity declined crossing are not filings at all and are answered 409. The act is a manager's, so a machine key is refused 403.
+         */
+        post: operations["largeCashRecordFiling"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/large-cash/events/{id}/form-8300": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The Form 8300 data set for a crossing
+         * @description The data set the filer types into BSA E-Filing: the payer's name, address, taxpayer identification number, date of birth and occupation, the amount and the dates of the cash, and the branch the filing is made for. This is the one surface that carries the taxpayer identification number, because the IRS form cannot be completed without it, so the route is the dealer's own and admin's only and a machine key is refused 403. The export is audited without the number in the audit body. Gable does not file: the export carries the sentence that says so.
+         */
+        get: operations["largeCashForm8300"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/large-cash/statements": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The customer statements for a year
+         * @description The customer statements for a year, one per payer who had reportable cash in it: the business name and address, the contact name and telephone number, the aggregate amount of reportable cash received in the year, and the sentence that says the information was furnished to the IRS. The statement is a separate obligation from the filing and runs on its own clock: it is due on or before the last day of the first month of the year after the cash was received. The statement never carries the payer's taxpayer identification number and never says the dealer noted the transaction was suspicious. A branch scoped caller sees the payers whose crossings touched its branch; the aggregate each statement carries is the dealer's whole year for that payer, because the United States aggregation is deliberately central.
+         */
+        get: operations["largeCashStatements"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/large-cash/events/{id}/statement": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Issue the customer statement for a crossing's payer
+         * @description The customer statement for the crossing's payer and the year the cash was received, issued once. A statement says the information was furnished to the IRS, so it is issued only for a reportable crossing whose Form 8300 is recorded as filed (409 otherwise). The generator also refuses to carry the dealer's suspicion of the transaction on the customer's statement and refuses a voluntary filing; these are rules in the code rather than a training note. Of several managers issuing one statement exactly one is answered 200 and the rest 409. The act is a manager's, so a machine key is refused 403.
+         */
+        post: operations["largeCashIssueStatement"];
         delete?: never;
         options?: never;
         head?: never;
@@ -6240,7 +6364,7 @@ export interface paths {
         put?: never;
         /**
          * Email the sale's receipt
-         * @description Sends the sale's invoice to the account's contact exactly as the invoice email route does (the same service call, the same words, 202 and {"status":"queued"}; the outcome is written to email_deliveries), under the counter's own roles admin, owner and cashier. The sale is read as the sale read reads it (404 for a sale the caller cannot read). A sale that is not completed or has no invoice answers 409 with the blocker no_receipt; a walk in sale (no customer, or the shared walk in customer, whatever address that row holds), or an account with no email address on file, answers 409 with the blocker no_contact and words the card can show. Nothing is sent for any refusal.
+         * @description Sends the sale's invoice to the account's contact exactly as the invoice email route does (the same service call, the same words, 202 and {"status":"queued"} with the queued delivery row's delivery_id; the send resolves that row to sent, logged or failed in email_deliveries), under the counter's own roles admin, owner and cashier. The sale is read as the sale read reads it (404 for a sale the caller cannot read). A sale that is not completed or has no invoice answers 409 with the blocker no_receipt; a walk in sale (no customer, or the shared walk in customer, whatever address that row holds), or an account with no email address on file, answers 409 with the blocker no_contact and words the card can show. Nothing is sent for any refusal.
          */
         post: operations["posTransactionReceiptEmail"];
         delete?: never;
@@ -6387,6 +6511,26 @@ export interface paths {
          * @description A sale started before the open till rule, with no drawer on it, completes only into the register's open session, which it joins (409 till_not_open when there is none). The money moment, one transaction: stock out through the inventory write path, the invoice (origin POS, pickup) posted through the AR core with its tax and COGS legs, each cash, check or card tender a payment applied to it and stored net (the tendered amount less change, so the payment is the money kept), an ACCOUNT tender left open on the invoice and subject to the credit check, the card charged at the gateway in the sale's currency before the transaction opens, and the pos_transaction.completed event written last: a failing event, audit or ledger write rolls the whole sale back (no invoice, payment, stock move or entry). Tenders must cover the total (change comes only from cash). Refused with 409 and a blocker: insufficient_tender, change_from_cash, walk_in_account (an ACCOUNT tender for the walk-in customer), card_terminal, card_declined, tax_quote_stale, tax_rate_not_configured, credit_limit, credit_hold, cash_only_terms (an account tender on an account whose terms are due on receipt), account_hold (an account tender on an account the AR core holds: a standing credit hold record, or an override window on it that has passed or whose cap the sale is over), buyer_required, buyer_not_authorized, buyer_cap (the account's buyer roster), check_over_limit (a check over the customer's check limit, or the database wide one, unless a manager approved it for this sale), store_credit_short, walk_in_store_credit, one_account_leg, one_store_credit_leg, insufficient_stock; 503 when the tax provider fails before any row is written. An ACCOUNT tender is held to the same verdict the standing read states, and a manager override the sale holds is spent here, once. A store_credit tender applies the customer's open credit memos to the sale's invoice through the AR core, oldest first. The completion carries the sale's revision (If-Match or the body's revision; 428 without one, 409 stale_revision on a stale one). A sale that does not exist, or that the caller's branch context or wall hides, answers 404, the same for both, and nothing is written; a caller with no branch in context who holds no grant for the sale's branch is refused 403 by name.
          */
         post: operations["posTransactionComplete"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pos/large-cash/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * What the large cash rule asks of this payment
+         * @description The counter's look before Pay (CP-17a): the server classifies the named tenders against the sale it holds under the branch's country rule (the United States Form 8300 family, or the Canadian dealer threshold when the dealer has it on) and answers whether the payer's details will be required and which fields the rule needs. The branch's walk-in identity floor rides the same answer: over the floor the counter asks a walk-in who paid cash to identify themselves, so their cash sales are counted together, and the identity the counter already holds may be carried here so the preview and the completion key the same person. Writes nothing; the completion's own capture is the authority.
+         */
+        post: operations["posLargeCashPreview"];
         delete?: never;
         options?: never;
         head?: never;
@@ -8398,6 +8542,26 @@ export interface paths {
         patch: operations["productUpdateLeadTime"];
         trace?: never;
     };
+    "/api/v1/products/{id}/consumer-durable": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Set or clear the consumer durable flag
+         * @description The Form 8300 designated reporting transaction flag (CP-17a): the counter's large cash classifier counts a qualifying negotiable instrument only for a sale line of a flagged product priced over the threshold. The default is false; the flagged exceptions are the big ticket consumer goods.
+         */
+        patch: operations["productUpdateConsumerDurable"];
+        trace?: never;
+    };
     "/api/v1/products/{id}/units": {
         parameters: {
             query?: never;
@@ -9572,6 +9736,215 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/tint/systems": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List tint systems
+         * @description Every tinting system the dealer runs, with the dispense denominator that makes its colourant amount columns meaningful.
+         */
+        get: operations["tintSystemList"];
+        put?: never;
+        /**
+         * Create a tint system
+         * @description One manufacturer's tinting system. The unit_denominator is one of the trade's dispense increments (32, 48, 64, 128, 192, 384, 1024).
+         */
+        post: operations["tintSystemCreate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tint/bases": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List bases
+         * @description The base paints, optionally filtered to a tint system or to the bases whose product link is a given products row.
+         */
+        get: operations["tintBaseList"];
+        put?: never;
+        /** Create a base */
+        post: operations["tintBaseCreate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tint/colorants": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List colorants */
+        get: operations["tintColorantList"];
+        put?: never;
+        /** Create a colorant */
+        post: operations["tintColorantCreate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tint/colors": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List colours
+         * @description The colours, by name or manufacturer code fragment. A manufacturer code is an attribute, never a key.
+         */
+        get: operations["tintColorList"];
+        put?: never;
+        /**
+         * Create a colour
+         * @description A colour of a book (manufacturer_code set) or a store match (is_custom true, no manufacturer code, optionally the customer it was matched for).
+         */
+        post: operations["tintColorCreate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tint/formulas": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List formulas
+         * @description The formulas, optionally filtered to a colour, a base and a container size code, with their components in guide order.
+         */
+        get: operations["tintFormulaList"];
+        put?: never;
+        /**
+         * Create a formula
+         * @description One formula of a colour in a base at a container size. Every component's unit_denominator must be the one the colour's tint system declares.
+         */
+        post: operations["tintFormulaCreate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tint/formulas/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read a formula */
+        get: operations["tintFormulaGet"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tint/formulas/{id}/rescale": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Rescale a formula to another container size
+         * @description Each component is multiplied by the exact volume ratio and rounded independently to a whole count of its own dispense unit, half up; any_rounded reports whether at least one component was rounded, so the counter can see the value is a derived approximation and override it.
+         */
+        post: operations["tintFormulaRescale"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tint/saved-colors": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List saved colours
+         * @description The store's record of a customer's colours, optionally filtered by the free text job note (a room or a jobsite). The saved colours are customer rows, so the read is walled to the customers the caller may see: a customer of another branch reads as missing, and a key bound to a branch reads only the saved colours of the customers that hold its pin.
+         */
+        get: operations["tintSavedColorList"];
+        put?: never;
+        /**
+         * Save a colour for a customer
+         * @description The name is unique per customer, so a customer cannot accumulate two identical names. The counter dialogue offers saving a colour, so the cashier may write one; the write is walled to the customer it names, and a key bound to a branch reaches it only while that customer holds its pin.
+         */
+        post: operations["tintSavedColorCreate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tint/saved-colors/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Delete a saved colour */
+        delete: operations["tintSavedColorDelete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tint/charge": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The dealer's tint charge
+         * @description The dealer's tint charge rule (row CP-16) as the counter shows it: the charge for a tint with the colorant total and the base tier given. The rule follows the tint, not only the container: a tier covers the base tier it names and the colorant floor it names, and the flat figure covers the rest. A request with no numbers answers the flat figure, the dealer's default.
+         */
+        get: operations["tintChargeGet"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/units": {
         parameters: {
             query?: never;
@@ -10500,6 +10873,16 @@ export interface components {
             limit: number;
             /** Format: int64 */
             total?: number;
+        };
+        /** @description The dealer's large cash settings (CP-17a): the default country a branch with none of its own falls back to, and the Canadian dealer threshold, off by default. */
+        AdminLargeCashSettings: {
+            /** @description The dealer's default country, two letters, or empty when unset. */
+            country_default: string;
+            ca_enabled: boolean;
+            /** Format: int64 */
+            ca_threshold_cents: number;
+            /** Format: int64 */
+            ca_default_threshold_cents: number;
         };
         /** @description Go type techadmin.APIKey. The hash field is tagged out of the JSON and never leaves the package; only the 12 character prefix identifies a key. */
         ApiKey: {
@@ -12708,6 +13091,11 @@ export interface components {
         DocumentEmailQueued: {
             /** @enum {string} */
             status: "queued";
+            /**
+             * Format: uuid
+             * @description The queued email_deliveries row, already written; read its status (sent, logged or failed) from GET /api/v1/email-deliveries. Absent only when the row could not be written.
+             */
+            delivery_id?: string;
         };
         /**
          * @description The draft lifecycle, lowercase on the wire; promoted is terminal.
@@ -12916,8 +13304,11 @@ export interface components {
             document_id: string | null;
             /** @description The document's number; the account number for a statement. */
             document_number: string | null;
-            /** @enum {string} */
-            status: "sent" | "failed";
+            /**
+             * @description queued the moment the sending route answers 202, then sent (the SMTP server took it), logged (a log sender took it: nothing left the process, email is not set up on this server) or failed (the send errored).
+             * @enum {string}
+             */
+            status: "queued" | "sent" | "logged" | "failed";
             /** @description The sender's own answer; the SMTP server's reply, or a note that the log sender logged and did not send. */
             sender_answer: string | null;
             error: string | null;
@@ -13894,6 +14285,8 @@ export interface components {
             stock_quantity: string | null;
             /** @description The pieces by length a random length line carries (ADR 0006 section 4); null on every other line. */
             tally: components["schemas"]["Tally"] | null;
+            /** @description The paint line's tint record (row CP-16); null on every other line. */
+            tint: components["schemas"]["LineTint"] | null;
             /**
              * Format: int64
              * @description The price charged per price unit, after any override, before any discount.
@@ -13996,9 +14389,15 @@ export interface components {
             /** @description Required by a void. */
             reason?: string;
         };
+        /** @description The queued send. The 202 alone never says the mail went out; the delivery row the delivery_id names is where the outcome lands. */
         InvoiceEmailResponse: {
             /** @enum {string} */
             status: "queued";
+            /**
+             * Format: uuid
+             * @description The queued email_deliveries row, already written; read its status (sent, logged or failed) from GET /api/v1/email-deliveries. Absent only when the row could not be written.
+             */
+            delivery_id?: string;
         };
         /** @description A credit memo header, used as a list item and as the head of the full document. */
         CreditMemoSummary: {
@@ -14187,6 +14586,8 @@ export interface components {
             stock_quantity: string | null;
             /** @description The pieces by length a random length line carries (ADR 0006 section 4); null on every other line. */
             tally: components["schemas"]["Tally"] | null;
+            /** @description The paint line's tint record (row CP-16); null on every other line. */
+            tint: components["schemas"]["LineTint"] | null;
             /**
              * Format: int64
              * @description The price charged per price unit, after any override, before any discount.
@@ -14369,6 +14770,200 @@ export interface components {
             next_cursor: string | null;
             limit: number;
         };
+        LargeCashWorklist: {
+            items: components["schemas"]["LargeCashWorklistRow"][];
+            count: number;
+            /** Format: date-time */
+            generated_at: string;
+        };
+        LargeCashWorklistRow: {
+            /** Format: uuid */
+            event_id: string;
+            /** @description The aggregation key: the named customer's id, else the captured identity's digest. It is a digest, never the taxpayer identification number. */
+            payer_key: string;
+            /** @description The customer's name */
+            payer_name: string;
+            /** Format: uuid */
+            customer_id?: string | null;
+            customer_account?: string;
+            /** Format: uuid */
+            branch_id: string;
+            branch_name: string;
+            branch_address: string;
+            /** @description Every branch that contributed to the aggregate. */
+            contributed_branch_ids: string[];
+            currency: string;
+            /**
+             * Format: int64
+             * @description The reportable cash total since the last report.
+             */
+            total_cents: number;
+            /** @enum {string} */
+            rule_family: "US_8300" | "CA_DEALER";
+            /** Format: int64 */
+            threshold_cents: number;
+            /** @description The cash transactions in the aggregate. */
+            transaction_count: number;
+            /** @description The cash tenders counted in the aggregate. */
+            tender_count: number;
+            /**
+             * Format: date-time
+             * @description The first cash in the aggregate.
+             */
+            first_date?: string | null;
+            /**
+             * Format: date-time
+             * @description The most recent cash in the aggregate.
+             */
+            last_date?: string | null;
+            /** @enum {string} */
+            event_state: "reportable" | "recorded" | "identity declined";
+            /**
+             * @description Not yet reportable, reportable and not filed, filed, or voluntary (the payer asked not to be reported).
+             * @enum {string}
+             */
+            filing_state: "not_reportable" | "reportable" | "filed" | "voluntary";
+            /**
+             * Format: date-time
+             * @description The receipt anchor plus 15 days. Null when there is no filing to make.
+             */
+            filing_deadline?: string | null;
+            past_deadline: boolean;
+            /** Format: date-time */
+            filed_date?: string | null;
+            acknowledgement_no?: string;
+            /** @enum {string} */
+            statement_state: "not_issued" | "issued";
+            /** Format: date-time */
+            statement_issued_date?: string | null;
+            payer_details_captured: boolean;
+            /** Format: int64 */
+            severity_score: number;
+            /** @enum {string} */
+            recommended_action: "capture_payer_details" | "file" | "chase_filing" | "issue_statement" | "manager_review" | "dealer_record";
+            /** @description The plain sentence that says what the row is. */
+            note?: string;
+            /** @description The dealer confirms each filing with its own adviser. */
+            adviser_note: string;
+        };
+        LargeCashFilingRequest: {
+            /**
+             * Format: date
+             * @description The day the Form 8300 was filed. The server's day when it is absent.
+             */
+            filed_date?: string;
+            /** @description The BSA E-Filing acknowledgement number the manager typed. Required for a filing. */
+            acknowledgement_no?: string;
+            /** @description Always refused with 409 on a reportable crossing: every reportable crossing is over the threshold, so its filing is required. */
+            voluntary?: boolean;
+        };
+        LargeCashFiling: {
+            /** Format: uuid */
+            event_id: string;
+            /** @enum {string} */
+            state: "filed" | "voluntary";
+            /** Format: date-time */
+            filed_date?: string | null;
+            acknowledgement_no?: string;
+            recorded_by: string;
+            /** Format: date-time */
+            recorded_at: string;
+            past_deadline: boolean;
+        };
+        LargeCashForm8300: {
+            /** Format: uuid */
+            event_id: string;
+            /** @description The IRS form the data set is for. */
+            form: string;
+            currency: string;
+            /** Format: int64 */
+            amount_cents: number;
+            transaction_count: number;
+            tender_count: number;
+            /** Format: date-time */
+            first_date: string;
+            /** Format: date-time */
+            last_date: string;
+            /** Format: date-time */
+            received_at: string;
+            /** Format: date-time */
+            filing_deadline: string;
+            /** @description Form 8300 Part I: the payer as the form takes it. */
+            payer: {
+                name: string;
+                address: string;
+                /** @description The payer's taxpayer identification number, in full. This is the one surface that carries it. */
+                taxpayer_id: string;
+                date_of_birth?: string;
+                occupation?: string;
+            };
+            /** @description Form 8300 Part II: the person on whose behalf the transaction was conducted. */
+            third_party_payer?: {
+                name?: string;
+            } | null;
+            /** @description The legal person the filing is made for: the branch that received the cash. */
+            filer: {
+                /** Format: uuid */
+                branch_id: string;
+                branch_name: string;
+                address?: string;
+            };
+            note: string;
+            /** @description The dealer confirms each filing with its own adviser. */
+            adviser_note: string;
+            /** @description The masked hint of the taxpayer identification number, for the filer to check. */
+            taxpayer_id_hint?: string | null;
+        };
+        LargeCashStatements: {
+            year: number;
+            items: components["schemas"]["LargeCashStatement"][];
+            count: number;
+        };
+        LargeCashStatement: {
+            payer_key: string;
+            year: number;
+            /** @description The addressee. */
+            payer_name: string;
+            /** @description The addressee's address. */
+            payer_address: string;
+            /** @description The dealer's name */
+            business_name: string;
+            /** @description The dealer's information contact address */
+            business_address: string;
+            /** @description The dealer's information contact */
+            contact_name: string;
+            /** @description The dealer's information contact telephone. */
+            telephone: string;
+            /**
+             * Format: int64
+             * @description The payer's counted cash received in the calendar year in the receiving branch's own zone, summed from the counted tenders.
+             */
+            aggregate_cents: number;
+            currency: string;
+            crossing_count: number;
+            /** Format: date-time */
+            first_date?: string | null;
+            /** Format: date-time */
+            last_date?: string | null;
+            /** @enum {string} */
+            state: "not_issued" | "issued";
+            /** Format: date-time */
+            issued_date?: string | null;
+            issued_by?: string;
+            /**
+             * Format: date-time
+             * @description The statement's own deadline: the last day of the first month of the year after the cash was received.
+             */
+            due_date: string;
+            /** @description The information was furnished to the IRS. */
+            note: string;
+            /** @description The dealer confirms each filing with its own adviser. */
+            adviser_note: string;
+        };
+        LargeCashStatementRequest: {
+            /** @description Asks the generator to put the dealer's suspicion of the transaction on the customer's statement. The generator refuses. */
+            include_suspicion?: boolean;
+        };
         /** @description Who the record is, and every frontend's URL for it. The record segment in the links is the document number when the entity has one, otherwise the UUID; draft links use the draft's UUID. Optional slots are present as null (ADR 0001 section 12). */
         LinkAnswer: {
             /** @description The entity name (quote, order, invoice, customer, product, draft). */
@@ -14413,6 +15008,13 @@ export interface components {
             default_tax_rate: number | null;
             cash_rounding_mode: components["schemas"]["CashRoundingMode"];
             timezone: string | null;
+            /** @description The branch's country, two letters (CP-17a): the country picks the branch's large cash rule. Null falls back to the dealer's country.default; a branch with neither cannot be saved. */
+            country_code: string | null;
+            /**
+             * Format: int64
+             * @description The branch's floor for asking a walk-in's identity on a cash sale over it (CP-17a), so the walk-in's cash sales are counted together. Null is the branch country's default: 3,000 dollars on a United States branch, off on a Canadian one. Zero is the dealer saying off.
+             */
+            walk_in_identity_cents: number | null;
             active: boolean;
             /** Format: uuid */
             branch_id: string | null;
@@ -14445,6 +15047,13 @@ export interface components {
             default_tax_rate?: number | null;
             cash_rounding_mode?: components["schemas"]["CashRoundingMode"];
             timezone?: string | null;
+            /** @description The branch's country, two letters (CP-17a): the country picks the branch's large cash rule. Null falls back to the dealer's country.default; a branch with neither cannot be saved. */
+            country_code?: string | null;
+            /**
+             * Format: int64
+             * @description The branch's floor for asking a walk-in's identity on a cash sale over it (CP-17a), so the walk-in's cash sales are counted together. Null is the branch country's default: 3,000 dollars on a United States branch, off on a Canadian one. Zero is the dealer saying off.
+             */
+            walk_in_identity_cents?: number | null;
             active?: boolean;
             /** Format: int64 */
             revision?: number;
@@ -14467,6 +15076,13 @@ export interface components {
             default_tax_rate?: number;
             cash_rounding_mode?: components["schemas"]["CashRoundingMode"];
             timezone?: string;
+            /** @description The branch's country, two letters (CP-17a); null falls back to the dealer's country.default. */
+            country_code?: string | null;
+            /**
+             * Format: int64
+             * @description The branch's floor for asking a walk-in's identity on a cash sale over it (CP-17a), so the walk-in's cash sales are counted together. Null is the branch country's default: 3,000 dollars on a United States branch, off on a Canadian one. Zero is the dealer saying off.
+             */
+            walk_in_identity_cents?: number | null;
             /** @description Defaults to true when absent; an explicit false is honored. */
             active?: boolean | null;
         };
@@ -14766,6 +15382,8 @@ export interface components {
             stock_quantity: string | null;
             /** @description The pieces by length a random length line carries (ADR 0006 section 4); null on every other line. */
             tally: components["schemas"]["Tally"] | null;
+            /** @description The paint line's tint record (row CP-16); null on every other line. */
+            tint: components["schemas"]["LineTint"] | null;
             /**
              * Format: int64
              * @description The price charged per price unit, after any override, before any discount.
@@ -14879,6 +15497,8 @@ export interface components {
             stock_quantity: string | null;
             /** @description The pieces by length a random length line carries (ADR 0006 section 4); null on every other line. */
             tally: components["schemas"]["Tally"] | null;
+            /** @description The paint line's tint record (row CP-16); null on every other line. */
+            tint: components["schemas"]["LineTint"] | null;
             /**
              * Format: int64
              * @description The price charged per price unit, after any override, before any discount.
@@ -15147,7 +15767,7 @@ export interface components {
             deposit_total_cents: number;
             /**
              * Format: int64
-             * @description The order total less everything taken on it: what the customer still owes on the order.
+             * @description The order total less everything taken on it and less what its invoices were already paid otherwise: what the customer still owes on the order.
              */
             balance_due_after_deposits_cents: number;
             /** @description The posted payments taken against this order (deposits), oldest first, each with the invoices it settled. */
@@ -15577,6 +16197,8 @@ export interface components {
              * @description The open counter till session a cash or check counter deposit rides.
              */
             till_session_id?: string;
+            /** @description A check taken on a till session: the clerk looked at the payer's ID. The counter's ID rule asks for it. */
+            id_checked?: boolean;
             applications?: components["schemas"]["PaymentApplicationRequest"][];
         };
         CardPaymentRequest: {
@@ -16708,6 +17330,34 @@ export interface components {
              * @description The sale's revision; or send If-Match.
              */
             revision?: number;
+            /** @description The payer's details the counter captured for a large cash crossing (CP-17a); required when this payment takes the payer over the branch's threshold, refused 409 payer_details_required without them. */
+            payer?: components["schemas"]["PosPayerCapture"];
+            /** @description The counter's record that the walk-in declined to identify over the branch's walk-in identity floor (CP-17a); the sale goes ahead and the fact is recorded for the manager's worklist as an identity declined. */
+            payer_declined?: boolean;
+            /** @description The manager's mark that an instrument may be being used to avoid reporting (CP-17a); it makes a qualifying instrument count as cash whatever was sold. */
+            suspected_avoidance?: boolean;
+        };
+        /** @description The payer identity a large cash crossing captures at the counter (CP-17a). The taxpayer identification number and the ID number are sensitive: sealed at rest, never logged, never printed on a receipt and never in an audit row's body. */
+        PosPayerCapture: {
+            /** @description The payer's name. */
+            name?: string;
+            /** @description The payer's address. */
+            address?: string;
+            /** @description The payer's occupation, or the nature of a sole proprietor's principal business. */
+            occupation?: string;
+            /** @description The payer's date of birth, as YYYY-MM-DD. */
+            date_of_birth?: string;
+            /**
+             * @description The kind of identification looked at.
+             * @enum {string}
+             */
+            id_type?: "drivers_license" | "state_id" | "passport" | "military_id" | "other";
+            /** @description The identification number; sealed at rest. */
+            id_number?: string;
+            /** @description The taxpayer identification number (the United States rule); sealed at rest. */
+            taxpayer_id?: string;
+            /** @description Whether the person paying acts on behalf of someone else. */
+            third_party_payer?: boolean;
             /** @description The customer's counter alerts the clerk read and acknowledged before taking the sale. A warning that asks to be acknowledged must be named here, or the completion is refused with 409 alert_unacknowledged and nothing is taken. */
             acknowledged_alert_ids?: string[];
         };
@@ -16726,6 +17376,63 @@ export interface components {
              * @enum {string|null}
              */
             id_type?: "drivers_license" | "state_id" | "passport" | "military_id" | "other" | null;
+            /**
+             * @description The kind of check the tender is (CP-17a); on a check tender only. A personal check never counts as cash; a cashier's check, bank draft, traveler's check or money order at or under the threshold face value counts only for a consumer durable sale line or under the suspected avoidance mark.
+             * @enum {string|null}
+             */
+            instrument?: "personal_check" | "cashiers_check" | "bank_draft" | "travelers_check" | "money_order" | null;
+        };
+        PosLargeCashPreviewRequest: {
+            /**
+             * Format: uuid
+             * @description The sale the payment panel holds.
+             */
+            transaction_id: string;
+            /** @description The manager's suspected avoidance mark. */
+            suspected_avoidance?: boolean;
+            /** @description The identity the counter already holds for this payer (the walk-in identified earlier in this till session). The preview keys the same person the completion will, so the two agree on whose cash this is. */
+            payer?: components["schemas"]["PosPayerCapture"];
+            tenders: {
+                /** @description The tender method: cash, check, card, account or store_credit. */
+                method: string;
+                /** @enum {string|null} */
+                instrument?: "personal_check" | "cashiers_check" | "bank_draft" | "travelers_check" | "money_order" | null;
+                /** Format: int64 */
+                amount_cents: number;
+            }[];
+        };
+        /** @description What the counter asks before Pay (CP-17a): the branch's country and rule family, this sale's counted cash, the aggregate it comes to, the threshold with its comparator shape, whether the payer's details are required and the fields the rule needs. A Canadian branch carries the note that the capture is for the dealer's own records and is not a FINTRAC report. The walk-in floor is the branch's own amount over which the counter asks a walk-in who paid cash to identify themselves; a branch with it off says on the counter that the walk-in's cash is not aggregated. */
+        PosLargeCashPreview: {
+            /** @description The branch's country, two letters. */
+            country: string;
+            /** @enum {string} */
+            rule_family: "" | "US_8300" | "CA_DEALER";
+            /** Format: int64 */
+            counted_cents: number;
+            /** Format: int64 */
+            aggregate_cents: number;
+            /** Format: int64 */
+            threshold_cents: number;
+            /** @enum {string} */
+            comparator: "greater" | "at_or_above";
+            asks_details: boolean;
+            fields: string[];
+            note?: string;
+            /** @description True for the Canadian dealer policy threshold (never a legal duty). */
+            dealer_threshold?: boolean;
+            /**
+             * Format: int64
+             * @description The branch's walk-in identity floor in cents; zero when the branch has it off.
+             */
+            walk_in_floor_cents: number;
+            /** @description True when this walk-in's cash sale passes the branch's floor and no identity is captured yet: the counter asks before Pay. */
+            asks_floor: boolean;
+            /** @description True when the branch counts a walk-in's cash sales together once the walk-in is identified. */
+            walk_in_aggregated: boolean;
+            /** @description The plain sentence the counter shows when the branch's floor is off: the walk-in's cash is not aggregated. */
+            walk_in_note?: string;
+            /** @description True when this sale's counted cash crosses the rule's threshold: the payer's details are required and no decline answers it. */
+            threshold_crossed: boolean;
         };
         PosVoidRequest: {
             reason: string;
@@ -16882,7 +17589,7 @@ export interface components {
          * @description The closed lowercase list of return reasons; an absent reason is other.
          * @enum {string}
          */
-        PosReturnReasonCode: "defective" | "damaged" | "wrong_item" | "ordered_wrong" | "changed_mind" | "overbought" | "other";
+        PosReturnReasonCode: "defective" | "damaged" | "wrong_item" | "ordered_wrong" | "changed_mind" | "overbought" | "mis_tint" | "other";
         PosWayForward: {
             /** @enum {string} */
             kind: "pay_down" | "manager_override" | "switch_tender";
@@ -17049,6 +17756,17 @@ export interface components {
             picked_up_by?: string | null;
             /** @description The customer's counter alerts the clerk read and acknowledged before taking the exchange's replacement sale. A warning that asks to be acknowledged must be named here, or the exchange is refused with 409 alert_unacknowledged and nothing is written. */
             acknowledged_alert_ids?: string[];
+            /** @description The payer's details the counter captured for a large cash crossing (CP-17a); required when this exchange's cash difference takes the payer over the branch's threshold, refused 409 payer_details_required without them. */
+            payer?: components["schemas"]["PosPayerCapture"];
+            /** @description The counter's record that the walk-in declined to identify over the branch's walk-in identity floor (CP-17a); the exchange goes ahead and the fact is recorded for the manager's worklist as an identity declined. */
+            payer_declined?: boolean;
+            /** @description The manager's suspected avoidance mark (CP-17a); it makes a qualifying instrument count as cash whatever was sold. */
+            suspected_avoidance?: boolean;
+            /**
+             * @description The preview only: the method the counter will tender for the difference, so the server can say what the branch's large cash rule needs of this exchange before it is rung. The exchange takes the tender itself in tenders.
+             * @enum {string}
+             */
+            tender_method?: "cash" | "check" | "card";
         };
         PosReturnFigures: {
             /**
@@ -17113,6 +17831,8 @@ export interface components {
              * @description Replacement less return: positive is what the customer pays, negative what goes back.
              */
             difference_cents: number;
+            /** @description The branch country's large cash answer for this exchange (CP-17a): whether the payer's details are required and which fields the rule needs. */
+            large_cash?: components["schemas"]["PosLargeCashPreview"];
         };
         PosExchange: {
             return: components["schemas"]["PosReturn"];
@@ -17208,6 +17928,8 @@ export interface components {
             /** Format: int64 */
             discount_cents?: number | null;
             discount_reason?: string | null;
+            /** @description The paint line's tint record (row CP-16), null or omitted on every other line. */
+            tint?: components["schemas"]["LineTint"] | null;
         };
         /** @description A sale's head, a list item. */
         PosTransactionSummary: {
@@ -17456,6 +18178,8 @@ export interface components {
             vendor_id: string | null;
             /** Format: int64 */
             special_order_unit_cost_ten_thousandths: number | null;
+            /** @description The paint line's tint record (row CP-16), null on every other line. */
+            tint: components["schemas"]["LineTint"] | null;
             /** @description Where the line's weight came from; null on a line that was not weighed (CP-19). */
             weight_source: ("scale" | "manual") | null;
             /** @description The gross reading in pounds, a decimal string. */
@@ -17735,6 +18459,10 @@ export interface components {
              * @description The fee this line's reason withheld from its refund, half even to the cent.
              */
             restocking_fee_cents: number;
+            /** @description The mis tint return (row CP-16): the store mixed the wrong colour, so the tinted line returned. */
+            mis_tint: boolean;
+            /** @description A returned line whose sale carried a tint: the can goes to the mistint rack, never back into saleable stock. */
+            tinted_return: boolean;
         };
         /** @description One drawer shift. The expected cash is the sum of the session's cash payments (already net of change) plus the opening float less cash refunds. */
         PosTillSession: {
@@ -17948,6 +18676,9 @@ export interface components {
                 restocking_fee_defaults: {
                     [key: string]: number;
                 };
+                tint_charge: components["schemas"]["TintChargeRule"];
+                /** @description The dealer's tinted no return policy: a tinted can is not taken back. Off unless the dealer says so, because the rule is a dealer policy and not a law. */
+                tinted_no_return: boolean;
             };
         };
         PosSettingsRequest: {
@@ -17970,6 +18701,9 @@ export interface components {
                 restocking_fees: {
                     [key: string]: number;
                 };
+                tint_charge?: components["schemas"]["TintChargeRule"];
+                /** @description The dealer's tinted no return policy. Absent is off (the rule is a dealer policy and not a law). */
+                tinted_no_return?: boolean;
             };
             /**
              * Format: int64
@@ -19123,6 +19857,8 @@ export interface components {
             stackable: boolean | null;
             geometry_source: string | null;
             lead_time_days: number | null;
+            /** @description The Form 8300 designated reporting transaction flag (CP-17a); a lumber yard's default is false. */
+            consumer_durable: boolean;
             /** @description A decimal string at scale 4. */
             reorder_point: string;
             reorder_qty: string;
@@ -19182,6 +19918,8 @@ export interface components {
             board_length_ft?: number | null;
             /** @description The product is sold by tally; it stocks in LF and carries no fixed length. */
             random_length?: boolean;
+            /** @description The Form 8300 designated reporting transaction flag (CP-17a); false when absent. */
+            consumer_durable?: boolean | null;
             /** @description The weighed sale's density (CP-19); both fields together or neither. */
             density_lb_per_cy?: components["schemas"]["Quantity"] | null;
             density_volume_state?: ("loose" | "compacted") | null;
@@ -19252,6 +19990,12 @@ export interface components {
         };
         ProductLeadTimeUpdate: {
             lead_time_days?: number | null;
+            /** Format: int64 */
+            revision?: number;
+        };
+        ProductConsumerDurableUpdate: {
+            /** @description The Form 8300 designated reporting transaction flag (CP-17a). */
+            consumer_durable: boolean;
             /** Format: int64 */
             revision?: number;
         };
@@ -20573,6 +21317,244 @@ export interface components {
         TaxZoneCloseRequest: {
             /** @description YYYY-MM-DD */
             effective_to: string;
+        };
+        TintSystem: {
+            /** Format: uuid */
+            id?: string;
+            code?: string;
+            name?: string;
+            manufacturer?: string;
+            unit_denominator?: number;
+            unit_label?: string;
+            /** Format: date-time */
+            created_at?: string;
+        };
+        TintSystemCreate: {
+            code: string;
+            name: string;
+            manufacturer?: string;
+            /** @enum {integer} */
+            unit_denominator: 32 | 48 | 64 | 128 | 192 | 384 | 1024;
+            unit_label?: string;
+        };
+        TintSystemPage: {
+            items?: components["schemas"]["TintSystem"][];
+        };
+        TintBase: {
+            /** Format: uuid */
+            id?: string;
+            /** Format: uuid */
+            tint_system_id?: string;
+            code?: string;
+            name?: string;
+            manufacturer_base_code?: string;
+            /** Format: uuid */
+            product_id?: string | null;
+            fill_volume_oz?: number;
+            is_deepest?: boolean;
+            /** Format: date-time */
+            created_at?: string;
+        };
+        TintBaseCreate: {
+            /** Format: uuid */
+            tint_system_id: string;
+            code: string;
+            name: string;
+            manufacturer_base_code?: string;
+            /** Format: uuid */
+            product_id?: string;
+            fill_volume_oz: number;
+            is_deepest?: boolean;
+        };
+        TintBasePage: {
+            items?: components["schemas"]["TintBase"][];
+        };
+        TintColorant: {
+            /** Format: uuid */
+            id?: string;
+            /** Format: uuid */
+            tint_system_id?: string;
+            code?: string;
+            name?: string;
+            manufacturer_code?: string;
+            manufacturer_upc?: string | null;
+            /** Format: date-time */
+            created_at?: string;
+        };
+        TintColorantCreate: {
+            /** Format: uuid */
+            tint_system_id: string;
+            code: string;
+            name: string;
+            manufacturer_code?: string;
+            manufacturer_upc?: string;
+        };
+        TintColorantPage: {
+            items?: components["schemas"]["TintColorant"][];
+        };
+        TintColor: {
+            /** Format: uuid */
+            id?: string;
+            /** Format: uuid */
+            tint_system_id?: string;
+            manufacturer_code?: string | null;
+            name?: string;
+            is_custom?: boolean;
+            /** Format: uuid */
+            customer_id?: string | null;
+            note?: string;
+            /** Format: date-time */
+            created_at?: string;
+        };
+        TintColorCreate: {
+            /** Format: uuid */
+            tint_system_id: string;
+            manufacturer_code?: string;
+            name: string;
+            is_custom?: boolean;
+            /** Format: uuid */
+            customer_id?: string;
+            note?: string;
+        };
+        TintColorPage: {
+            items?: components["schemas"]["TintColor"][];
+        };
+        TintAmount: {
+            whole_oz: number;
+            /** @description The count of the coarse 1/32 step. */
+            increments_coarse: number;
+            /** @description The count of the fine 1/denominator step. */
+            increments_fine: number;
+            /** @enum {integer} */
+            unit_denominator: 32 | 48 | 64 | 128 | 192 | 384 | 1024;
+        };
+        TintComponent: {
+            /** Format: uuid */
+            colorant_id?: string;
+            colorant_code?: string;
+            colorant_name?: string;
+            amount?: components["schemas"]["TintAmount"];
+        };
+        TintFormula: {
+            /** Format: uuid */
+            id?: string;
+            /** Format: uuid */
+            color_id?: string;
+            /** Format: uuid */
+            base_id?: string;
+            /** Format: uuid */
+            product_id?: string | null;
+            container_size_code?: string;
+            container_volume_oz?: number;
+            total_colorant_oz?: string;
+            /** @enum {string} */
+            source?: "book" | "match" | "manual";
+            components?: components["schemas"]["TintComponent"][];
+            /** Format: date-time */
+            created_at?: string;
+        };
+        TintFormulaCreate: {
+            /** Format: uuid */
+            color_id: string;
+            /** Format: uuid */
+            base_id: string;
+            /** Format: uuid */
+            product_id?: string;
+            container_size_code: string;
+            container_volume_oz: number;
+            /** @enum {string} */
+            source?: "book" | "match" | "manual";
+            components?: {
+                /** Format: uuid */
+                colorant_id: string;
+                whole_oz: number;
+                increments_coarse: number;
+                increments_fine: number;
+                /** @enum {integer} */
+                unit_denominator: 32 | 48 | 64 | 128 | 192 | 384 | 1024;
+            }[];
+        };
+        TintFormulaPage: {
+            items?: components["schemas"]["TintFormula"][];
+        };
+        TintRescaleRequest: {
+            /** @description The target container volume in whole fluid ounces. */
+            target_volume_oz: number;
+        };
+        TintRescaledComponent: {
+            colorant_code?: string;
+            colorant_name?: string;
+            amount?: components["schemas"]["TintAmount"];
+            rounded?: boolean;
+        };
+        TintRescale: {
+            formula?: components["schemas"]["TintFormula"];
+            target_volume_oz?: number;
+            components?: components["schemas"]["TintRescaledComponent"][];
+            any_rounded?: boolean;
+        };
+        TintSavedColor: {
+            /** Format: uuid */
+            id?: string;
+            /** Format: uuid */
+            customer_id?: string;
+            /** Format: uuid */
+            color_id?: string;
+            name?: string;
+            job_note?: string;
+            note?: string;
+            /** Format: uuid */
+            project_id?: string | null;
+            created_by?: string;
+            /** Format: date-time */
+            created_at?: string;
+        };
+        TintSavedColorCreate: {
+            /** Format: uuid */
+            customer_id: string;
+            /** Format: uuid */
+            color_id: string;
+            name: string;
+            job_note?: string;
+            note?: string;
+            /** Format: uuid */
+            project_id?: string;
+        };
+        TintSavedColorPage: {
+            items?: components["schemas"]["TintSavedColor"][];
+        };
+        TintCharge: {
+            tint_charge_cents?: number;
+        };
+        /** @description One tier of the dealer's tint charge rule: the base tier it covers (empty is any base), the lowest colorant total in fluid ounces it covers (empty is any total) and the charge in cents. */
+        TintChargeTier: {
+            /** @enum {string} */
+            base_tier: "" | "flat" | "deep";
+            min_colorant_oz: string;
+            charge_cents: number;
+        };
+        /** @description The dealer's tint charge rule: the flat figure per container and the tiers that may cover it. */
+        TintChargeRule: {
+            flat_cents: number;
+            tiers: components["schemas"]["TintChargeTier"][];
+        };
+        /** @description A paint line's tint record (row CP-16), the base, the colour and the formula frozen on the sale, the amounts as actually mixed. */
+        LineTint: {
+            /** Format: uuid */
+            formula_id: string | null;
+            color_code: string;
+            color_name: string;
+            base_code: string;
+            container_size_code: string;
+            /** @description True when the amounts were rescaled to this size; the counter may override any of them. */
+            rescaled: boolean;
+            /** Format: int64 */
+            tint_charge_cents: number | null;
+            components: {
+                colorant_code: string;
+                colorant_name: string;
+                amount: components["schemas"]["TintAmount"];
+            }[];
         };
         /** @description One unit of the catalogue. The standard size is the pair std_unit_qty of this unit = std_ref_qty of its dimension's reference unit, stored in the canonical form of ADR 0006 section 1 (GAL is 576 = 77 CF); both fields are null for a unit whose size is per product (a box, a bundle). */
         Unit: {
@@ -22862,6 +23844,63 @@ export interface operations {
                 };
             };
             400: components["responses"]["IdempotencyBadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["ConflictEither"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    adminGetLargeCashSettings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The dealer's large cash settings. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminLargeCashSettings"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    adminSaveLargeCashSettings: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AdminLargeCashSettings"];
+            };
+        };
+        responses: {
+            /** @description The saved settings. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminLargeCashSettings"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             409: components["responses"]["ConflictEither"];
@@ -27923,7 +28962,7 @@ export interface operations {
                 /** @description A comma separated list of expansions. total adds the count of rows matching the filters, which costs a second query and is therefore opt in. */
                 include?: components["parameters"]["Include"];
                 document_type?: "invoice" | "statement" | "quote" | "purchase_order";
-                status?: "sent" | "failed";
+                status?: "queued" | "sent" | "logged" | "failed";
                 document_id?: string;
             };
             header?: {
@@ -29736,6 +30775,160 @@ export interface operations {
             422: components["responses"]["UnprocessableEntity"];
             428: components["responses"]["WirePreconditionRequired"];
             500: components["responses"]["InternalError"];
+        };
+    };
+    largeCashWorklist: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The ranked worklist. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LargeCashWorklist"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    largeCashRecordFiling: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path: {
+                /** @description The crossing the filing is for. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LargeCashFilingRequest"];
+            };
+        };
+        responses: {
+            /** @description The recorded filing. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LargeCashFiling"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["WireConflict"];
+        };
+    };
+    largeCashForm8300: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path: {
+                /** @description The crossing the form is for. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The Form 8300 data set. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LargeCashForm8300"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["WireConflict"];
+        };
+    };
+    largeCashStatements: {
+        parameters: {
+            query?: {
+                /** @description The year the cash was received. The current year when it is absent. */
+                year?: number;
+            };
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The year's statements. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LargeCashStatements"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    largeCashIssueStatement: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path: {
+                /** @description The crossing whose payer the statement is for. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LargeCashStatementRequest"];
+            };
+        };
+        responses: {
+            /** @description The issued statement. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LargeCashStatement"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["WireConflict"];
         };
     };
     linksQuoteResolve: {
@@ -34388,6 +35581,35 @@ export interface operations {
             503: components["responses"]["ServiceUnavailable"];
         };
     };
+    posLargeCashPreview: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PosLargeCashPreviewRequest"];
+            };
+        };
+        responses: {
+            /** @description The rule family's view of this payment. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PosLargeCashPreview"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["WireNotFound"];
+            500: components["responses"]["InternalError"];
+        };
+    };
     posTransactionVoid: {
         parameters: {
             query?: never;
@@ -38379,6 +39601,47 @@ export interface operations {
             500: components["responses"]["InternalError"];
         };
     };
+    productUpdateConsumerDurable: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+                /** @description The quoted revision; required unless the body carries it. */
+                "If-Match"?: string;
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProductConsumerDurableUpdate"];
+            };
+        };
+        responses: {
+            /** @description The product with the new revision and its ETag. */
+            200: {
+                headers: {
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProductView"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["WireConflict"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
+            428: components["responses"]["WirePreconditionRequired"];
+            500: components["responses"]["InternalError"];
+        };
+    };
     productUnitSetGet: {
         parameters: {
             query?: never;
@@ -40722,6 +41985,451 @@ export interface operations {
             404: components["responses"]["NotFound"];
             413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    tintSystemList: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The tint systems. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TintSystemPage"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    tintSystemCreate: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TintSystemCreate"];
+            };
+        };
+        responses: {
+            /** @description The created system. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TintSystem"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["Conflict"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    tintBaseList: {
+        parameters: {
+            query?: {
+                /** @description Filter by tint system. */
+                tint_system_id?: string;
+                /** @description Only the bases whose product link names this product. */
+                product_id?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The bases. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TintBasePage"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    tintBaseCreate: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TintBaseCreate"];
+            };
+        };
+        responses: {
+            /** @description The created base. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TintBase"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    tintColorantList: {
+        parameters: {
+            query?: {
+                /** @description Filter by tint system. */
+                tint_system_id?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The colorants. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TintColorantPage"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    tintColorantCreate: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TintColorantCreate"];
+            };
+        };
+        responses: {
+            /** @description The created colorant. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TintColorant"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    tintColorList: {
+        parameters: {
+            query?: {
+                /** @description Filter by tint system. */
+                tint_system_id?: string;
+                /** @description A name or manufacturer code fragment. */
+                q?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The colours. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TintColorPage"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    tintColorCreate: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TintColorCreate"];
+            };
+        };
+        responses: {
+            /** @description The created colour. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TintColor"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    tintFormulaList: {
+        parameters: {
+            query?: {
+                /** @description Filter by colour. */
+                color_id?: string;
+                /** @description Filter by base. */
+                base_id?: string;
+                /** @description Filter by container size code. */
+                container_size_code?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The formulas. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TintFormulaPage"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    tintFormulaCreate: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TintFormulaCreate"];
+            };
+        };
+        responses: {
+            /** @description The created formula. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TintFormula"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["Conflict"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    tintFormulaGet: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The formula with its components. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TintFormula"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    tintFormulaRescale: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TintRescaleRequest"];
+            };
+        };
+        responses: {
+            /** @description The source formula, the rescaled components and the rounding flag. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TintRescale"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    tintSavedColorList: {
+        parameters: {
+            query?: {
+                /** @description Filter by customer. */
+                customer_id?: string;
+                /** @description A job note fragment. */
+                job_note?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The saved colours. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TintSavedColorPage"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    tintSavedColorCreate: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TintSavedColorCreate"];
+            };
+        };
+        responses: {
+            /** @description The saved colour. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TintSavedColor"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["Conflict"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    tintSavedColorDelete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The saved colour is gone. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    tintChargeGet: {
+        parameters: {
+            query?: {
+                /** @description The tint's colorant total in the system's whole dispense units. */
+                colorant_units?: number;
+                /** @description The dispense grid the tint's units are counted on (the colour system's unit denominator). */
+                unit_denominator?: number;
+                /** @description The base tier the tint is mixed in: flat is the ordinary base of a system, deep is the deepest one. */
+                base_tier?: "flat" | "deep";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The charge in cents. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TintCharge"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             500: components["responses"]["InternalError"];
         };
     };

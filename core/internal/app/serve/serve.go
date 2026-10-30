@@ -25,6 +25,7 @@ import (
 	"github.com/gablelbm/gable/internal/ai"
 	"github.com/gablelbm/gable/internal/ap"
 	"github.com/gablelbm/gable/internal/app/orderwire"
+	"github.com/gablelbm/gable/internal/appwrite"
 	"github.com/gablelbm/gable/internal/bankrecon"
 	"github.com/gablelbm/gable/internal/chargecode"
 	"github.com/gablelbm/gable/internal/config"
@@ -47,6 +48,7 @@ import (
 	glint "github.com/gablelbm/gable/internal/integrations/gl"
 	"github.com/gablelbm/gable/internal/inventory"
 	"github.com/gablelbm/gable/internal/invoice"
+	"github.com/gablelbm/gable/internal/largecash"
 	"github.com/gablelbm/gable/internal/links"
 	"github.com/gablelbm/gable/internal/location"
 	"github.com/gablelbm/gable/internal/marketcheck"
@@ -72,6 +74,7 @@ import (
 	"github.com/gablelbm/gable/internal/tax"
 	"github.com/gablelbm/gable/internal/taxzone"
 	"github.com/gablelbm/gable/internal/techadmin"
+	"github.com/gablelbm/gable/internal/tint"
 	"github.com/gablelbm/gable/internal/unit"
 	"github.com/gablelbm/gable/internal/vendor"
 	"github.com/gablelbm/gable/internal/vision"
@@ -231,6 +234,28 @@ func Run() {
 		os.Exit(1)
 	}
 
+	// ADR 0012: when APPWRITE_ENDPOINT is set, Appwrite is the identity
+	// provider and its server must clear the 2.0.0 floor. A server below the
+	// floor stops the boot; an unreadable one only warns, since no sign in
+	// path is wired to it yet.
+	if cfg.AppwriteEndpoint != "" {
+		awClient := &appwrite.Client{
+			Endpoint:  cfg.AppwriteEndpoint,
+			ProjectID: cfg.AppwriteProjectID,
+			APIKey:    cfg.AppwriteAPIKey,
+		}
+		state, err := appwrite.CheckStart(context.Background(), awClient)
+		switch {
+		case errors.Is(err, appwrite.ErrUnsupportedVersion):
+			logger.Error("Appwrite server below the 2.0.0 floor", "endpoint", cfg.AppwriteEndpoint, "error", err)
+			os.Exit(1)
+		case state == appwrite.StartRedirectsClosed:
+			logger.Warn("Appwrite version unreadable at start; provider redirect methods stay closed", "endpoint", cfg.AppwriteEndpoint)
+		default:
+			logger.Info("Appwrite identity provider", "endpoint", cfg.AppwriteEndpoint)
+		}
+	}
+
 	// 4b. Branch Context Middleware — enforces multi-branch scoping per
 	// the user_locations grant table. Controlled by system_settings keys
 	// `multi_branch_enabled` (kill switch) and `default_branch_required`.
@@ -267,6 +292,15 @@ func Run() {
 	unit.NewHandler(unitSvc).RegisterRoutes(mux,
 		middleware.RequireRole("admin", "owner", "sales", "warehouse", "finance", "cashier", "purchasing"),
 		middleware.RequireRole("admin", "owner"))
+
+	// Paint tint catalogue (row CP-16): the dealer's own bases, colorants,
+	// colours and per size formulas, the rescale, and the saved colours per
+	// customer and job. Read for every desk role (the counter needs it mid
+	// sale), write for admin and owner; the catalogue is dealer wide. The
+	// saved colours are customer rows, so they are walled to the customer
+	// they name, and the counter may save one.
+	tintSvc := tint.NewService(tint.NewRepository(db)).WithTxRunner(db)
+	wall.tint(mux, tintSvc)
 
 	// Unified AI client: the chosen provider's key (DB-first via system_settings,
 	// env fallback for OpenRouter) powers all AI features: material-list/freight
@@ -812,11 +846,27 @@ func Run() {
 		logger.Info("the Run card terminal driver is wired",
 			"transaction_lookup", cfg.RunReportingBaseURL != "")
 	}
+
+	// The large cash rules of the branch's country (CP-17a): the payer
+	// capture at the counter, the classifier and the two aggregations, the
+	// sensitive values sealed with the same payment vault key.
+	lcVault, lcVaultErr := payment.NewVault(cfg.PaymentVaultKey)
+	if lcVaultErr != nil {
+		logger.Error("PAYMENT_VAULT_KEY is not a valid vault key; the large cash payer's sensitive values cannot be sealed")
+	}
+	largeCashSvc := largecash.NewService(db, lcVault, cfg.PaymentVaultKey)
+	posSvc.WithLargeCash(largeCashSvc)
+	wall.largeCash(mux, largecash.NewHandler(largeCashSvc),
+		[]string{"admin", "owner", "finance"},
+		[]string{"admin", "owner", "cashier"})
 	accountSvc.WithInvoiceApplyGuard(posSvc)
 	accountSvc.WithTenderCreditGuard(posSvc)
 	// and the payment refund route holds the same credit to the counter's
 	// terminal rail: the online gateway is never the way back for it
 	paymentSvc.WithTenderCreditGuard(posSvc)
+	// and a check deposit riding a till session meets the counter's check
+	// limit and ID rule, as a sale's check tender does
+	paymentSvc.WithTillCheckGuard(posSvc)
 	// The scale seam (CP-19, ruling D8): the SMA driver behind its interface,
 	// and on a demo stack the simulator with a device row per branch, so the
 	// ticket names the device that produced the reading. An unset value

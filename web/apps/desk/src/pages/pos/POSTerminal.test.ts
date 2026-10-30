@@ -9,6 +9,7 @@ const svc = vi.hoisted(() => ({
   currentTill: vi.fn(),
   startSale: vi.fn(),
   completeSale: vi.fn(),
+  largeCashPreview: vi.fn().mockResolvedValue({ asks_details: false, fields: [], dealer_threshold: false }),
   searchProducts: vi.fn(),
   findCustomers: vi.fn(),
   attachCustomer: vi.fn(),
@@ -33,6 +34,13 @@ vi.mock('../../services/POSService', async (orig) => {
   const real = await orig<typeof import('../../services/POSService')>();
   return { ...real, posService: svc };
 });
+
+const deliveries = vi.hoisted(() => ({
+  listForDocument: vi.fn().mockResolvedValue([]),
+  follow: vi.fn().mockResolvedValue({ id: 'd-1', status: 'sent', recipient: 'billing@example.test' }),
+}));
+
+vi.mock('../../services/EmailDeliveryService', () => ({ EmailDeliveryService: deliveries }));
 
 import './POSTerminal';
 import type { POSTerminal } from './POSTerminal';
@@ -1095,13 +1103,31 @@ describe('the Panels board', () => {
       el.remove();
     });
 
+    it('styles a logged send apart from a sent one and a failed one', async () => {
+      svc.emailReceipt.mockResolvedValue({ status: 'queued', delivery_id: 'd-1' });
+      const el = await mount(done({ id: 'sale-9', invoice_id: 'inv-1', customer_id: 'cu1' }));
+      const noteClass = async (status: string) => {
+        deliveries.follow.mockResolvedValueOnce({ id: 'd-1', status, recipient: 'billing@example.test' });
+        q(el, 'pos-receipt-email').click();
+        await flush(el);
+        return q(el, 'pos-receipt-note').className;
+      };
+      expect(await noteClass('sent')).toContain('text-slate-400');
+      expect(await noteClass('logged')).toContain('text-amber-400');
+      expect(await noteClass('failed')).toContain('text-safety-red');
+      el.remove();
+    });
+
     it('sends the invoice for Email and says so, or says why not', async () => {
-      svc.emailReceipt.mockResolvedValueOnce(undefined).mockRejectedValueOnce(new Error('This account has no email address on file'));
+      svc.emailReceipt
+        .mockResolvedValueOnce({ status: 'queued', delivery_id: 'd-1' })
+        .mockRejectedValueOnce(new Error('This account has no email address on file'));
       const el = await mount(done({ id: 'sale-9', invoice_id: 'inv-1', customer_id: 'cu1' }));
       q(el, 'pos-receipt-email').click();
       await flush(el);
       expect(svc.emailReceipt).toHaveBeenCalledWith('sale-9');
-      expect(q(el, 'pos-receipt-note').textContent).toContain('sent');
+      expect(deliveries.follow).toHaveBeenCalledWith('d-1', 'inv-1');
+      expect(q(el, 'pos-receipt-note').textContent).toContain('Receipt sent to billing@example.test');
       q(el, 'pos-receipt-email').click();
       await flush(el);
       // the words sit beside Email receipt, not in the page band

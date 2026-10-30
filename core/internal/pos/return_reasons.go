@@ -16,6 +16,11 @@ import (
 // the return.
 const ReasonOther = "other"
 
+// ReasonMisTint is the mis tint return reason (row CP-16): the store mixed
+// the wrong colour, so the tinted line returns where a customer choice
+// return of it is refused.
+const ReasonMisTint = "mis_tint"
+
 // returnReason is one entry of the closed list of return reasons.
 type returnReason struct {
 	Code  string
@@ -34,6 +39,9 @@ var returnReasons = []returnReason{
 	{"ordered_wrong", "Ordered the wrong item"},
 	{"changed_mind", "Changed their mind"},
 	{"overbought", "Bought too much"},
+	// The mis tint (row CP-16): the store mixed the wrong colour, so the
+	// tinted can comes back where a customer choice return of it is refused.
+	{"mis_tint", "Mis tint (the store's error)"},
 	{ReasonOther, "Other (needs a note)"},
 }
 
@@ -43,9 +51,9 @@ const settingRestockingFeePrefix = "pos.restocking_fee_bps."
 // defaultRestockingFeeBps are the figures the settings screen offers a dealer
 // who has set none: the reasons that are the customer's own doing carry the
 // house figure, and the ones that are the dealer's (defective goods, the
-// wrong item given, damaged goods) and the catch all carry nothing. They are
-// suggestions on the screen, never a fee in force: nothing is withheld until
-// a dealer writes the map.
+// wrong item given, damaged goods, the mis tint) and the catch all carry
+// nothing. They are suggestions on the screen, never a fee in force: nothing
+// is withheld until a dealer writes the map.
 var defaultRestockingFeeBps = map[string]int{
 	"ordered_wrong": 1500,
 	"changed_mind":  1500,
