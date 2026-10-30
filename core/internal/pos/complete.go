@@ -1053,12 +1053,18 @@ func (s *Service) completeSaleTx(ctx context.Context, saleID uuid.UUID, ifMatch 
 				}
 			}
 		}
+		completed := map[string]any{
+			"number": sale.Number, "customer_id": sale.CustomerID, "status": StatusCompleted.Status(),
+			"from_status": StatusOpen.Status(), "revision": sale.Revision + 1, "currency": sale.Currency,
+			"total_cents": total, "invoice_id": inv.ID, "change_cents": change,
+		}
+		if verdict != nil {
+			// an offline sale's completion says so (ADR 0011 6.4); a live
+			// one's data is unchanged
+			completed["offline"] = true
+		}
 		if err := s.recordEvent(ctx, outbox.Event{Type: EventSaleCompleted, EntityType: "pos_transaction", EntityID: saleID,
-			BranchID: &branch, Data: eventJSON(map[string]any{
-				"number": sale.Number, "customer_id": sale.CustomerID, "status": StatusCompleted.Status(),
-				"from_status": StatusOpen.Status(), "revision": sale.Revision + 1, "currency": sale.Currency,
-				"total_cents": total, "invoice_id": inv.ID, "change_cents": change, "offline": verdict != nil,
-			})}); err != nil {
+			BranchID: &branch, Data: eventJSON(completed)}); err != nil {
 			return err
 		}
 		out, err = s.GetSale(ctx, saleID)

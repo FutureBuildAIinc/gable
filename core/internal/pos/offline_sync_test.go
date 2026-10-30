@@ -80,6 +80,10 @@ func TestOfflineSync_ReplayTwicePostsOnce(t *testing.T) {
 		AND entity_id IN (SELECT id FROM pos_transactions WHERE register_id = $1)`, b.register); n != 3 {
 		t.Errorf("%d posted audit rows, want 3", n)
 	}
+	if n := countOf(t, f.db, `SELECT count(*) FROM events_outbox WHERE type = 'pos_transaction.completed'
+		AND (data->>'offline')::boolean AND entity_id IN (SELECT id FROM pos_transactions WHERE register_id = $1)`, b.register); n != 3 {
+		t.Errorf("%d completion events say offline, want 3", n)
+	}
 	entries := f.counterEntries(t)
 
 	again := b.sync(t, items...)
