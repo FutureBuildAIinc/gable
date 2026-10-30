@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"sort"
 	"testing"
 	"time"
 
@@ -166,6 +167,37 @@ func TestFloorHoldsASlowBodyAnswerToo(t *testing.T) {
 		}
 		if diff > testSlowPath/4 {
 			t.Fatalf("%s: unknown and wrong differ by %v from the last body byte; they must not be told apart", d.name, diff)
+		}
+	}
+}
+
+func median(ds []time.Duration) time.Duration {
+	s := append([]time.Duration(nil), ds...)
+	sort.Slice(s, func(i, j int) bool { return s[i] < s[j] })
+	return s[len(s)/2]
+}
+
+// A single sample can be moved by a loaded runner, so the two refusals are
+// also compared by their medians over several answers, per door: the unknown
+// address and the wrong password must land within a small fraction of the
+// slow path of each other.
+func TestFloorMediansOfUnknownAndWrongAgree(t *testing.T) {
+	const samples = 7
+	_, mux := floorRig(t, testFloor, testSlowPath)
+	for _, d := range doors {
+		var unknown, wrong []time.Duration
+		for i := 0; i < samples; i++ {
+			_, u := timed(mux, d, "nobody@x.example")
+			_, w := timed(mux, d, "wrong@x.example")
+			unknown, wrong = append(unknown, u), append(wrong, w)
+		}
+		mu, mw := median(unknown), median(wrong)
+		diff := mu - mw
+		if diff < 0 {
+			diff = -diff
+		}
+		if diff > testSlowPath/5 {
+			t.Fatalf("%s: median unknown %v and median wrong %v differ by %v, want under %v", d.name, mu, mw, diff, testSlowPath/5)
 		}
 	}
 }
