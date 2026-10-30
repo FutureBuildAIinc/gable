@@ -22,7 +22,7 @@ async function signInAs(page: import('@playwright/test').Page, name: string, rol
 test.describe('Desk role walls', () => {
   const walled = [
     { path: '/admin/counter-rules', words: 'This page is for admin and owner', heading: /counter rules/i },
-    { path: '/admin/offline-counter', words: 'This page is for admin, owner and finance', heading: /counter rules/i },
+    { path: '/admin/offline-counter', words: 'This page is for admin, owner and finance', heading: /offline selling/i },
   ];
   for (const { path, words, heading } of walled) {
     test(`a cashier persona sees the refusal on ${path}`, async ({ page }) => {
