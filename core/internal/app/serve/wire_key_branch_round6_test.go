@@ -27,7 +27,7 @@ func TestKeyBranchPin_PosSyncRegisterWithoutBranchedLocation(t *testing.T) {
 		_, _ = f.db.Pool.Exec(ctx, `DELETE FROM pos_line_items WHERE transaction_id = $1`, client)
 		_, _ = f.db.Pool.Exec(ctx, `DELETE FROM pos_transactions WHERE id = $1`, client)
 	})
-	body := fmt.Sprintf(`{"batch_id":"pin-reg01","register_id":"REG-01","items":[{"client_id":%q,"register_id":"REG-01",`+
+	body := fmt.Sprintf(`{"batch_id":"pin-reg01","register_id":"REG-01","device_epoch":1,"reported_seq":0,"items":[{"client_id":%q,"register_id":"REG-01",`+
 		`"cashier_id":%q,"customer_id":%q,"items":[],"tenders":[],"client_created_at":%q}]}`,
 		client, uuid.NewString(), f.custID, time.Now().UTC().Format(time.RFC3339))
 	status, buf := f.key(t, first.raw, "POST", "/api/v1/pos/sync", body, nil)

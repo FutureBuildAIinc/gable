@@ -361,6 +361,11 @@ type TillReport struct {
 	ExpectedByMethod  map[string]int64 `json:"expected_by_method"`
 	OverShortByMethod map[string]int64 `json:"over_short_by_method,omitempty"`
 
+	// OfflineHeldByMethod is the money of the session's offline sales that
+	// wait on a manager (CP-13 OW), already inside ExpectedByMethod: the
+	// drawer holds it, nothing has posted it. Absent when none waits.
+	OfflineHeldByMethod map[string]int64 `json:"offline_held_by_method,omitempty"`
+
 	// RefundsByMethod is what the session refunded, per method (CASH out of
 	// the drawer, CARD back to the card), so the X report answers "refunds"
 	// beside the taken and expected figures. A method appears only where the

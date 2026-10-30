@@ -336,6 +336,9 @@ type Repository interface {
 	LockRegisterDevice(ctx context.Context, register string, epoch int64) (*registerDevice, error)
 	AdvanceDeviceMark(ctx context.Context, deviceID uuid.UUID, seq int64, digest string) error
 	ConfirmDeviceMark(ctx context.Context, register string, epoch, reported int64) (int64, error)
+	OpenOfflineExceptionCount(ctx context.Context, register string) (int64, error)
+	ReplacedCartFacts(ctx context.Context, saleID uuid.UUID) (*replacedCartFacts, error)
+	MarkDifferentCustomer(ctx context.Context, saleID uuid.UUID) error
 	OfflinePostedRecord(ctx context.Context, id uuid.UUID) (*offlinePosted, error)
 	OfflineExceptionsOf(ctx context.Context, id uuid.UUID) ([]offlineExceptionRow, error)
 	OfflineSequenceHolder(ctx context.Context, register string, epoch, seq int64, id uuid.UUID) (bool, error)
@@ -445,6 +448,9 @@ type TillAggregate struct {
 	CardRefundsCents int64
 	// MovementTotals sums the session's movements by kind (CP-08).
 	MovementTotals map[string]int64
+	// OfflineHeldByMethod is the money of the session's offline sales that
+	// wait on a manager (CP-13 OW): taken into the drawer, not yet posted.
+	OfflineHeldByMethod map[string]int64
 }
 
 // SaleFilter is the sale list's filters. Date is a YYYY-MM-DD string, so

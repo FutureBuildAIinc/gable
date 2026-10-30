@@ -8,7 +8,7 @@
  */
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { NO_SIGNAL_ERROR, browserSignal, fixedSignal, noSignalWebFetch } from './signal'
-import { MONEY_SCOPES, scopeFence } from './scopes'
+import { COUNTER_OFFLINE_QUEUE, MONEY_SCOPES, scopeFence } from './scopes'
 
 const inner = vi.fn(async (_input: string, _init?: RequestInit) => new Response('{}', { status: 200 }))
 
@@ -126,5 +126,14 @@ describe('scopeFence', () => {
   it('answers nothing for a value that is no scope at all', () => {
     expect(scopeFence(null)).toBeNull()
     expect(scopeFence(42)).toBeNull()
+  })
+})
+
+describe('the one exception keeps the fence', () => {
+  it('names the counter\'s offline queue in the Rust core and still fences pos_transactions in a page', () => {
+    expect(COUNTER_OFFLINE_QUEUE.scope).toBe('pos_transactions')
+    expect(COUNTER_OFFLINE_QUEUE.where).toContain('Rust core')
+    expect(MONEY_SCOPES).toContain('pos_transactions')
+    expect(scopeFence('pos_transactions')?.reason).toBe('money_scope')
   })
 })

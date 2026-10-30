@@ -126,15 +126,16 @@ func TestTheCreateHoldsABoundKeyToItsPin(t *testing.T) {
 
 func (w *namedWall) syncBody(customer uuid.UUID) (string, string) {
 	client := uuid.NewString()
-	return client, fmt.Sprintf(`{"batch_id":"cw-%s","register_id":%q,"items":[{"client_id":%q,"cashier_id":%q,`+
+	return client, fmt.Sprintf(`{"batch_id":"cw-%s","register_id":%q,"device_epoch":1,"reported_seq":0,"items":[{"client_id":%q,"cashier_id":%q,`+
 		`"customer_id":%q,"items":[{"product_id":%q,"quantity":"1"}],`+
 		`"tenders":[{"method":"account","amount_cents":599}],"client_created_at":%q}]}`,
 		uuid.NewString()[:8], w.f.register, client, uuid.NewString(), customer.String(),
 		w.f.productID.String(), time.Now().UTC().Format(time.RFC3339))
 }
 
-// RULE (money never queues): the offline sync refuses every batch that
-// parses, a user naming another yard's customer included, and nothing of it
+// RULE (money never queues where the dealer has not opted in): with no
+// offline policy at the branch the sync refuses every batch that parses, a
+// user naming another yard's customer included, and nothing of it
 // is written: no sale, no invoice, no sync log row. The customer walls ahead
 // of the handler keep their own refusals (the bound key's is the serve
 // package's wire test).
@@ -244,7 +245,7 @@ func TestAZeroLimitRefusesEveryAccountTenderEvenWithUnappliedCash(t *testing.T) 
 		t.Errorf("the refused charge posted %d invoices", got-before)
 	}
 	// a cash tender on the same account is not held
-	if r := f.completeSale(saleID, f.cashFor("1")); r.status != http.StatusOK {
+	if r := f.completeSale(saleID, f.cashFor(saleID)); r.status != http.StatusOK {
 		t.Errorf("cash on a held account = %d, want 200: %s", r.status, r.raw)
 	}
 }

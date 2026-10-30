@@ -244,7 +244,8 @@ func TestOfflineResolve_WriteOffPostsNothing(t *testing.T) {
 	if got := f.stock(); got != "100.0000/0.0000" {
 		t.Errorf("stock = %s, want 100", got)
 	}
-	wantOutcome(t, b.sync(t, raw), sale, pos.OfflineRefused, "insufficient_stock")
+	// the replay answers resolved (C2, ADR 0011 5.3): the device settles it
+	wantOutcome(t, b.sync(t, raw), sale, pos.OfflineResolved, "insufficient_stock")
 	if _, err := resolveAs(t, f, id, pos.ResolveRetry, offlineManager); err == nil {
 		t.Errorf("a written off sale was retried")
 	}

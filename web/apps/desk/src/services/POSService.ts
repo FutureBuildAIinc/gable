@@ -181,6 +181,22 @@ export const posService = {
     },
 
     /**
+     * Records the clerk's answer for an offline sale that replaced a result
+     * unknown cart (ADR 0011 5.3): was it the same customer and goods? A no
+     * is listed for the manager.
+     */
+    async answerReplacedCart(saleId: string, sameGoods: boolean): Promise<void> {
+        await expectOk(
+            await fetchWithAuth(`${API_URL}/api/v1/pos/transactions/${saleId}/replaced-cart-answer`, {
+                method: 'POST',
+                headers: JSON_HEADERS,
+                body: JSON.stringify({ same_goods: sameGoods }),
+            }),
+            'Failed to record the answer',
+        );
+    },
+
+    /**
      * Fetches the completed sale's own receipt through the authenticated client (a
      * plain new tab would carry no token) and shows it from a blob url in a tab
      * opened during the click. A blocked tab answers the url for a download link;

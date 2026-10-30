@@ -73,8 +73,13 @@ func (r *offlineExceptionRow) outcome(it *offlineItem) *OfflineItemOutcome {
 	id, code, msg := r.ID, r.ReasonCode, r.ReasonMessage
 	out := &OfflineItemOutcome{ClientID: it.Sale.ClientID, DeviceEpoch: it.Sale.DeviceEpoch, DeviceSeq: it.Sale.DeviceSeq,
 		Outcome: OfflineRefused, ExceptionID: &id, ReasonCode: &code, ReasonMessage: &msg}
-	if r.Status == "held" {
+	switch r.Status {
+	case "held":
 		out.Outcome = OfflineHeld
+	case "resolved":
+		// a manager resolved it with nothing posted (a resolution that posts
+		// the sale is answered from the posting first, as a duplicate)
+		out.Outcome = OfflineResolved
 	}
 	return out
 }
@@ -148,6 +153,19 @@ func (r *PostgresRepository) ConfirmDeviceMark(ctx context.Context, register str
 		return 0, fmt.Errorf("failed to confirm the register's mark: %w", err)
 	}
 	return confirmed, nil
+}
+
+// OpenOfflineExceptionCount answers how many of the register's offline
+// exception rows wait on a manager with nothing posted (open or held), the
+// count the counter shows (ADR 0011 section 3.4, item 660). A sold past
+// warning row whose sale posted is on the manager's list but holds nothing.
+func (r *PostgresRepository) OpenOfflineExceptionCount(ctx context.Context, register string) (int64, error) {
+	var n int64
+	if err := r.ex(ctx).QueryRow(ctx, `SELECT count(*) FROM pos_offline_exceptions
+		WHERE register_id = $1 AND status IN ('open', 'held') AND posted_sale_id IS NULL`, register).Scan(&n); err != nil {
+		return 0, fmt.Errorf("failed to count the register's open offline exceptions: %w", err)
+	}
+	return n, nil
 }
 
 // OfflinePostedRecord reads a posted sale by id for the duplicate check.

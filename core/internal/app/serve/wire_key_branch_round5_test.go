@@ -429,7 +429,7 @@ func TestKeyBranchPin_PosSyncCustomerWall(t *testing.T) {
 	client := uuid.New()
 	freshClient := func() string { client = uuid.New(); return client.String() }
 	sync := func(register, customer string) string {
-		return fmt.Sprintf(`{"batch_id":"pin-%s","register_id":%q,"items":[{"client_id":%q,"cashier_id":%q,`+
+		return fmt.Sprintf(`{"batch_id":"pin-%s","register_id":%q,"device_epoch":1,"reported_seq":0,"items":[{"client_id":%q,"cashier_id":%q,`+
 			`"customer_id":%q,"items":[{"product_id":%q,"quantity":"1"}],`+
 			`"tenders":[{"method":"account","amount_cents":105}],"client_created_at":%q}]}`,
 			uuid.NewString()[:8], register, freshClient(), uuid.NewString(), customer,
@@ -473,13 +473,14 @@ func TestKeyBranchPin_PosSyncCustomerWall(t *testing.T) {
 	}
 
 	// The A control: the same sale on the pin's own customer passes the walls
-	// and is refused by rule (money never queues), nothing written; the user
-	// keeps the same reach on the foreign customer's sale at the foreign
-	// register, refused by the same rule.
+	// and is refused by the sync itself, a person's act never a machine key
+	// (ADR 0011 6.3), nothing written; the user keeps the same reach on the
+	// foreign customer's sale at the foreign register, refused by rule where
+	// the branch has no offline policy.
 	ownBefore := invoicesOn(f.custID)
 	status, buf = f.key(t, first.raw, "POST", "/api/v1/pos/sync", sync(f.regA, f.custID.String()), nil)
-	if status != http.StatusConflict || !strings.Contains(string(buf), "money_never_queues") {
-		t.Errorf("bound key pos sync on the pin's own customer: %d %s, want the rule's 409", status, buf)
+	if status != http.StatusForbidden || !strings.Contains(string(buf), "never a machine key") {
+		t.Errorf("bound key pos sync on the pin's own customer: %d %s, want the person only 403", status, buf)
 	}
 	if grown := invoicesOn(f.custID) - ownBefore; grown != 0 {
 		t.Errorf("the refused control pos sync wrote %d invoices on the pin's customer, want none", grown)

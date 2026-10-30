@@ -6597,6 +6597,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/pos/transactions/{id}/replaced-cart-answer": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Record the clerk's answer for an offline sale that replaced a cart
+         * @description On reconnect the counter asks once about an offline sale that kept the default link to the cart whose result was unknown and abandoned it at the sync (ADR 0011 5.3): was it the same customer and goods? A no records the sale as for a different customer, listed for the manager beside the abandoned cart; either answer is audited. A person's act at the counter, never a machine key (403). A sale that replaced no cart, a cart not abandoned by it, a sale declared at the time, and a second answer are refused 409, nothing written.
+         */
+        post: operations["posReplacedCartAnswer"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/pos/sync": {
         parameters: {
             query?: never;
@@ -6607,8 +6627,8 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Refuse the offline sale replay by rule (money never queues)
-         * @description Offline sale replay is refused by rule: money never queues offline, so a sale is completed online at the counter, never captured, queued and replayed later. A batch that parses answers 409 money_never_queues before anything of it is written: no sale, no invoice, no payment, no sync log row. A malformed body, a missing batch_id or an empty items array keeps its 400, and the branch and customer wall refusals run ahead of the handler as on every route.
+         * Sync a register's signed offline sales (ADR 0011)
+         * @description The register's shell sends the sales it signed while offline, each as the device signed it. Each item is processed in device sequence order and posted once through the completion's own body at the figures recorded, or written to the offline exception queue for a manager (refused or held), never dropped; a replay is a duplicate. The sync is a person's act at the register, never a machine key (403), held to the register's branch. A branch whose dealer has not set an offline policy answers 409 money_never_queues before anything of the batch is written. The answer carries every item's outcome, the mark the server confirms to the device, and the register's count of exception rows waiting on a manager.
          */
         post: operations["posSyncOffline"];
         delete?: never;
@@ -18262,27 +18282,120 @@ export interface components {
         };
         PosSyncRequest: {
             batch_id: string;
-            /** @description Defaults REG-01. */
-            register_id?: string;
-            items: components["schemas"]["PosSyncSale"][];
-        };
-        PosSyncSale: {
+            register_id: string;
             /**
-             * Format: uuid
-             * @description The offline client's id for the sale; a replay is a duplicate, not an error.
+             * Format: int64
+             * @description The register's enrolment epoch the device signs under.
              */
-            client_id: string;
+            device_epoch: number;
+            /**
+             * Format: int64
+             * @description The last sequence the device assigned under its epoch (the keychain's mark, ADR 0011 5.1).
+             */
+            reported_seq: number;
+            items: components["schemas"]["PosOfflineSignedSale"][];
+        };
+        /** @description One sale the register's core signed offline (ADR 0011 sections 2 and 6.1), sent exactly as signed: the signature covers the canonical bytes of every field but device_sig, so a field present is a field signed. */
+        PosOfflineSignedSale: {
             /** Format: uuid */
-            cashier_id?: string | null;
+            client_id: string;
+            register_id: string;
+            /** Format: int64 */
+            device_epoch: number;
+            /** Format: int64 */
+            device_seq: number;
+            prev_digest: string;
+            /** @description The receipt's number while the sale waits, register, epoch and sequence. */
+            offline_ref: string;
+            /** Format: uuid */
+            snapshot_id: string;
+            /** Format: uuid */
+            till_session_id: string;
+            /** Format: uuid */
+            cashier_id: string;
             /** Format: uuid */
             customer_id?: string | null;
-            items: components["schemas"]["PosLineRequest"][];
-            tenders: components["schemas"]["PosTenderRequest"][];
+            /** Format: uuid */
+            buyer_contact_id?: string | null;
+            customer_po?: string | null;
+            /** Format: uuid */
+            job_id?: string | null;
+            picked_up_by?: string | null;
+            /** Format: date */
+            business_date: string;
+            /** Format: date-time */
+            sold_at: string;
+            currency: string;
+            /** Format: int64 */
+            subtotal_cents: number;
+            /** Format: int64 */
+            tax_cents: number;
+            /** Format: int64 */
+            total_cents: number;
+            /** Format: int64 */
+            change_cents: number;
+            tax_rate: string;
+            tax_exempt: boolean;
+            /** Format: int64 */
+            queue_count: number;
+            /** Format: int64 */
+            queue_total_cents: number;
+            /** Format: int64 */
+            confirmed_mark: number;
             /**
-             * Format: date-time
-             * @description When the register made the sale offline.
+             * Format: uuid
+             * @description The open server cart the sale replaces, or the result unknown cart it defaults to (ADR 0011 5.3).
              */
-            client_created_at?: string | null;
+            replaces_sale_id?: string;
+            /** @description The clerk declared the sale is for another customer than the result unknown cart's. */
+            different_customer?: boolean;
+            /**
+             * Format: uuid
+             * @description The result unknown cart the declaration names.
+             */
+            unknown_cart_id?: string;
+            lines: Record<string, never>[];
+            tenders: Record<string, never>[];
+            device_sig: string;
+        };
+        PosSyncResult: {
+            batch_id: string;
+            register_id: string;
+            /** Format: int64 */
+            device_epoch: number;
+            /**
+             * Format: int64
+             * @description The highest sequence the server has recorded for the epoch, the mark the device's next sales carry.
+             */
+            confirmed_seq: number;
+            /**
+             * Format: int64
+             * @description The register's offline exception rows waiting on a manager with nothing posted (the counter's count).
+             */
+            open_exception_count: number;
+            items: components["schemas"]["PosSyncItemOutcome"][];
+        };
+        PosSyncItemOutcome: {
+            client_id: string;
+            /** Format: int64 */
+            device_epoch: number;
+            /** Format: int64 */
+            device_seq: number;
+            /**
+             * @description resolved: a manager resolved the item's exception with nothing posted (a write off), so the register settles it; error: the server could not judge the item; it is sent again at the next sync.
+             * @enum {string}
+             */
+            outcome: "posted" | "duplicate" | "refused" | "held" | "resolved" | "error";
+            /** Format: uuid */
+            sale_id: string | null;
+            number: string | null;
+            /** Format: uuid */
+            invoice_id: string | null;
+            invoice_number: string | null;
+            /** Format: uuid */
+            exception_id: string | null;
+            reason_code: string | null;
+            reason_message: string | null;
         };
         /** @description One sales line in the shared shape of ADR 0005 section 2.2, the same parse everywhere a sales line is written: a product line (quantity and unit from the product when it names one), a charge line (charge_code), or a text line (a note, nothing priced); an override or a discount carries its reason and is audited. */
         PosLineRequest: {
@@ -19644,6 +19757,10 @@ export interface components {
             };
             /** @description The signed variance cents per lowercase method; present once the drawer is counted. */
             over_short_by_method?: {
+                [key: string]: number;
+            };
+            /** @description The money of the session's offline sales waiting on a manager (refused or held, nothing posted), already inside expected_by_method so the drawer balances; absent when none waits (CP-13 OW). */
+            offline_held_by_method?: {
                 [key: string]: number;
             };
         };
@@ -36507,6 +36624,57 @@ export interface operations {
             500: components["responses"]["InternalError"];
         };
     };
+    posReplacedCartAnswer: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    same_goods: boolean;
+                };
+            };
+        };
+        responses: {
+            /** @description The answer as recorded. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** Format: uuid */
+                        sale_id: string;
+                        /** Format: uuid */
+                        replaced_sale_id: string;
+                        same_goods: boolean;
+                    };
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["NotFound"];
+            /** @description not_replacing, cart_not_abandoned, already_declared or answer_recorded (the ADR 0001 envelope). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WireError"];
+                };
+            };
+            500: components["responses"]["InternalError"];
+        };
+    };
     posSyncOffline: {
         parameters: {
             query?: never;
@@ -36525,10 +36693,19 @@ export interface operations {
             };
         };
         responses: {
+            /** @description Every item's outcome and the confirmed mark. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PosSyncResult"];
+                };
+            };
             400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["ForbiddenEither"];
-            /** @description The rule's refusal (the ADR 0001 envelope, code money_never_queues): money never queues offline; complete the sale online. */
+            /** @description The branch's refusal (the ADR 0001 envelope, code money_never_queues): the dealer has not opted the branch in to offline selling; complete the sale online. */
             409: {
                 headers: {
                     [name: string]: unknown;

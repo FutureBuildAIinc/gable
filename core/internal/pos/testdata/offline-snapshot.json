@@ -1,0 +1,239 @@
+{
+  "snapshot_id": "bedd515a-03dc-45db-b685-5228f1200032",
+  "register_id": "REG-acc4caa6",
+  "branch_id": "1bfa8365-692f-41a9-9549-45ef795ae0e5",
+  "device_epoch": 1,
+  "issued_at": "2026-10-30T08:43:50.48619915Z",
+  "till_session": {
+    "id": "9e760ee5-a2f0-4462-a8b1-3f5c0feaefaf",
+    "cashier_id": "4f6fb65d-97de-4ad6-ac9c-299fce7796c1",
+    "opened_at": "2026-10-30T07:43:50.43808Z",
+    "business_date": "2026-10-30",
+    "opening_float_cents": 0
+  },
+  "policy": {
+    "enabled": true,
+    "max_sale_cents": 10000000,
+    "max_check_cents": 10000000,
+    "default_check_limit_cents": null,
+    "account_cap_cents": 10000000,
+    "max_queue_count": 1000,
+    "max_queue_total_cents": 100000000,
+    "allowed_tenders": [
+      "cash",
+      "check",
+      "account"
+    ],
+    "require_id_for_tenders": [],
+    "cash_rounding_mode": "OFF"
+  },
+  "tax": {
+    "branch_rate": "0.088750",
+    "provider_configured": false
+  },
+  "walk_in_customer": {
+    "id": "f19d994e-80ea-4195-b203-4e40a1b0695d",
+    "currency": "USD"
+  },
+  "price_sheet": [
+    {
+      "product_id": "6a2f1cfb-3056-4f23-8fa2-8cf27550e9a7",
+      "price_key": "walkin",
+      "price_uom": "EA",
+      "uom_qty": "1",
+      "price_uom_qty": "1",
+      "unit_price_ten_thousandths": 110000,
+      "price_source": "level",
+      "price_basis": "LEVEL"
+    },
+    {
+      "product_id": "6a2f1cfb-3056-4f23-8fa2-8cf27550e9a7",
+      "price_key": "customer:ce4e41f7-2621-4acf-8227-9d83de3d9889",
+      "price_uom": "EA",
+      "uom_qty": "1",
+      "price_uom_qty": "1",
+      "unit_price_ten_thousandths": 99000,
+      "price_source": "level",
+      "price_basis": "LEVEL"
+    },
+    {
+      "product_id": "6a2f1cfb-3056-4f23-8fa2-8cf27550e9a7",
+      "price_key": "level:bffddcb5-72ac-490f-acfa-531d0d45931b",
+      "price_uom": "EA",
+      "uom_qty": "1",
+      "price_uom_qty": "1",
+      "unit_price_ten_thousandths": 99000,
+      "price_source": "level",
+      "price_basis": "LEVEL"
+    },
+    {
+      "product_id": "584b1085-4cc1-473f-b6df-39bf86147ddd",
+      "price_key": "walkin",
+      "price_uom": "PCS",
+      "uom_qty": "1",
+      "price_uom_qty": "1",
+      "unit_price_ten_thousandths": 100000,
+      "price_source": "level",
+      "price_basis": "LEVEL"
+    },
+    {
+      "product_id": "584b1085-4cc1-473f-b6df-39bf86147ddd",
+      "price_key": "customer:ce4e41f7-2621-4acf-8227-9d83de3d9889",
+      "price_uom": "PCS",
+      "uom_qty": "1",
+      "price_uom_qty": "1",
+      "unit_price_ten_thousandths": 90000,
+      "price_source": "level",
+      "price_basis": "LEVEL"
+    },
+    {
+      "product_id": "584b1085-4cc1-473f-b6df-39bf86147ddd",
+      "price_key": "level:bffddcb5-72ac-490f-acfa-531d0d45931b",
+      "price_uom": "PCS",
+      "uom_qty": "1",
+      "price_uom_qty": "1",
+      "unit_price_ten_thousandths": 90000,
+      "price_source": "level",
+      "price_basis": "LEVEL"
+    },
+    {
+      "product_id": "026924f2-4b33-4302-a6c1-7fa2d87321da",
+      "price_key": "walkin",
+      "price_uom": "PCS",
+      "uom_qty": "1",
+      "price_uom_qty": "1",
+      "unit_price_ten_thousandths": 55000,
+      "price_source": "level",
+      "price_basis": "LEVEL"
+    },
+    {
+      "product_id": "026924f2-4b33-4302-a6c1-7fa2d87321da",
+      "price_key": "customer:ce4e41f7-2621-4acf-8227-9d83de3d9889",
+      "price_uom": "PCS",
+      "uom_qty": "1",
+      "price_uom_qty": "1",
+      "unit_price_ten_thousandths": 50000,
+      "price_source": "contract",
+      "price_basis": "CONTRACT"
+    },
+    {
+      "product_id": "026924f2-4b33-4302-a6c1-7fa2d87321da",
+      "price_key": "level:bffddcb5-72ac-490f-acfa-531d0d45931b",
+      "price_uom": "PCS",
+      "uom_qty": "1",
+      "price_uom_qty": "1",
+      "unit_price_ten_thousandths": 49500,
+      "price_source": "level",
+      "price_basis": "LEVEL"
+    }
+  ],
+  "products": [
+    {
+      "id": "6a2f1cfb-3056-4f23-8fa2-8cf27550e9a7",
+      "sku": "KIT-d2dff5fa",
+      "description": "bundle kit",
+      "taxable": true,
+      "is_kit": true,
+      "random_length": false,
+      "board_thickness_in": null,
+      "board_width_in": null,
+      "stock_uom": "EA",
+      "sale_uom": "EA",
+      "price_uom": "EA",
+      "unit_set": [
+        {
+          "uom": "EA",
+          "unit_qty": "1",
+          "stock_qty": "1",
+          "sell": true,
+          "price": true
+        }
+      ],
+      "barcode": null,
+      "category": "",
+      "in_stock": "0"
+    },
+    {
+      "id": "584b1085-4cc1-473f-b6df-39bf86147ddd",
+      "sku": "P2-584b1085",
+      "description": "cedar 1x6",
+      "taxable": true,
+      "is_kit": false,
+      "random_length": false,
+      "board_thickness_in": null,
+      "board_width_in": null,
+      "stock_uom": "PCS",
+      "sale_uom": "PCS",
+      "price_uom": "PCS",
+      "unit_set": [
+        {
+          "uom": "PCS",
+          "unit_qty": "1",
+          "stock_qty": "1",
+          "sell": true,
+          "price": true
+        }
+      ],
+      "barcode": "0123456789012",
+      "category": "Boards",
+      "in_stock": "7"
+    },
+    {
+      "id": "026924f2-4b33-4302-a6c1-7fa2d87321da",
+      "sku": "POS-93c97f87",
+      "description": "2x4x8 SPF",
+      "taxable": true,
+      "is_kit": false,
+      "random_length": false,
+      "board_thickness_in": null,
+      "board_width_in": null,
+      "stock_uom": "PCS",
+      "sale_uom": "PCS",
+      "price_uom": "PCS",
+      "unit_set": [
+        {
+          "uom": "PCS",
+          "unit_qty": "1",
+          "stock_qty": "1",
+          "sell": true,
+          "price": true
+        }
+      ],
+      "barcode": null,
+      "category": "",
+      "in_stock": "100"
+    }
+  ],
+  "accounts": [
+    {
+      "customer_id": "ce4e41f7-2621-4acf-8227-9d83de3d9889",
+      "account_number": "WPOS-3d0c4769",
+      "name": "Counter Co cc4dfe79",
+      "currency": "USD",
+      "tax_exempt": false,
+      "po_required": false,
+      "buyer_roster_required": false,
+      "credit_hold": false,
+      "credit_limit_cents": 100000,
+      "open_receivable_cents": 0,
+      "offline_room_cents": 100000,
+      "check_limit_cents": null,
+      "price_key": "customer:ce4e41f7-2621-4acf-8227-9d83de3d9889",
+      "level_key": "level:bffddcb5-72ac-490f-acfa-531d0d45931b",
+      "buyers": [
+        {
+          "contact_id": "053a1b1a-87cd-477f-add6-46b2b31e2e4e",
+          "name": "Yard Buyer",
+          "per_purchase_cap_cents": 50000
+        }
+      ],
+      "jobs": [
+        {
+          "id": "fb50344f-517d-4fcc-9a0c-230448aa5deb",
+          "code": "",
+          "name": "Front Deck"
+        }
+      ]
+    }
+  ]
+}

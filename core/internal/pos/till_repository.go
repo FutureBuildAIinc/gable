@@ -220,6 +220,27 @@ func (r *PostgresRepository) AggregateTillSession(ctx context.Context, sessionID
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
+	// The money of the session's offline sales that wait on a manager (CP-13
+	// OW, items 283 and 284): the cash (net of change) and the checks the
+	// clerk took sit in the drawer while the sale is refused or held, so the
+	// drawer's expected figure carries them until a resolution posts the
+	// sale (then the posted tender counts) or writes it off. A row whose
+	// figures are not proven (a bad copy, a replay mismatch) carries none.
+	agg.OfflineHeldByMethod = map[string]int64{}
+	var heldCash, heldCheck int64
+	if err := r.ex(ctx).QueryRow(ctx, `
+		SELECT COALESCE(SUM(cash_cents), 0), COALESCE(SUM(check_cents), 0)
+		FROM pos_offline_exceptions
+		WHERE till_session_id = $1 AND status IN ('open', 'held') AND posted_sale_id IS NULL
+			AND reason_code NOT IN ('bad_signature', 'replay_mismatch')`, sessionID).Scan(&heldCash, &heldCheck); err != nil {
+		return nil, fmt.Errorf("failed to aggregate the session's held offline sales: %w", err)
+	}
+	if heldCash != 0 {
+		agg.OfflineHeldByMethod["CASH"] = heldCash
+	}
+	if heldCheck != 0 {
+		agg.OfflineHeldByMethod["CHECK"] = heldCheck
+	}
 	// The session's cash refunds, through its returns' credit memos. The cash
 	// that left the drawer is the refund entry's cash leg: a cash refund of a
 	// rounded sale pays the rounded figure (CP-18), while the refund row
