@@ -103,7 +103,8 @@ describe('the counter below 900: the header fits a phone', () => {
     expect(button).toBeTruthy();
     expect(hasClass(button, 'min-[900px]:hidden')).toBe(true);
     expect(hasClass(button, 'h-11')).toBe(true);
-    expect(hasClass(button, 'w-11')).toBe(true);
+    // a visible label beside the card icon: the button is no longer a bare icon
+    expect(q(el, 'pos-till-menu-label')?.textContent?.trim()).toBe('Till');
     expect(button.getAttribute('aria-expanded')).toBe('false');
 
     button.click();

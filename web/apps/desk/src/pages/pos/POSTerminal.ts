@@ -3163,7 +3163,7 @@ export class POSTerminal extends LitElement {
                 <span class="font-mono" data-testid="pos-register">${this._registerId}</span>
                 ${this._registers.length > 1 ? html`
                   <label class="sr-only" for="pos-register-picker">Register</label>
-                  <gable-select id="pos-register-picker" data-testid="pos-register-picker"
+                  <gable-select id="pos-register-picker" data-testid="pos-register-picker" class="min-w-[9rem]"
                     .value=${this._registerId}
                     .options=${this._registers.map((r) => ({ value: r.id, label: `${r.branch_code} ${r.name}` }))}
                     @change=${(e: Event) => {
@@ -3222,10 +3222,11 @@ export class POSTerminal extends LitElement {
         <button type="button" data-testid="pos-till-menu-button" aria-label="Till" aria-haspopup="menu"
           title=${off ? 'Offline: drawer cash and X report need the connection; Close Till says what holds it' : 'Till'}
           aria-expanded=${this._tillMenu ? 'true' : 'false'} @click=${() => { this._tillMenu = !this._tillMenu; }}
-          class="flex h-11 w-11 items-center justify-center rounded border border-white/20 text-slate-200 hover:bg-white/5 min-[900px]:hidden">
+          class="flex h-11 items-center justify-center gap-1.5 rounded border border-white/20 px-3 text-slate-200 hover:bg-white/5 min-[900px]:hidden">
           <svg viewBox="0 0 24 24" class="h-5 w-5" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
             <rect x="3" y="6" width="18" height="13" rx="2"></rect><path d="M3 10h18"></path><path d="M7 15h4"></path>
           </svg>
+          <span class="text-xs font-semibold" data-testid="pos-till-menu-label">Till</span>
         </button>
         ${this._tillMenu ? html`
           <div role="menu" aria-label="Till" data-testid="pos-till-menu-items"
