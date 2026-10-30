@@ -71,6 +71,7 @@ import (
 	"github.com/gablelbm/gable/internal/salesteam"
 	"github.com/gablelbm/gable/internal/scheduling"
 	"github.com/gablelbm/gable/internal/signinmethods"
+	"github.com/gablelbm/gable/internal/staffauth"
 	"github.com/gablelbm/gable/internal/tax"
 	"github.com/gablelbm/gable/internal/taxzone"
 	"github.com/gablelbm/gable/internal/techadmin"
@@ -108,7 +109,19 @@ var publicAPIPaths = []string{
 	"/api/v1/a2a/",
 	"/api/v1/auth/config",
 	"/api/v1/auth/start/",
+	// The callback every redirect method ends at (ADR 0012 section 4).
+	"/api/v1/auth/callback",
+	// The shell token path: redeem, refresh and sign out (ADR 0012 section 3).
+	"/api/v1/auth/shell/",
+	// The staff session routes read the cookie themselves (ADR 0012).
+	"/api/v1/auth/signin",
+	"/api/v1/auth/refresh",
+	"/api/v1/auth/signout",
 }
+
+// uploadsRoles are the roles that may fetch an uploaded file: every mapped
+// staff role (ADR 0012 section 5), which replaces the old "user" role.
+var uploadsRoles = middleware.StaffRoles()
 
 // machineKeyValidator adapts the techadmin service to the machine-key auth
 // core's KeyValidator seam: a credential failure (unknown, revoked or
@@ -212,9 +225,59 @@ func Run() {
 	)
 
 	// 4. Initialize Auth Middleware
-	// Fail-closed: JWKS_URL is required unless AUTH_MODE=dev is explicitly set.
+	// Fail-closed: a core needs Appwrite settings (staff sessions, ADR 0012),
+	// a JWKS_URL, or AUTH_MODE=dev. Dev mode beside Appwrite settings exits.
+	awCfg := staffauth.Config{
+		Endpoint: cfg.AppwriteEndpoint, ProjectID: cfg.AppwriteProjectID, TeamID: cfg.AppwriteTeamID,
+		APIKey: cfg.AppwriteAPIKey, Origin: cfg.PublicURL, AuthMode: cfg.AuthMode,
+	}
+	if err := awCfg.Check(); err != nil {
+		logger.Error("Appwrite configuration refused", "error", err)
+		os.Exit(1)
+	}
 	var authMw *middleware.AuthMiddleware
-	if cfg.JWKSURL != "" {
+	sweepCtx, sweepCancel := context.WithCancel(context.Background())
+	defer sweepCancel()
+	var staffHandler *staffauth.Handler
+	var staffLinks *staffauth.Links
+	var awClient *appwrite.Client
+	if awCfg.Enabled() {
+		// ADR 0012: Appwrite is the identity provider and its server must
+		// clear the 2.0.0 floor. A server below the floor stops the boot; an
+		// unreadable one closes the provider redirect methods (none is built
+		// yet) and the floor watch below keeps checking.
+		awClient = &appwrite.Client{Endpoint: cfg.AppwriteEndpoint, ProjectID: cfg.AppwriteProjectID, APIKey: cfg.AppwriteAPIKey, HTTP: &http.Client{Timeout: 10 * time.Second}}
+		state, err := appwrite.CheckStart(context.Background(), awClient)
+		switch {
+		case errors.Is(err, appwrite.ErrUnsupportedVersion):
+			logger.Error("Appwrite server below the 2.0.0 floor", "endpoint", cfg.AppwriteEndpoint, "error", err)
+			os.Exit(1)
+		case state == appwrite.StartRedirectsClosed:
+			logger.Warn("Appwrite version unreadable at start; provider redirect methods stay closed", "endpoint", cfg.AppwriteEndpoint)
+		default:
+			logger.Info("Appwrite identity provider", "endpoint", cfg.AppwriteEndpoint)
+		}
+		staffSvc := staffauth.NewService(awClient, staffauth.NewStore(db), auditLog, staffauth.Settings{
+			ProjectID: cfg.AppwriteProjectID, TeamID: cfg.AppwriteTeamID,
+			IdleLimit: cfg.StaffSessionIdle, AbsoluteLimit: cfg.StaffSessionAbsolute,
+			RefreshAfter: cfg.StaffSessionRefresh, SnapshotMaxAge: cfg.StaffSessionSnapshot,
+		}, logger).WithFloorWatch(awClient, time.Minute).WithRedirects(awClient, cfg.PublicURL)
+		staffLinks = staffauth.NewLinks(db, awClient, auditLog)
+		go staffSvc.RunSweeper(sweepCtx, time.Hour)
+		staffHandler = staffauth.NewHandler(staffSvc, staffauth.HandlerConfig{Origin: cfg.PublicURL, Trusted: cfg.TrustedProxies})
+		am, err := middleware.NewAuthMiddleware(context.Background(), middleware.AuthConfig{
+			JWKSURL:     cfg.JWKSURL,
+			Issuer:      cfg.AuthIssuer,
+			PublicPaths: publicAPIPaths,
+			MachineKeys: machineKeyAuth,
+			Sessions:    staffSvc,
+		}, logger)
+		if err != nil {
+			logger.Error("Failed to initialize Auth Middleware", "error", err)
+			os.Exit(1)
+		}
+		authMw = am
+	} else if cfg.JWKSURL != "" {
 		logger.Info("Initializing Auth Middleware", "jwks_url", cfg.JWKSURL)
 		am, err := middleware.NewAuthMiddleware(context.Background(), middleware.AuthConfig{
 			JWKSURL:     cfg.JWKSURL,
@@ -230,30 +293,8 @@ func Run() {
 	} else if strings.EqualFold(cfg.AuthMode, "dev") {
 		logger.Warn("AUTH_MODE=dev: authentication disabled (development only)")
 	} else {
-		logger.Error("JWKS_URL not set and AUTH_MODE != dev; set JWKS_URL for production or AUTH_MODE=dev for development")
+		logger.Error("JWKS_URL not set and AUTH_MODE != dev; set the Appwrite settings or JWKS_URL for production or AUTH_MODE=dev for development")
 		os.Exit(1)
-	}
-
-	// ADR 0012: when APPWRITE_ENDPOINT is set, Appwrite is the identity
-	// provider and its server must clear the 2.0.0 floor. A server below the
-	// floor stops the boot; an unreadable one only warns, since no sign in
-	// path is wired to it yet.
-	if cfg.AppwriteEndpoint != "" {
-		awClient := &appwrite.Client{
-			Endpoint:  cfg.AppwriteEndpoint,
-			ProjectID: cfg.AppwriteProjectID,
-			APIKey:    cfg.AppwriteAPIKey,
-		}
-		state, err := appwrite.CheckStart(context.Background(), awClient)
-		switch {
-		case errors.Is(err, appwrite.ErrUnsupportedVersion):
-			logger.Error("Appwrite server below the 2.0.0 floor", "endpoint", cfg.AppwriteEndpoint, "error", err)
-			os.Exit(1)
-		case state == appwrite.StartRedirectsClosed:
-			logger.Warn("Appwrite version unreadable at start; provider redirect methods stay closed", "endpoint", cfg.AppwriteEndpoint)
-		default:
-			logger.Info("Appwrite identity provider", "endpoint", cfg.AppwriteEndpoint)
-		}
 	}
 
 	// 4b. Branch Context Middleware — enforces multi-branch scoping per
@@ -712,6 +753,10 @@ func Run() {
 	if err != nil {
 		logger.Error("Sign in methods service error", "error", err)
 		os.Exit(1)
+	}
+	if staffHandler != nil {
+		staffHandler.WithAllowed(signinSvc.Allowed).RegisterRoutes(mux)
+		staffLinks.RegisterRoutes(mux, middleware.RequireRole("admin", "owner"))
 	}
 	signinmethods.NewHandler(signinSvc, cfg.AuthMode).RegisterRoutes(mux, signinmethods.Guards{
 		Admin: middleware.RequireRole("admin", "owner"),
@@ -1251,7 +1296,7 @@ func Run() {
 	// Static file serving for uploaded photos (auth-protected, no directory listing)
 	uploadFS := noListingFileSystem{fs: http.Dir("uploads")}
 	fileServer := http.FileServer(uploadFS)
-	mux.Handle("/uploads/", middleware.RequireRole("admin", "owner", "user")(http.StripPrefix("/uploads/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	mux.Handle("/uploads/", middleware.RequireRole(uploadsRoles...)(http.StripPrefix("/uploads/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Disposition", "attachment")
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		fileServer.ServeHTTP(w, r)

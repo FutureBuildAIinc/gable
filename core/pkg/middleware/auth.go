@@ -5,6 +5,7 @@ package middleware
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -22,6 +23,41 @@ type AuthConfig struct {
 	// shape). When nil a machine-key Bearer is refused 401 fail closed
 	// rather than reaching the JWT parser.
 	MachineKeys *MachineKeyAuth
+	// Sessions, when set, resolves the staff session cookie (ADR 0012). A
+	// cookie that is presented and does not resolve is refused 401 and never
+	// passed over for another credential.
+	Sessions SessionResolver
+}
+
+// SessionCookieName is the staff session cookie (ADR 0012 section 3).
+const SessionCookieName = "gable_session"
+
+// CSRFHeaderName is the custom header a state changing request authenticated
+// by the session cookie must carry; a cross site form cannot set it.
+const CSRFHeaderName = "X-Gable-CSRF"
+
+// ShellTokenPrefix is the fixed prefix of a shell access token (ADR 0012
+// section 3), distinct from the machine key shape (sk_live_).
+const ShellTokenPrefix = "gst_"
+
+// IsShellToken reports whether a bearer value has the shell access token shape.
+func IsShellToken(v string) bool { return strings.HasPrefix(v, ShellTokenPrefix) }
+
+// ShellResolver resolves a shell access token to claims. A session resolver
+// that also implements it makes the auth layer accept shell bearers; the
+// cookie path never accepts a shell token and this path never accepts a
+// cookie id.
+type ShellResolver interface {
+	ResolveShell(ctx context.Context, token string) (*UserClaims, error)
+}
+
+// ErrSessionInvalid is a resolver's answer for a session id that is unknown,
+// revoked or expired.
+var ErrSessionInvalid = errors.New("middleware: session invalid")
+
+// SessionResolver turns a presented session id into claims.
+type SessionResolver interface {
+	Resolve(ctx context.Context, id string) (*UserClaims, error)
 }
 
 type AuthMiddleware struct {
@@ -30,6 +66,7 @@ type AuthMiddleware struct {
 	publicPaths []string
 	logger      *slog.Logger
 	machineKeys *MachineKeyAuth
+	sessions    SessionResolver
 }
 
 // UserClaims holds standard OIDC claims and FB Brain custom claims.
@@ -54,9 +91,15 @@ func NewAuthMiddleware(ctx context.Context, cfg AuthConfig, logger *slog.Logger)
 	// Create the JWKS from the URL.
 	// This will fetch the keys immediately and cache them.
 	// It handles refresh automatically based on Cache-Control headers or errors.
-	k, err := keyfunc.NewDefault([]string{cfg.JWKSURL})
-	if err != nil {
-		return nil, fmt.Errorf("failed to create JWKS from URL %s: %w", cfg.JWKSURL, err)
+	// With no URL (a core that signs staff in through Appwrite sessions
+	// alone) a bearer that is not a machine key is refused.
+	var k keyfunc.Keyfunc
+	if cfg.JWKSURL != "" {
+		var err error
+		k, err = keyfunc.NewDefault([]string{cfg.JWKSURL})
+		if err != nil {
+			return nil, fmt.Errorf("failed to create JWKS from URL %s: %w", cfg.JWKSURL, err)
+		}
 	}
 
 	return &AuthMiddleware{
@@ -65,6 +108,7 @@ func NewAuthMiddleware(ctx context.Context, cfg AuthConfig, logger *slog.Logger)
 		publicPaths: cfg.PublicPaths,
 		logger:      logger,
 		machineKeys: cfg.MachineKeys,
+		sessions:    cfg.Sessions,
 	}, nil
 }
 
@@ -77,6 +121,33 @@ func (m *AuthMiddleware) Handler(next http.Handler) http.Handler {
 		if isPublicPath(m.publicPaths, r.URL.Path) {
 			next.ServeHTTP(w, r)
 			return
+		}
+
+		// 0b. The session cookie. A presented cookie is always resolved: an
+		// invalid one is refused here, whatever else the request carries, and
+		// a valid one with no Authorization header is the whole credential.
+		if m.sessions != nil {
+			if c, err := r.Cookie(SessionCookieName); err == nil {
+				claims, rerr := m.sessions.Resolve(r.Context(), c.Value)
+				if rerr != nil {
+					if errors.Is(rerr, ErrSessionInvalid) {
+						respondAuthError(w, r, http.StatusUnauthorized, "unauthorized", "invalid session")
+					} else {
+						m.logger.Error("Session resolve failed", "error", rerr)
+						respondAuthError(w, r, http.StatusServiceUnavailable, "unavailable", "sign in is unavailable")
+					}
+					return
+				}
+				if r.Header.Get("Authorization") == "" {
+					if !safeMethod(r.Method) && r.Header.Get(CSRFHeaderName) == "" {
+						respondAuthError(w, r, http.StatusForbidden, "forbidden", "missing request header")
+						return
+					}
+					ctx := context.WithValue(r.Context(), UserContextKey, claims)
+					next.ServeHTTP(w, r.WithContext(ctx))
+					return
+				}
+			}
 		}
 
 		// 1. Extract Token
@@ -95,6 +166,31 @@ func (m *AuthMiddleware) Handler(next http.Handler) http.Handler {
 		}
 		tokenString := parts[1]
 
+		// 1a. A shell access token, by its own fixed prefix. It is resolved
+		// to the shell's row in staff_sessions; there is no CSRF header on
+		// this path because it is not a cookie request. A shell token that
+		// does not resolve is refused here, never passed to another check.
+		if IsShellToken(tokenString) {
+			shells, ok := m.sessions.(ShellResolver)
+			if !ok || m.sessions == nil {
+				respondAuthError(w, r, http.StatusUnauthorized, "unauthorized", "invalid token")
+				return
+			}
+			claims, rerr := shells.ResolveShell(r.Context(), tokenString)
+			if rerr != nil {
+				if errors.Is(rerr, ErrSessionInvalid) {
+					respondAuthError(w, r, http.StatusUnauthorized, "unauthorized", "invalid session")
+				} else {
+					m.logger.Error("Shell session resolve failed", "error", rerr)
+					respondAuthError(w, r, http.StatusServiceUnavailable, "unavailable", "sign in is unavailable")
+				}
+				return
+			}
+			ctx := context.WithValue(r.Context(), UserContextKey, claims)
+			next.ServeHTTP(w, r.WithContext(ctx))
+			return
+		}
+
 		// 1b. A Bearer machine key is not a JWT: dispatch by shape before
 		// the JWT parser sees it. With no machine-key core wired the token
 		// is refused fail closed; it must never fall into JWT parsing, which
@@ -109,6 +205,10 @@ func (m *AuthMiddleware) Handler(next http.Handler) http.Handler {
 		}
 
 		// 2. Parse and Validate Token
+		if m.jwks == nil {
+			respondAuthError(w, r, http.StatusUnauthorized, "unauthorized", "invalid token")
+			return
+		}
 		token, err := jwt.ParseWithClaims(tokenString, &UserClaims{}, m.jwks.Keyfunc)
 		if err != nil {
 			m.logger.Warn("Token validation failed", "error", err, "path", r.URL.Path)
@@ -232,4 +332,8 @@ func BrainPlanTierFromContext(ctx context.Context) string {
 		return claims.PlanTier
 	}
 	return ""
+}
+
+func safeMethod(m string) bool {
+	return m == http.MethodGet || m == http.MethodHead || m == http.MethodOptions
 }

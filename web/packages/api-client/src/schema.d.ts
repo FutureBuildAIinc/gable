@@ -9601,7 +9601,7 @@ export interface paths {
         };
         /**
          * The runtime auth config
-         * @description Public (answers before any sign in). The auth mode the server runs in, the dealer's public display name and optional mark URL for the white labelled door (read from the single dealer_profile row), and the dealer's allowed sign in methods in the stored order, each with what the front door needs to render it: the kind (form, passkey, link or redirect), the label, the start URL (the portal login for the form method, the start route for the others) and, for oidc, the issuer URL and client id. A strict allowlist response type: it never carries a secret, an internal host or another tenant's data. The dealer is the install's single tenant.
+         * @description Public (answers before any sign in). The auth mode the server runs in, the dealer's public display name and optional mark URL for the white labelled door (read from the single dealer_profile row), and the dealer's allowed sign in methods in the stored order, each with what the front door needs to render it: the kind (form, passkey, link or redirect), the label, the start URL (the portal login for the form method, the start route for the others). The oidc issuer is configured in Appwrite, so its issuer URL and client id are always null here. A strict allowlist response type: it never carries a secret, an internal host or another tenant's data. The dealer is the install's single tenant.
          */
         get: operations["authConfigGet"];
         put?: never;
@@ -9619,11 +9619,15 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /**
+         * Start a provider sign in by navigation
+         * @description Public. For google, microsoft and oidc the browser navigates here. The core files a pending sign in, sets the single use state cookie (HttpOnly, Secure, SameSite=Lax, Path=/api, no Domain, short lived) and redirects (302) to Appwrite's provider redirect, whose success and failure addresses are Gable's callback and nothing else. A method outside the three is a 404, one the dealer's allowlist does not hold a 403, and the provider methods are closed with a 503 until a supported Appwrite version has been read. Limited per client address.
+         */
+        get: operations["authStartRedirect"];
         put?: never;
         /**
          * Start a sign in by one method
-         * @description Public. The route a non form method starts from. A method outside the six is a 404; a method the dealer's allowlist does not hold is a 403; the form method has no start route (a 400); and a method that is allowed but not built on this server yet answers a plain 501 not_implemented, never a crash.
+         * @description Public. The POST a non form method is asked at. A method outside the six is a 404; a method the dealer's allowlist does not hold is a 403; the form method has no start route (a 400); the provider redirect methods (google, microsoft, oidc) start by navigating (GET) and answer a POST with a 405; the magic link's POST is its own route; and a method that is allowed but not served here (passkey, deferred) answers a plain 501 not_implemented, never a crash.
          */
         post: operations["authStart"];
         delete?: never;
@@ -9646,11 +9650,235 @@ export interface paths {
         get: operations["authMethodsGet"];
         /**
          * Replace the dealer's sign in method allowlist
-         * @description Replaces the whole allowlist. The order of the request's methods is the order the door renders them. The list must hold at least one method, every code one of the six, no code twice, and the oidc fields (issuer URL, client id, display label) belong to the oidc method alone and are required on it; the table never stores a client secret. The write is audited with the before and after in one transaction. Role gated admin and owner.
+         * @description Replaces the whole allowlist. The order of the request's methods is the order the door renders them. The list must hold at least one method, every code one of the six, no code twice, and the oidc display label belongs to the oidc method alone. The issuer URL and client id are retired (the issuer is configured in Appwrite) and refused on every method; the table never stores a client secret. The write is audited with the before and after in one transaction. Role gated admin and owner.
          */
         put: operations["authMethodsPut"];
         post?: never;
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/signin": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Sign a staff member in with email and password
+         * @description Public. The core opens an Appwrite session server side, reads the account and the membership in the dealer's Team, ends the Appwrite session at once and, when the person is admitted, issues its own session: a fresh random id every time (a presented one is ignored), set as an HttpOnly, Secure, SameSite=Strict cookie on Path /api with no Domain. The request must carry the X-Gable-CSRF header or an Origin that is Gable's own. Every refusal (wrong credentials, unconfirmed or absent membership, blocked or deleted user, unverified email, no mapped role, an Appwrite Team owner, multi factor on) gets the one fixed 401 answer. Limited per client address and per email; past the limit a 429 with Retry-After.
+         */
+        post: operations["authSignIn"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/refresh": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Re-read the signed in person's membership now
+         * @description The session cookie and the X-Gable-CSRF header are required. The core re-reads the account and the membership with its key; a definite answer that the person may no longer enter revokes the session (401), changed roles replace the snapshot. An answer that is not definite keeps the session on its snapshot until the snapshot reaches its maximum age.
+         */
+        post: operations["authRefresh"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/signout": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Sign out
+         * @description Revokes the session behind the cookie and clears the cookie. The X-Gable-CSRF header is required. Answers 204 whatever the cookie held.
+         */
+        post: operations["authSignOut"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/session": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The signed in person's display data
+         * @description The subject and role set of the session behind the cookie. No email: a staff session carries none.
+         */
+        get: operations["authSession"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/start/magic_link": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Email a sign in link to a member
+         * @description Public. Looks the email up and, only for an existing user who is a confirmed Team member with a mapped role and a verified address, asks Appwrite to email a link whose target is Gable's callback. It never creates a user, and it answers the same body and sets a state cookie of the same shape whether or not a link was sent. The request must carry the X-Gable-CSRF header or an Origin that is Gable's own. Limited per client address and per email.
+         */
+        post: operations["authStartMagicLink"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/callback": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Where every redirect sign in ends
+         * @description Public. Appwrite (or the magic link) sends the browser here with the state, and the user id and one time secret. The state in the query must equal the state cookie, and its pending row is claimed with one conditional update, committed, before Appwrite is called, so a state is spent once. The core exchanges the secret server side, reads the account and the membership, ends the Appwrite session and issues its own. The answer carries Referrer-Policy no-referrer and clears the state cookie. Success is a 303 to the desk with the session cookie set; every refusal (a missing, wrong, reused or expired state, a replayed secret, a person Gable does not admit) is a 303 to one fixed address.
+         */
+        get: operations["authCallback"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/shell/redeem": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Redeem a shell's one time code
+         * @description Public. A Tauri shell spends the one time code its callback returned, with the PKCE verifier whose S256 challenge it started with. The code is claimed with one conditional update, so it works once, before it expires; a wrong verifier changes nothing. The membership is read afresh before the session is issued. The answer is an opaque access token (prefix gst_) and a rotating refresh token. Every refusal gets the one fixed 401. Limited per client address.
+         */
+        post: operations["authShellRedeem"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/shell/refresh": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Rotate a shell's tokens
+         * @description Public. Swaps the shell's access and refresh tokens for new ones in one conditional update, only when the presented refresh token is the family's current one. A rotated refresh token presented again revokes the whole token family. Limited per client address.
+         */
+        post: operations["authShellRefresh"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/shell/signout": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Sign a shell out
+         * @description Public path; the shell's access token rides as the Bearer credential. Revokes the session behind it and answers 204 whatever the header held. Limited per client address.
+         */
+        post: operations["authShellSignOut"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/staff/sign-in-people": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The people who have signed in, for the roster link
+         * @description Owner and admin. The distinct subjects the core's sessions have seen, each with the email read from Appwrite by the stored Appwrite user id (the session row holds none) and the staff row it is linked to, if any. This is the list the staff screen picks from to link a roster row.
+         */
+        get: operations["adminStaffSignInPeople"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/staff/{id}/sign-in-link": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Link a staff row to a person who has signed in
+         * @description Owner and admin. Sets the staff row's sub to a person the sessions have seen, audited. A sub no session has seen is a 400, an unknown staff row a 404, and a staff row or a person already linked a 409 (the link is unique when set).
+         */
+        put: operations["adminStaffSignInLinkSet"];
+        post?: never;
+        /**
+         * Clear a staff row's sign in link
+         * @description Owner and admin. Clears the link, audited; clearing an unlinked row is a no-op.
+         */
+        delete: operations["adminStaffSignInLinkClear"];
         options?: never;
         head?: never;
         patch?: never;
@@ -10090,7 +10318,7 @@ export interface paths {
         };
         /**
          * Serve an uploaded file
-         * @description Authenticated access to the dealer file store under the uploads directory. The path after /uploads/ is the file path within the uploads directory. Content-Type is derived from the file extension first and by content sniffing when the extension is unknown; Content-Disposition is always attachment; X-Content-Type-Options is nosniff. A nonexistent file is a 404. The mount registers for every HTTP method and the file server ignores the method, so any other method on the same path answers the same file with the same status. A user JWT whose roles do not include admin, owner or user is a 403; a machine key is a 403 on this path whatever scope it holds.
+         * @description Authenticated access to the dealer file store under the uploads directory. The path after /uploads/ is the file path within the uploads directory. Content-Type is derived from the file extension first and by content sniffing when the extension is unknown; Content-Disposition is always attachment; X-Content-Type-Options is nosniff. A nonexistent file is a 404. The mount registers for every HTTP method and the file server ignores the method, so any other method on the same path answers the same file with the same status. A user JWT whose roles include none of the staff roles (owner, admin, sales, finance, purchasing, warehouse, cashier, driver) is a 403; a machine key is a 403 on this path whatever scope it holds.
          */
         get: operations["uploadsFile"];
         put?: never;
@@ -21418,9 +21646,9 @@ export interface components {
             label: string;
             /** @description Where the method starts: the portal login for the form method, the start route for every other. */
             start_url: string | null;
-            /** @description The oidc issuer URL, null for every other method. */
+            /** @description Retired (the issuer is configured in Appwrite); always null. */
             issuer_url: string | null;
-            /** @description The oidc client id, null for every other method. */
+            /** @description Retired (the issuer is configured in Appwrite); always null. */
             client_id: string | null;
         };
         AuthConfig: {
@@ -21445,13 +21673,61 @@ export interface components {
             methods: {
                 /** @enum {string} */
                 method: "email_password" | "passkey" | "magic_link" | "google" | "microsoft" | "oidc";
-                /** @description The https issuer URL; required on the oidc method, refused on any other. */
+                /** @description Retired; refused on every method (the issuer is configured in Appwrite). */
                 oidc_issuer_url?: string;
-                /** @description The client id; required on the oidc method, refused on any other. */
+                /** @description Retired; refused on every method. */
                 oidc_client_id?: string;
                 /** @description The display label; optional on the oidc method, refused on any other. */
                 oidc_label?: string;
             }[];
+        };
+        ShellRedeemRequest: {
+            code: string;
+            /** @description The PKCE verifier, 43 to 128 unreserved characters. */
+            code_verifier: string;
+        };
+        ShellRefreshRequest: {
+            refresh_token: string;
+        };
+        ShellTokens: {
+            access_token: string;
+            refresh_token: string;
+            /** @description Seconds until the session's absolute limit. */
+            expires_in: number;
+            sub: string;
+            roles: string[];
+        };
+        StaffMagicLinkRequest: {
+            email: string;
+        };
+        StaffMagicLinkReply: {
+            message: string;
+        };
+        StaffSignInPeople: {
+            items: {
+                /** Format: uuid */
+                sub: string;
+                email: string;
+                /** Format: uuid */
+                linked_staff_id: string | null;
+            }[];
+        };
+        StaffSignInLinkRequest: {
+            /** Format: uuid */
+            sub: string;
+        };
+        StaffSignInRequest: {
+            email: string;
+            password: string;
+        };
+        StaffIdentity: {
+            /**
+             * Format: uuid
+             * @description The name based subject UUID of the Appwrite user.
+             */
+            sub: string;
+            /** @description The Gable roles of the person, in the fixed role order. */
+            roles: ("owner" | "admin" | "sales" | "finance" | "purchasing" | "warehouse" | "cashier" | "driver")[];
         };
         TaxExemption: {
             /** Format: uuid */
@@ -42165,6 +42441,51 @@ export interface operations {
             500: components["responses"]["WireInternalError"];
         };
     };
+    authStartRedirect: {
+        parameters: {
+            query?: {
+                /** @description Set to shell by a Tauri shell. A shell start must also carry code_challenge, code_challenge_method and return_to; a web start takes no query at all. */
+                client?: "shell";
+                /** @description The PKCE S256 challenge, 43 base64url characters. */
+                code_challenge?: string;
+                code_challenge_method?: "S256";
+                /** @description Where the callback sends the shell's browser with its one time code: gable://auth/callback, or http://127.0.0.1:{port}/auth/callback or http://[::1]:{port}/auth/callback. Any other target is a 400. */
+                return_to?: string;
+            };
+            header?: never;
+            path: {
+                method: "google" | "microsoft" | "oidc";
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description To Appwrite's provider redirect; the state cookie is set. */
+            302: {
+                headers: {
+                    /** @description The gable_signin_state cookie (HttpOnly, Secure, SameSite=Lax, Path=/api, no Domain). */
+                    "Set-Cookie"?: string;
+                    Location?: string;
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["WireBadRequest"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["WireNotFound"];
+            /** @description Too many attempts; retry after the Retry-After seconds. */
+            429: {
+                headers: {
+                    "Retry-After"?: number;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WireError"];
+                };
+            };
+            503: components["responses"]["WireUnavailable"];
+        };
+    };
     authStart: {
         parameters: {
             query?: never;
@@ -42180,6 +42501,15 @@ export interface operations {
             400: components["responses"]["WireBadRequest"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["WireNotFound"];
+            /** @description A provider redirect method starts by navigation (GET), not by POST. */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WireError"];
+                };
+            };
             /** @description The method is in the dealer's allowlist but not implemented on this server; the standard error envelope with code not_implemented and the plain message that says so. */
             501: {
                 headers: {
@@ -42240,6 +42570,359 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             500: components["responses"]["WireInternalError"];
+        };
+    };
+    authSignIn: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StaffSignInRequest"];
+            };
+        };
+        responses: {
+            /** @description Signed in; the session cookie is set. */
+            200: {
+                headers: {
+                    /** @description The gable_session cookie (HttpOnly, Secure, SameSite=Strict, Path=/api, no Domain). */
+                    "Set-Cookie"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StaffIdentity"];
+                };
+            };
+            400: components["responses"]["WireBadRequest"];
+            401: components["responses"]["Unauthorized"];
+            /** @description Too many attempts; retry after the Retry-After seconds. */
+            429: {
+                headers: {
+                    "Retry-After"?: number;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WireError"];
+                };
+            };
+            503: components["responses"]["WireUnavailable"];
+        };
+    };
+    authRefresh: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The roles the session now holds. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StaffIdentity"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+        };
+    };
+    authSignOut: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Signed out; the cookie is cleared. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+        };
+    };
+    authSession: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The subject and roles. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StaffIdentity"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+        };
+    };
+    authStartMagicLink: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StaffMagicLinkRequest"];
+            };
+        };
+        responses: {
+            /** @description The fixed reply; the state cookie is set. */
+            200: {
+                headers: {
+                    /** @description The gable_signin_state cookie (HttpOnly, Secure, SameSite=Lax, Path=/api, no Domain). */
+                    "Set-Cookie"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StaffMagicLinkReply"];
+                };
+            };
+            400: components["responses"]["WireBadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            /** @description Too many attempts; retry after the Retry-After seconds. */
+            429: {
+                headers: {
+                    "Retry-After"?: number;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WireError"];
+                };
+            };
+            503: components["responses"]["WireUnavailable"];
+        };
+    };
+    authCallback: {
+        parameters: {
+            query?: {
+                state?: string;
+                userId?: string;
+                secret?: string;
+                failure?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description To the desk (session cookie set) or to the one fixed refusal address. */
+            303: {
+                headers: {
+                    "Referrer-Policy"?: string;
+                    Location?: string;
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Too many attempts; retry after the Retry-After seconds. */
+            429: {
+                headers: {
+                    "Retry-After"?: number;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WireError"];
+                };
+            };
+            503: components["responses"]["WireUnavailable"];
+        };
+    };
+    authShellRedeem: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ShellRedeemRequest"];
+            };
+        };
+        responses: {
+            /** @description The shell's tokens. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ShellTokens"];
+                };
+            };
+            400: components["responses"]["WireBadRequest"];
+            401: components["responses"]["Unauthorized"];
+            /** @description Too many attempts; retry after the Retry-After seconds. */
+            429: {
+                headers: {
+                    "Retry-After"?: number;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WireError"];
+                };
+            };
+            503: components["responses"]["WireUnavailable"];
+        };
+    };
+    authShellRefresh: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ShellRefreshRequest"];
+            };
+        };
+        responses: {
+            /** @description The new tokens. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ShellTokens"];
+                };
+            };
+            400: components["responses"]["WireBadRequest"];
+            401: components["responses"]["Unauthorized"];
+            /** @description Too many attempts; retry after the Retry-After seconds. */
+            429: {
+                headers: {
+                    "Retry-After"?: number;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WireError"];
+                };
+            };
+        };
+    };
+    authShellSignOut: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Signed out. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Too many attempts; retry after the Retry-After seconds. */
+            429: {
+                headers: {
+                    "Retry-After"?: number;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WireError"];
+                };
+            };
+        };
+    };
+    adminStaffSignInPeople: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The people. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StaffSignInPeople"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    adminStaffSignInLinkSet: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The staff row. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StaffSignInLinkRequest"];
+            };
+        };
+        responses: {
+            /** @description Linked. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["WireBadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["WireConflict"];
+        };
+    };
+    adminStaffSignInLinkClear: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The staff row. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Cleared. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["WireNotFound"];
         };
     };
     taxExemptionCreate: {

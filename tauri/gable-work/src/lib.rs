@@ -137,6 +137,49 @@ pub mod commands {
             .await
             .map_err(|_| OfflineError::keychain_unavailable())?
     }
+
+    /// Starts a redirect sign in (google, microsoft or oidc): the system
+    /// browser opens on the core's start route with a PKCE challenge and a
+    /// loopback return target, and this call answers once the person has come
+    /// back and the tokens are in the keychain. The wait is on a blocking
+    /// thread, and the command answers only to the app's own origins.
+    #[tauri::command]
+    pub async fn begin_sign_in(
+        window: tauri::WebviewWindow,
+        state: tauri::State<'_, TokenState>,
+        method: String,
+    ) -> Result<(), String> {
+        let url = window.url().map_err(|_| shell::ERR_ORIGIN.to_string())?;
+        let state = state.inner().clone();
+        tauri::async_runtime::spawn_blocking(move || {
+            shell::begin_sign_in_answer(
+                &state,
+                url.as_str(),
+                &method,
+                &gable_shell_core::signin::open_in_browser,
+                std::time::Duration::from_secs(300),
+            )
+        })
+        .await
+        .map_err(|_| shell::ERR_CUSTODY.to_string())?
+    }
+
+    /// Rotates the token pair and answers the new access token; the refresh
+    /// token stays in the keychain.
+    #[tauri::command]
+    pub async fn refresh_tokens(
+        window: tauri::WebviewWindow,
+        state: tauri::State<'_, TokenState>,
+    ) -> Result<AccessTokenAnswer, String> {
+        let url = window.url().map_err(|_| shell::ERR_ORIGIN.to_string())?;
+        let state = state.inner().clone();
+        tauri::async_runtime::spawn_blocking(move || {
+            shell::refresh_tokens_answer(&state, url.as_str())
+                .map(|access_token| AccessTokenAnswer { access_token })
+        })
+        .await
+        .map_err(|_| shell::ERR_CUSTODY.to_string())?
+    }
 }
 
 pub fn run() {
@@ -158,7 +201,9 @@ pub fn run() {
             commands::offline_enrolment_status,
             commands::load_offline_snapshot,
             commands::sign_and_queue_offline_sale,
-            commands::offline_queue_status
+            commands::offline_queue_status,
+            commands::begin_sign_in,
+            commands::refresh_tokens
         ])
         .setup(move |app| {
             let data_dir = app
@@ -240,7 +285,15 @@ mod tests {
             .iter()
             .map(|p| p.as_str().expect("permission names are strings"))
             .collect();
-        assert_eq!(perms, ["allow-core-token", "allow-clear-tokens"]);
+        assert_eq!(
+            perms,
+            [
+                "allow-core-token",
+                "allow-clear-tokens",
+                "allow-begin-sign-in",
+                "allow-refresh-tokens"
+            ]
+        );
         // Least privilege: no open core grant, no plugin, no device or shell
         // permission rides along. The device grants are the field profile's.
         for banned in [
