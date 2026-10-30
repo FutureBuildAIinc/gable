@@ -170,7 +170,10 @@ paths:
         it names the tenders that paid it and the cash rounding the branch's
         rule made, and it carries no total due and no remit to, because there
         is nothing left to remit. A sale that went on account, or one the
-        books have not settled, keeps its invoice. The sale is read as the sale
+        books have not settled, keeps its invoice. The file is offered under
+        the name of the document it carries: "inline; filename=receipt.pdf"
+        for a receipt and "inline; filename=invoice.pdf" for an invoice. The
+        sale is read as the sale
         read reads it: a sale that does not exist, or that the caller's
         branch context, wall or bound key pin hides, answers 404, the same
         for both. A sale that is not completed, or has no invoice, answers
