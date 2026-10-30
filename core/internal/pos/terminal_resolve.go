@@ -195,8 +195,10 @@ type salePlan struct {
 	invoice *uuid.UUID
 }
 
-// planSaleLeg reads the sale under its lock and settles the plan.
-func (s *Service) planSaleLeg(ctx context.Context, sale *Sale, amountCents int64) (salePlan, error) {
+// planSaleLeg reads the sale under its lock and settles the plan. The card
+// fee the leg carries (CP-15) goes with the money: booked with the applied
+// part, or back to the card with a whole reversal.
+func (s *Service) planSaleLeg(ctx context.Context, sale *Sale, amountCents, feeCents int64) (salePlan, error) {
 	switch sale.Status {
 	case StatusOpen, StatusHeld:
 		return salePlan{record: true}, nil
@@ -214,10 +216,13 @@ func (s *Service) planSaleLeg(ctx context.Context, sale *Sale, amountCents int64
 			if apply > open {
 				apply = open
 			}
+			if apply == 0 {
+				return salePlan{reverse: amountCents + feeCents}, nil
+			}
 			return salePlan{applyC: apply, reverse: amountCents - apply, invoice: sale.InvoiceID}, nil
 		}
 	}
-	return salePlan{reverse: amountCents}, nil
+	return salePlan{reverse: amountCents + feeCents}, nil
 }
 
 // resolveSaleAuthorized settles an authorized sale leg:
@@ -280,7 +285,7 @@ func (s *Service) resolveSaleAuthorized(ctx context.Context, item *payment.Termi
 		if err != nil {
 			return err
 		}
-		plan, err = s.planSaleLeg(ctx, sale, intent.AmountCents)
+		plan, err = s.planSaleLeg(ctx, sale, intent.AmountCents, intent.AnswerFeeCents)
 		if err != nil {
 			return err
 		}

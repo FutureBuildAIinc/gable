@@ -331,6 +331,21 @@ func (l *TerminalLedger) DeclineUnspentAuthorized(ctx context.Context, id uuid.U
 	return err == nil, err
 }
 
+// HoldDeviceAnswer keeps what a held approval charged above the leg as the
+// leg's fee (CP-15), on a leg no answer has landed on: the leg stays where it
+// is for the sweep and the manager item, and an answer that lands later
+// writes its own fee over it.
+func (l *TerminalLedger) HoldDeviceAnswer(ctx context.Context, intentID uuid.UUID, feeCents int64) error {
+	if feeCents < 0 {
+		return fmt.Errorf("a held fee of %d cents is negative", feeCents)
+	}
+	_, err := l.db.GetExecutor(ctx).Exec(ctx, `
+		UPDATE payment_terminal_intents SET answer_fee_cents = $2, updated_at = NOW()
+		WHERE id = $1 AND answered_at IS NULL AND state IN ('claimed', 'pending_at_device', 'lost')`,
+		intentID, feeCents)
+	return err
+}
+
 // ApplyDeviceAnswer lands one asynchronous verdict, idempotent by provider
 // reference: the same verdict twice is a no-op; a conflicting verdict is
 // audited and queued for a manager; an answer on an intent the sweep already
@@ -374,6 +389,15 @@ func (l *TerminalLedger) ApplyDeviceAnswer(ctx context.Context, a TerminalAnswer
 		}
 		return l.queueAnswer(ctx, in, a, "conflicting")
 	case TerminalLost:
+		// the late approval's fee stays on the leg (CP-15), so the manager's
+		// authorized resolution books or puts back what the card was charged
+		if a.Verdict == "authorized" {
+			if _, err := l.db.GetExecutor(ctx).Exec(ctx, `
+				UPDATE payment_terminal_intents SET answer_fee_cents = $2, updated_at = NOW()
+				WHERE id = $1 AND state = 'lost'`, a.IntentID, a.FeeCents); err != nil {
+				return "", err
+			}
+		}
 		return l.queueAnswer(ctx, in, a, "late")
 	case TerminalClaimed:
 		return "", ErrAnswerForClaimedIntent

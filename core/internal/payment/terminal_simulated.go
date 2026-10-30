@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"sync"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 // The simulated terminal (CP-05, IX-01): a TerminalProvider driver with
@@ -47,6 +49,14 @@ const (
 // delivers. The terminal ledger's ApplyDeviceAnswer is the production sink.
 type AnswerSink interface {
 	ApplyDeviceAnswer(ctx context.Context, a TerminalAnswer) (AnswerOutcome, error)
+}
+
+// HeldAnswerSink is the optional half of a sink that keeps what a held
+// approval charged above the leg (CP-15): the leg stays unanswered for the
+// manager item, and the manager's authorized resolution books or puts back
+// that figure as the card fee. The terminal ledger implements it.
+type HeldAnswerSink interface {
+	HoldDeviceAnswer(ctx context.Context, intentID uuid.UUID, feeCents int64) error
 }
 
 // SimulatedTerminal is the scripted TerminalProvider of tests and demo
