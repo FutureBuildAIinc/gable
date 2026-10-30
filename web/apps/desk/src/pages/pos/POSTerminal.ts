@@ -61,7 +61,7 @@ import { offlineCounter, OfflineCounterError } from '../../services/OfflineCount
 import type { OfflineQueue, OfflineSignedSale } from '../../types/offline';
 import {
   OFFLINE_BANNER, RESULT_UNKNOWN, SAME_GOODS_QUESTION, bannerFigures, carryCart, isLostAnswer,
-  queueDrained, snapshotRefusalWords, syncWords, tillCloseWait, unknownCardKey, unknownCartKey, type CarriedCart,
+  NEEDS_CONNECTION, queueDrained, snapshotRefusalWords, syncWords, tillCloseWait, unknownCardKey, unknownCartKey, type CarriedCart,
 } from './offline';
 import { POS_SW_WARNING_ATTR } from '../../lib/pos-sw';
 
@@ -1564,6 +1564,8 @@ export class POSTerminal extends LitElement {
     const open = sale?.status === 'open';
     const hasLines = (sale?.lines ?? []).some((l) => l.parent_line_id === null);
     const till = this._till !== null;
+    // the offline counter has none of these keys; the legend dims them as the tender buttons dim
+    if (this._offline) return false;
     switch (action) {
       case 'search':
       case 'add':
@@ -3148,22 +3150,23 @@ export class POSTerminal extends LitElement {
           ${this._till ? html`
             <span title="Drawer open with a float of ${fmt(this._till.opening_float_cents)}" class="whitespace-nowrap rounded-full border border-gable-green/40 px-2 py-0.5 font-mono text-xs font-semibold text-gable-green" data-testid="pos-till-state">Till open</span>` : html`
             <span class="whitespace-nowrap rounded-full border border-safety-red/40 px-2 py-0.5 text-xs font-semibold text-safety-red" data-testid="pos-till-state">No till</span>`}
-          <span class="hidden max-w-[8rem] truncate text-xs text-slate-200 min-[900px]:inline" title="Cashier" data-testid="pos-cashier">${cashier}</span>
+          <span class="hidden max-w-[16rem] truncate text-xs text-slate-200 min-[900px]:inline" title=${cashier} data-testid="pos-cashier">${cashier}</span>
           ${!this._register ? nothing : this._till ? html`
             ${this._renderTillMenu()}
             <button @click=${() => { this._showScale = true; }} data-testid="pos-scale-button"
               title="Weigh a truck in and out, or enter a weight by hand"
               class="min-h-11 whitespace-nowrap rounded border border-white/20 px-3 py-2 text-xs text-slate-200 hover:bg-white/5">Scale</button>
-            <button @click=${() => this._beginFresh()}
-              class="min-h-11 whitespace-nowrap rounded border border-white/20 px-3 py-2 text-xs text-slate-200 hover:bg-white/5">New Sale</button>` : html`
+            <button @click=${() => this._beginFresh()} ?disabled=${this._offline} title=${this._offline ? NEEDS_CONNECTION : 'Start a new sale'}
+              class="min-h-11 whitespace-nowrap rounded border border-white/20 px-3 py-2 text-xs text-slate-200 hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-40">New Sale</button>` : html`
             <button id="pos-open-till" @click=${() => { this._showTillOpen = true; }}
               class="min-h-11 whitespace-nowrap rounded bg-gable-green px-3 py-2 text-xs font-semibold text-deep-space">Open Till</button>
             <button @click=${() => { this._showZReports = true; }} data-testid="pos-z-reports"
               title="The frozen Z report of each past drawer of this register"
               class="min-h-11 whitespace-nowrap rounded border border-white/20 px-3 py-2 text-xs text-slate-200">Z Reports</button>`}
           ${this._register && this._till ? html`
-          <button @click=${() => this._openReturnSearch()} data-testid="return-search-open"
-            class="min-h-11 whitespace-nowrap rounded border border-white/20 px-3 py-2 text-xs text-slate-200">Return a past sale</button>` : nothing}
+          <button @click=${() => this._openReturnSearch()} data-testid="return-search-open" ?disabled=${this._offline}
+            title=${this._offline ? NEEDS_CONNECTION : 'Find a past sale to return'}
+            class="min-h-11 whitespace-nowrap rounded border border-white/20 px-3 py-2 text-xs text-slate-200 disabled:cursor-not-allowed disabled:opacity-40">Return a past sale</button>` : nothing}
         </div>
       </header>`;
   }
@@ -3175,6 +3178,10 @@ export class POSTerminal extends LitElement {
    */
   private _renderTillMenu() {
     const item = 'flex min-h-11 w-full items-center whitespace-nowrap rounded border border-white/20 px-3 py-2 text-xs text-slate-200 hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-40';
+    // offline, every act here needs the server; Close Till stays live only to say what holds it
+    const off = this._offline;
+    const closeHeld = off && tillCloseWait(this._offlineQueue, this._unknownCart) !== null;
+    const needs = (title: string) => (off ? NEEDS_CONNECTION : title);
     return html`
       <div class="min-[900px]:contents" data-testid="pos-till-menu">
         <button type="button" data-testid="pos-till-menu-button" aria-label="Till" aria-haspopup="menu"
@@ -3187,28 +3194,28 @@ export class POSTerminal extends LitElement {
         ${this._tillMenu ? html`
           <div role="menu" aria-label="Till" data-testid="pos-till-menu-items"
             class="absolute right-0 top-full z-30 mt-1 flex w-44 flex-col gap-1 rounded border border-white/10 bg-slate-steel p-2 shadow-raised">
-            <button role="menuitem" @click=${() => { this._tillMenu = false; this._showMovement = true; }} ?disabled=${this._tillBusy}
-              data-testid="pos-drawer-cash" title="Safe drop, pickup, cash paid in or paid out" class=${item}>Drawer Cash</button>
-            <button role="menuitem" @click=${() => { this._tillMenu = false; this._beginXReport(); }} ?disabled=${this._tillBusy}
-              data-testid="pos-x-report" title="A mid-shift read of the drawer, printable; not a close" class=${item}>X Report</button>
-            <button role="menuitem" @click=${() => { this._tillMenu = false; this._showZReports = true; }} ?disabled=${this._tillBusy}
-              data-testid="pos-z-reports" title="The frozen Z report of each past drawer of this register" class=${item}>Z Reports</button>
-            <button role="menuitem" @click=${() => { this._tillMenu = false; this._beginCloseTill(); }} ?disabled=${this._tillBusy}
-              data-testid="pos-close-till" title="Count the drawer and close the till with its Z report" class=${item}>Close Till</button>
+            <button role="menuitem" @click=${() => { this._tillMenu = false; this._showMovement = true; }} ?disabled=${this._tillBusy || off}
+              data-testid="pos-drawer-cash" title=${needs("Safe drop, pickup, cash paid in or paid out")} class=${item}>Drawer Cash</button>
+            <button role="menuitem" @click=${() => { this._tillMenu = false; this._beginXReport(); }} ?disabled=${this._tillBusy || off}
+              data-testid="pos-x-report" title=${needs("A mid-shift read of the drawer, printable; not a close")} class=${item}>X Report</button>
+            <button role="menuitem" @click=${() => { this._tillMenu = false; this._showZReports = true; }} ?disabled=${this._tillBusy || off}
+              data-testid="pos-z-reports" title=${needs("The frozen Z report of each past drawer of this register")} class=${item}>Z Reports</button>
+            <button role="menuitem" @click=${() => { this._tillMenu = false; this._beginCloseTill(); }} ?disabled=${this._tillBusy || (off && !closeHeld)}
+              data-testid="pos-close-till" title=${off && !closeHeld ? NEEDS_CONNECTION : "Count the drawer and close the till with its Z report"} class=${item}>Close Till</button>
           </div>` : nothing}
         <div class="hidden items-center gap-2 min-[900px]:flex">
-          <button @click=${() => { this._showMovement = true; }} ?disabled=${this._tillBusy} data-testid="pos-drawer-cash"
-            title="Safe drop, pickup, cash paid in or paid out"
-            class="whitespace-nowrap rounded border border-white/20 px-3 py-1 text-xs text-slate-200">Drawer Cash</button>
-          <button @click=${() => this._beginXReport()} ?disabled=${this._tillBusy} data-testid="pos-x-report"
-            title="A mid-shift read of the drawer, printable; not a close"
-            class="whitespace-nowrap rounded border border-white/20 px-3 py-1 text-xs text-slate-200">X Report</button>
-          <button @click=${() => { this._showZReports = true; }} ?disabled=${this._tillBusy} data-testid="pos-z-reports"
-            title="The frozen Z report of each past drawer of this register"
-            class="whitespace-nowrap rounded border border-white/20 px-3 py-1 text-xs text-slate-200">Z Reports</button>
-          <button @click=${() => this._beginCloseTill()} ?disabled=${this._tillBusy}
-            title="Count the drawer and close the till with its Z report"
-            class="whitespace-nowrap rounded border border-white/20 px-3 py-1 text-xs text-slate-200">Close Till</button>
+          <button @click=${() => { this._showMovement = true; }} ?disabled=${this._tillBusy || off} data-testid="pos-drawer-cash"
+            title=${needs("Safe drop, pickup, cash paid in or paid out")}
+            class="whitespace-nowrap rounded border border-white/20 px-3 py-1 text-xs text-slate-200 disabled:cursor-not-allowed disabled:opacity-40">Drawer Cash</button>
+          <button @click=${() => this._beginXReport()} ?disabled=${this._tillBusy || off} data-testid="pos-x-report"
+            title=${needs("A mid-shift read of the drawer, printable; not a close")}
+            class="whitespace-nowrap rounded border border-white/20 px-3 py-1 text-xs text-slate-200 disabled:cursor-not-allowed disabled:opacity-40">X Report</button>
+          <button @click=${() => { this._showZReports = true; }} ?disabled=${this._tillBusy || off} data-testid="pos-z-reports"
+            title=${needs("The frozen Z report of each past drawer of this register")}
+            class="whitespace-nowrap rounded border border-white/20 px-3 py-1 text-xs text-slate-200 disabled:cursor-not-allowed disabled:opacity-40">Z Reports</button>
+          <button @click=${() => this._beginCloseTill()} ?disabled=${this._tillBusy || (off && !closeHeld)} data-testid="pos-close-till"
+            title=${off && !closeHeld ? NEEDS_CONNECTION : "Count the drawer and close the till with its Z report"}
+            class="whitespace-nowrap rounded border border-white/20 px-3 py-1 text-xs text-slate-200 disabled:cursor-not-allowed disabled:opacity-40">Close Till</button>
         </div>
       </div>`;
   }
@@ -3900,8 +3907,8 @@ export class POSTerminal extends LitElement {
         <div class="border-b border-amber-400/40 bg-amber-400/10 px-4 py-2 text-sm text-amber-400" role="status" data-testid="pos-offline-banner">
           <p class="font-semibold">${OFFLINE_BANNER}</p>
           ${room ? html`<p class="mt-0.5 text-xs" data-testid="pos-offline-banner-figures">
-            Waiting: <span class="font-mono">${room.count}</span> ${room.count === 1 ? 'sale' : 'sales'}, <span class="font-mono">${fmt(room.totalCents)}</span>.
-            Room left: <span class="font-mono">${room.roomCount}</span> ${room.roomCount === 1 ? 'sale' : 'sales'}, <span class="font-mono">${fmt(room.roomCents)}</span>.</p>` : nothing}
+            Waiting: <span class="font-mono">${room.count}</span> ${room.count === 1 ? 'sale' : 'sales'}, <span class="font-mono">${formatCents(room.totalCents)}</span>.
+            Room left: <span class="font-mono">${room.roomCount}</span> ${room.roomCount === 1 ? 'sale' : 'sales'}, <span class="font-mono">${formatCents(room.roomCents)}</span>.</p>` : nothing}
           ${reloadWarning ? html`<p class="mt-0.5 text-xs font-semibold" data-testid="pos-offline-reload-warning">${reloadWarning}</p>` : nothing}
         </div>` : nothing}
       ${this._offlineStrip ? html`

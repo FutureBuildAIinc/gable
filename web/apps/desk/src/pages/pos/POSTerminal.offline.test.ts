@@ -114,6 +114,15 @@ describe('the counter when the connection drops', () => {
     await settle(el);
     expect(q(el, 'pos-offline-banner')?.textContent).toContain(OFFLINE_BANNER);
     expect(q(el, 'pos-offline-banner-figures')?.textContent).toContain('Room left');
+    expect(q(el, 'pos-offline-banner-figures')?.textContent).toMatch(/\$\d{1,3}(,\d{3})+\.\d{2}/);
+    for (const id of ['pos-drawer-cash', 'pos-x-report', 'pos-z-reports', 'pos-close-till', 'return-search-open']) {
+      const b = q(el, id) as HTMLButtonElement;
+      expect(b.disabled, id).toBe(true);
+      expect(b.title, id).toBe('needs the connection');
+    }
+    const legend = el.querySelector('[data-testid="pos-hotkey-legend"]');
+    expect(legend?.querySelectorAll('[data-action]').length).toBeGreaterThan(0);
+    expect(legend?.querySelectorAll('[data-action]:not(.opacity-40)').length).toBe(0);
     const offline = q(el, 'pos-offline-mode') as HTMLElement & { seed: { lines: unknown[]; replacesSaleId: string } };
     expect(offline).toBeTruthy();
     expect(offline.seed.replacesSaleId).toBe('s1');

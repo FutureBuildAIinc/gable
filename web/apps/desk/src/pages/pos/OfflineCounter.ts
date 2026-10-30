@@ -323,9 +323,10 @@ export class OfflineCounter extends LitElement {
                     <span class="text-sm" data-testid="pos-offline-customer-name">${this._account?.name ?? 'Walk-in sale'}</span>
                     ${this._account ? html`<button type="button" class="min-h-11 text-sm text-slate-300" @click=${() => this._chooseAccount(null)}>Walk-in</button>` : nothing}
                 </div>
+                <p class="mt-2 text-xs text-slate-400">Only accounts cached on this register can be found.</p>
                 <input data-testid="pos-offline-account-search" .value=${this._accountQuery} aria-label="Find a cached account"
                     @input=${(e: Event) => { this._accountQuery = (e.target as HTMLInputElement).value; }}
-                    placeholder="Cached accounts only: name or account number"
+                    placeholder="Cached accounts: name or number"
                     class="mt-2 min-h-11 w-full rounded-lg border border-white/10 bg-deep-space px-3 text-sm text-white" />
                 ${matches.map((a) => html`<button type="button" data-testid="pos-offline-account" @click=${() => this._chooseAccount(a)}
                     class="mt-1 flex min-h-11 w-full items-center justify-between rounded px-2 text-left text-sm hover:bg-white/5">
