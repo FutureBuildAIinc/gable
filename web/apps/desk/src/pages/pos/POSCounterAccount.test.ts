@@ -63,7 +63,7 @@ async function answerStepUp(el: HTMLElement, managerName = 'E2E Manager') {
 import { answerAppDialog, typeIntoAppDialog, chooseOption, flush } from '../../test/dom';
 import type { CounterRegister } from '../../types/pos';
 
-const REG_01: CounterRegister = { id: 'REG-01', name: 'Front till', branch_id: 'b-main', branch_code: 'MAIN', branch_name: 'main yard' };
+const REG_01: CounterRegister = { id: 'REG-01', name: 'Front till', branch_id: 'b-main', branch_code: 'MAIN', branch_name: 'main yard', card_terminal: 'run' };
 
 const line = (id: string, cents: number) => ({
   id, position: 1, line_type: 'product', parent_line_id: null, product_id: `p-${id}`,

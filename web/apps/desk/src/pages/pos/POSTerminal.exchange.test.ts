@@ -45,7 +45,7 @@ import type { GablePayerDialog } from './PayerDialog';
 import { flush } from '../../test/dom';
 
 const REG_01: CounterRegister = {
-    id: 'REG-01', name: 'Front till', branch_id: 'b-main', branch_code: 'MAIN', branch_name: 'main yard',
+    id: 'REG-01', name: 'Front till', branch_id: 'b-main', branch_code: 'MAIN', branch_name: 'main yard', card_terminal: 'run',
 };
 
 const PRODUCT: QuickSearchResult = {

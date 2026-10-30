@@ -655,7 +655,9 @@ export class POSTerminal extends LitElement {
     try {
       const enrolment = await offlineCounter.enrolment();
       const snapshot = await offlineCounter.snapshot();
-      this._registers = [{ id: enrolment.register_id, name: enrolment.register_id, branch_id: snapshot.branch_id, branch_code: '', branch_name: 'Offline' }];
+      // offline the register runs no card terminal: Card is refused in words, as
+      // the server refuses a card offline (CP-05 round 3 P1-B)
+      this._registers = [{ id: enrolment.register_id, name: enrolment.register_id, branch_id: snapshot.branch_id, branch_code: '', branch_name: 'Offline', card_terminal: 'none' }];
       this._register = this._registers[0];
       this._registersLoaded = true;
       this._registersFailed = false;
