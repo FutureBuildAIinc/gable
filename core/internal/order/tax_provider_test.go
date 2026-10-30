@@ -184,9 +184,9 @@ func TestOrderCreditExposureCountsOverdueInvoices(t *testing.T) {
 		t.Helper()
 		_, err := db.Pool.Exec(ctx, `INSERT INTO invoices (id, order_id, customer_id, branch_id, status, total_amount, subtotal, tax_amount, due_date, voided_at)
 			VALUES (gen_random_uuid(), (SELECT id FROM orders WHERE customer_id = $1 LIMIT 1), $1,
-			        (SELECT value::uuid FROM system_settings WHERE key = 'default_branch_id'), $2, $3, $3, 0, CURRENT_DATE - 40,
+			        $4, $2, $3, $3, 0, CURRENT_DATE - 40,
 			        CASE WHEN $2 = 'VOID' THEN NOW() END)`,
-			f.customerID, status, total)
+			f.customerID, status, total, f.branchID)
 		if err != nil {
 			t.Fatal(err)
 		}

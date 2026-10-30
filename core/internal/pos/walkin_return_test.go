@@ -33,7 +33,7 @@ func TestAWalkInReturnRefusesAccount(t *testing.T) {
 		t.Fatalf("walk-in account return = %d, want 400: %s", r.status, r.raw)
 	}
 	// nothing was written: no memo, no return row, the stock whole
-	if got := countOf(t, f.db, `SELECT count(*) FROM credit_memos WHERE customer_id = (SELECT id FROM customers WHERE account_number = 'WALK-IN')`); got != 0 {
+	if got := countOf(t, f.db, `SELECT count(*) FROM credit_memos WHERE branch_id = $1 AND customer_id = (SELECT id FROM customers WHERE account_number = 'WALK-IN')`, f.branchID); got != 0 {
 		t.Errorf("%d memos on the walk-in customer, want 0", got)
 	}
 	if got := f.counterReturns(t); got != 0 {

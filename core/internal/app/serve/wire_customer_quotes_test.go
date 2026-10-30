@@ -136,9 +136,9 @@ func newCQStack(t *testing.T, multiBranch ...bool) *cqStack {
 			t.Fatalf("fixture %q: %v", sql, err)
 		}
 	}
-	if err := db.Pool.QueryRow(ctx, `SELECT value::uuid FROM system_settings WHERE key = 'default_branch_id'`).Scan(&s.branch); err != nil {
-		t.Fatal(err)
-	}
+	// the stack stands on a branch of its own, taxed at 7 percent, so the
+	// shared default branch's rate is never written
+	s.branch = testutil.OwnBranch(t, db, "0.07")
 	s.custA, s.custB, s.projA, s.projB = uuid.New(), uuid.New(), uuid.New(), uuid.New()
 	for _, c := range []struct {
 		id   uuid.UUID
@@ -159,15 +159,6 @@ func newCQStack(t *testing.T, multiBranch ...bool) *cqStack {
 		must(`INSERT INTO products (id, sku, description, uom_primary, base_price, category_id) VALUES ($1, $2, $3, 'EA', $4::numeric, $5)`,
 			p.id, "CQW-"+p.id.String()[:8], p.name, p.base, s.catLum)
 	}
-	// The order service refuses an order whose branch has no tax rate.
-	var oldRate *string
-	if err := db.Pool.QueryRow(ctx, `SELECT default_tax_rate::text FROM locations WHERE id = $1`, s.branch).Scan(&oldRate); err != nil {
-		t.Fatal(err)
-	}
-	must(`UPDATE locations SET default_tax_rate = 0.07 WHERE id = $1`, s.branch)
-	t.Cleanup(func() {
-		_, _ = db.Pool.Exec(ctx, `UPDATE locations SET default_tax_rate = $2::numeric WHERE id = $1`, s.branch, oldRate)
-	})
 	t.Cleanup(func() {
 		testutil.DeleteCustomerQuotes(t, db, s.custA, s.custB)
 		cs := []uuid.UUID{s.custA, s.custB}
@@ -748,7 +739,13 @@ func TestWire_PriceWall1_NothingOfTheContractorsMarkupReachesTheDealer(t *testin
 	}
 	check("dealer accept", s.do("POST", "/api/v1/pro-projects/"+id+"/accept", asDesk, nil), true)
 	check("the converted order", s.do("GET", "/api/v1/orders/"+orderID, asDesk, nil), false)
-	check("the order list", s.do("GET", "/api/v1/orders", asDesk, nil), false)
+	// the order list is scoped to this stack's customer, so the wall holds
+	// over the test's own orders only, never over another stack's rows
+	orderList := s.do("GET", "/api/v1/orders?customer_id="+s.custA.String(), asDesk, nil)
+	check("the order list", orderList, false)
+	if !bytes.Contains(orderList.body, []byte(orderID)) {
+		t.Errorf("the order list does not hold the converted order: %s", truncate(orderList.body))
+	}
 	// The dealer's cost is the order's price: studs at the dealer's $5.50.
 	r := s.do("GET", "/api/v1/orders/"+orderID, asDesk, nil)
 	if !bytes.Contains(r.body, []byte(`"unit_price_ten_thousandths":55000`)) {

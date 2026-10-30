@@ -345,6 +345,11 @@ POST	/api/v1/invoices/{id}/email	internal/document	h.HandleEmailInvoice
 GET	/api/v1/invoices/{id}/payments	internal/invoice	h.HandleApplications
 POST	/api/v1/invoices/{id}/transitions	internal/invoice	h.HandleTransition
 POST	/api/v1/invoices/{id}/write-offs	internal/invoice	h.HandleWriteOff
+POST	/api/v1/large-cash/events/{id}/filing	internal/largecash	h.RecordFiling
+GET	/api/v1/large-cash/events/{id}/form-8300	internal/largecash	h.Form8300
+POST	/api/v1/large-cash/events/{id}/statement	internal/largecash	h.IssueStatement
+GET	/api/v1/large-cash/statements	internal/largecash	h.Statements
+GET	/api/v1/large-cash/worklist	internal/largecash	h.Worklist
 GET	/api/v1/links/customers/{id}	internal/links	Guarded(guard, h.resolveFor("customers", false))
 GET	/api/v1/links/drafts/orders/{id}	internal/links	Guarded(guard, h.resolveFor("orders", true))
 GET	/api/v1/links/drafts/quotes/{id}	internal/links	Guarded(guard, h.resolveFor("quotes", true))

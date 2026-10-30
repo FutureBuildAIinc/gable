@@ -24,10 +24,7 @@ func registerBranchFixture(t *testing.T) (repo *pos.PostgresRepository, register
 	db := testutil.RequireDB(t)
 	ctx := context.Background()
 	repo = pos.NewRepository(db)
-	if err := db.Pool.QueryRow(ctx,
-		`SELECT value::uuid FROM system_settings WHERE key = 'default_branch_id'`).Scan(&own); err != nil {
-		t.Fatalf("read the default branch: %v", err)
-	}
+	own = testutil.OwnBranch(t, db, "0")
 	other = uuid.New()
 	if _, err := db.Pool.Exec(ctx,
 		`INSERT INTO locations (id, type, code) VALUES ($1, 'BRANCH', $2)`, other, "RB-"+other.String()[:8]); err != nil {

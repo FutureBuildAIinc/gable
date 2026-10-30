@@ -23,6 +23,7 @@ import (
 func statementWorld(t *testing.T) *arWorld {
 	t.Helper()
 	w := newARWorld(t)
+	testutil.LockOutboxTables(t)
 	w.svc.WithOutbox(outbox.NewWriter(w.db, "test"))
 	// Opening: posted before the period starts, 15 days past due at day zero.
 	w.invoice(50_000, daysFromNow(-45))
@@ -35,12 +36,15 @@ func statementWorld(t *testing.T) *arWorld {
 
 // TestStatementRunRecordsTheFigures walks one run end to end.
 func TestStatementRunRecordsTheFigures(t *testing.T) {
-	testutil.LockOutboxTables(t)
 	w := statementWorld(t)
 	start, end := daysFromNow(-30), daysFromNow(0)
 
+	// The run names the world's own customer: a run over the whole book
+	// reads every account on the shared test database, and the totals and
+	// the balance it records are then over accounts this test never wrote.
 	run, err := w.svc.CreateStatementRun(context.Background(), account.StatementRunIn{
-		PeriodStart: start, PeriodEnd: end, QueueEmail: true, Actor: "u-test", Role: "finance"})
+		PeriodStart: start, PeriodEnd: end, QueueEmail: true, CustomerIDs: []uuid.UUID{w.customerID},
+		Actor: "u-test", Role: "finance"})
 	if err != nil {
 		t.Fatalf("create the run: %v", err)
 	}
@@ -141,7 +145,6 @@ func TestStatementRunIsAnArtefact(t *testing.T) {
 // run covers the whole book's balances; and a period that ends past today is
 // refused.
 func TestStatementRunScopeAndQueueing(t *testing.T) {
-	testutil.LockOutboxTables(t)
 	w := statementWorld(t)
 	// A customer with no balance at all.
 	quiet := uuid.New()

@@ -410,7 +410,7 @@ func TestInvoiceVoidRefusals(t *testing.T) {
 	// an applied credit memo naming it
 	applied, _ := f.invoice("1")
 	mustExec(t, db, `INSERT INTO credit_memos (invoice_id, customer_id, branch_id, currency, reason_code, reason, amount, status, number, memo_date, subtotal, tax_amount, total_amount, tax_rate, amount_open)
-		VALUES ($1, $2, `+defaultBranch+`, 'USD', 'OTHER', 'applied', 5, 'APPLIED', credit_memo_next_number(), CURRENT_DATE, -5, 0, -5, 0, 0)`, applied, f.customerID)
+		VALUES ($1, $2, $3, 'USD', 'OTHER', 'applied', 5, 'APPLIED', credit_memo_next_number(), CURRENT_DATE, -5, 0, -5, 0, 0)`, applied, f.customerID, f.branchID)
 	f.liveCreditApplication(applied)
 	r = f.voidInvoice(applied, rev(t, f.getInvoice(applied)), "has an applied memo")
 	if _, blockers, _ := errorOf(t, r); r.status != 409 || fmt.Sprint(blockers) != "[has_applications]" {
@@ -566,7 +566,7 @@ func TestRawInsertNumbersThroughTheCounter(t *testing.T) {
 	var raw string
 	if err := db.Pool.QueryRow(context.Background(), `
 		INSERT INTO invoices (customer_id, branch_id, status, total_amount, subtotal, tax_amount, due_date)
-		VALUES ($1, `+defaultBranch+`, 'UNPAID', 10, 10, 0, CURRENT_DATE + 30) RETURNING number`, f.customerID).Scan(&raw); err != nil {
+		VALUES ($1, $2, 'UNPAID', 10, 10, 0, CURRENT_DATE + 30) RETURNING number`, f.customerID, f.branchID).Scan(&raw); err != nil {
 		t.Fatal(err)
 	}
 	if raw != fmt.Sprintf("IN-%06d", before) && counterNext(t, db, "invoice") <= before {
@@ -682,13 +682,13 @@ func TestRelievedCostReadExcludesVoidInvoices(t *testing.T) {
 	ctx := context.Background()
 	vendor, po := uuid.New(), uuid.New()
 	mustExec(t, db, `INSERT INTO vendors (id, name) VALUES ($1, $2)`, vendor, "rv-"+vendor.String()[:8])
-	mustExec(t, db, `INSERT INTO purchase_orders (id, vendor_id, status, source, branch_id) VALUES ($1, $2, 'RECEIVED', 'SPECIAL_ORDER', `+defaultBranch+`)`, po, vendor)
+	mustExec(t, db, `INSERT INTO purchase_orders (id, vendor_id, status, source, branch_id) VALUES ($1, $2, 'RECEIVED', 'SPECIAL_ORDER', $3)`, po, vendor, f.branchID)
 	t.Cleanup(func() {
 		_, _ = db.Pool.Exec(ctx, `DELETE FROM purchase_order_lines WHERE po_id = $1`, po)
 		_, _ = db.Pool.Exec(ctx, `DELETE FROM purchase_orders WHERE id = $1`, po)
 		_, _ = db.Pool.Exec(ctx, `DELETE FROM vendors WHERE id = $1`, vendor)
 	})
-	r := f.do("POST", "/api/v1/orders", map[string]any{"customer_id": f.customerID.String(), "delivery_type": "pickup", "lines": []map[string]any{{
+	r := f.do("POST", "/api/v1/orders", map[string]any{"customer_id": f.customerID.String(), "branch_id": f.branchID.String(), "delivery_type": "pickup", "lines": []map[string]any{{
 		"description": "Custom millwork", "quantity": "3", "uom": "EA", "unit_price_ten_thousandths": 100000,
 		"is_special_order": true, "special_order_unit_cost_ten_thousandths": 30000}}})
 	if r.status != 201 {

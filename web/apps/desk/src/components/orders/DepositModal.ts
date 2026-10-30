@@ -9,6 +9,8 @@ import type { CreatePaymentRequest, PaymentMethod } from '../../types/payment';
 // The methods the payments route records today (a card charge is the
 // gateway's own flow through Run Payments).
 const DEPOSIT_METHODS: PaymentMethod[] = ['cash', 'check', 'ach', 'other'];
+// A counter deposit rides the till session, which takes cash or check only.
+const COUNTER_DEPOSIT_METHODS: PaymentMethod[] = ['cash', 'check'];
 const METHOD_LABELS: Record<string, string> = { cash: 'Cash', check: 'Check', ach: 'ACH', other: 'Other' };
 
 /**
@@ -28,12 +30,20 @@ export class GableDepositModal extends LitElement {
   @property({ type: String, attribute: 'branch-id' }) branchId = '';
   /** What the customer still owes on the order: the most a deposit may take. */
   @property({ type: Number, attribute: 'balance-due-cents' }) balanceDueCents = 0;
+  /** A counter deposit rides the till, which takes cash or check only; a
+   *  check there asks whether the clerk looked at the payer's ID. */
+  @property({ type: Boolean }) counter = false;
 
   @state() private _amountDollars = 0;
   @state() private _method: PaymentMethod = 'cash';
   @state() private _reference = '';
   @state() private _notes = '';
+  @state() private _idChecked = false;
   @state() private _error = '';
+
+  private _methods(): PaymentMethod[] {
+    return this.counter ? COUNTER_DEPOSIT_METHODS : DEPOSIT_METHODS;
+  }
 
   updated(changed: Map<string, unknown>) {
     if (changed.has('isOpen') && this.isOpen) {
@@ -41,6 +51,7 @@ export class GableDepositModal extends LitElement {
       this._method = 'cash';
       this._reference = '';
       this._notes = '';
+      this._idChecked = false;
       this._error = '';
     }
   }
@@ -66,6 +77,7 @@ export class GableDepositModal extends LitElement {
       method: this._method,
       order_id: this.orderId,
     };
+    if (this.counter && this._method === 'check' && this._idChecked) deposit.id_checked = true;
     if (this.branchId) deposit.branch_id = this.branchId;
     if (this._reference.trim()) deposit.reference = this._reference.trim();
     if (this._notes.trim()) deposit.notes = this._notes.trim();
@@ -107,10 +119,19 @@ export class GableDepositModal extends LitElement {
               <label class="block text-sm font-medium text-zinc-400 mb-1">Method</label>
               <gable-select
                 .value=${this._method}
-                .options=${DEPOSIT_METHODS.map(m => ({ value: m, label: METHOD_LABELS[m] }))}
+                .options=${this._methods().map(m => ({ value: m, label: METHOD_LABELS[m] }))}
                 @change=${(e: Event) => this._method = (e.target as HTMLSelectElement).value as PaymentMethod}
               ></gable-select>
             </div>
+
+            ${this.counter && this._method === 'check' ? html`
+              <label class="flex items-center gap-2 text-sm text-zinc-300">
+                <input type="checkbox" name="deposit-id-checked" data-testid="deposit-id-checked"
+                  .checked=${this._idChecked}
+                  @change=${(e: Event) => { this._idChecked = (e.target as HTMLInputElement).checked; }} />
+                I checked the payer's ID
+              </label>
+            ` : nothing}
 
             <div>
               <label class="block text-sm font-medium text-zinc-400 mb-1">Reference (Check # / Transaction ID)</label>

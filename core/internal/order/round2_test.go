@@ -46,12 +46,13 @@ func TestContactLimitIsCheckedAgainstTheRefreshedTotal(t *testing.T) {
 		t.Fatalf("create = %d total %v: %s", r.status, r.body["total_cents"], r.raw)
 	}
 	id := str(t, r.body, "id")
-	branch := `(SELECT value::uuid FROM system_settings WHERE key = 'default_branch_id')`
-	if _, err := db.Pool.Exec(ctx, `UPDATE locations SET default_tax_rate = 0.10 WHERE id = `+branch); err != nil {
+	// the rate moves on the branch the fixture owns, never on the
+	// deployment's default branch every package shares
+	if _, err := db.Pool.Exec(ctx, `UPDATE locations SET default_tax_rate = 0.10 WHERE id = $1`, f.branchID); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
-		_, _ = db.Pool.Exec(ctx, `UPDATE locations SET default_tax_rate = $1 WHERE id = `+branch, f.branchRate)
+		_, _ = db.Pool.Exec(ctx, `UPDATE locations SET default_tax_rate = $1 WHERE id = $2`, f.branchRate, f.branchID)
 	})
 	r = f.transition(id, 1, "confirmed")
 	if r.status != 409 {

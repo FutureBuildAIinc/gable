@@ -44,10 +44,7 @@ func newQueueWorld(t *testing.T) *queueWorld {
 	db := testutil.RequireDB(t)
 	f := newFixture(t, db)
 	svc := f.serveWith(f.withStock())
-	w := &queueWorld{f: f, svc: svc}
-	if err := db.Pool.QueryRow(context.Background(), `SELECT value::uuid FROM system_settings WHERE key = 'default_branch_id'`).Scan(&w.branch); err != nil {
-		t.Fatal(err)
-	}
+	w := &queueWorld{f: f, svc: svc, branch: f.branchID}
 	for i := 0; i < 3; i++ {
 		r := f.create()
 		id := str(t, r.body, "id")
@@ -321,8 +318,7 @@ func TestReceiveDrivesTheBackorderReleaseThroughTheDrain(t *testing.T) {
 	ctx := context.Background()
 	// The receive path: a PO line for the product, received at a yard.
 	yard := uuid.New()
-	branchSQL := `(SELECT value::uuid FROM system_settings WHERE key = 'default_branch_id')`
-	if _, err := db.Pool.Exec(ctx, `INSERT INTO locations (id, type, code, parent_id, branch_id) VALUES ($1, 'YARD', $2, `+branchSQL+`, `+branchSQL+`)`, yard, "RC-"+yard.String()[:8]); err != nil {
+	if _, err := db.Pool.Exec(ctx, `INSERT INTO locations (id, type, code, parent_id, branch_id) VALUES ($1, 'YARD', $2, $3, $3)`, yard, "RC-"+yard.String()[:8], w.f.branchID); err != nil {
 		t.Fatal(err)
 	}
 	po, poLine := uuid.New(), uuid.New()
@@ -330,7 +326,7 @@ func TestReceiveDrivesTheBackorderReleaseThroughTheDrain(t *testing.T) {
 	if _, err := db.Pool.Exec(ctx, `INSERT INTO vendors (id, name) VALUES ($1, $2)`, vendor, "recv-"+vendor.String()[:8]); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.Pool.Exec(ctx, `INSERT INTO purchase_orders (id, vendor_id, status, source, branch_id) VALUES ($1, $2, 'SENT', 'MANUAL', `+branchSQL+`)`, po, vendor); err != nil {
+	if _, err := db.Pool.Exec(ctx, `INSERT INTO purchase_orders (id, vendor_id, status, source, branch_id) VALUES ($1, $2, 'SENT', 'MANUAL', $3)`, po, vendor, w.f.branchID); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := db.Pool.Exec(ctx, `INSERT INTO purchase_order_lines (id, po_id, product_id, description, quantity, cost) VALUES ($1, $2, $3, 'recv', 12, 3)`, poLine, po, w.f.productID); err != nil {

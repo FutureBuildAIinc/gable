@@ -94,11 +94,12 @@ describe('InvoiceService', () => {
     expect(inv.status).toBe('void')
   })
 
-  it('emails through the unchanged route', async () => {
-    fetchMock.mockImplementation(async () => new Response(null, { status: 202 }))
-    await InvoiceService.emailInvoice('i-1')
+  it('emails through the unchanged route and answers the queued delivery', async () => {
+    fetchMock.mockImplementation(async () => new Response(JSON.stringify({ status: 'queued', delivery_id: 'd-1' }), { status: 202 }))
+    const queued = await InvoiceService.emailInvoice('i-1')
     expect(lastUrl().pathname).toBe('/api/v1/invoices/i-1/email')
     expect(lastInit().method).toBe('POST')
+    expect(queued).toEqual({ status: 'queued', delivery_id: 'd-1' })
   })
 
   it('parses a void refusal into an ApiError carrying the server message and the blocker code', async () => {

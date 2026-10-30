@@ -65,8 +65,11 @@ type Service struct {
 	// it; C2-5, FROM-PRINCIPAL 60): this route's online gateway is then
 	// never the way back for it.
 	tenderCreditGuard account.TenderCreditGuard
-	logger            *slog.Logger
-	now               func() time.Time
+	// tillCheckGuard, when wired, holds a check taken on a till session to
+	// the counter's check rules (limit and ID), as a sale's check tender is.
+	tillCheckGuard TillCheckGuard
+	logger         *slog.Logger
+	now            func() time.Time
 }
 
 func NewService(db *database.DB, repo *Repository, accountService *account.Service) *Service {
@@ -86,6 +89,20 @@ func (s *Service) WithGateway(gw PaymentGateway, publicKey string) *Service {
 // here before the online gateway is ever asked.
 func (s *Service) WithTenderCreditGuard(g account.TenderCreditGuard) *Service {
 	s.tenderCreditGuard = g
+	return s
+}
+
+// TillCheckGuard is the counter's rule for a check tender. The counter's
+// service satisfies it; serve wires the two. It runs inside the payment's
+// transaction and answers the refusal a sale's check tender would get.
+type TillCheckGuard interface {
+	CheckTillCheckDeposit(ctx context.Context, customerID uuid.UUID, amountCents int64, idChecked bool) error
+}
+
+// WithTillCheckGuard sets the counter's check rules for a check deposit
+// riding a till session.
+func (s *Service) WithTillCheckGuard(g TillCheckGuard) *Service {
+	s.tillCheckGuard = g
 	return s
 }
 
@@ -351,7 +368,7 @@ func (s *Service) record1(ctx context.Context, res *resolved, card *account.Card
 			for _, a := range in.Applications {
 				applied += a.AmountCents
 			}
-			if err := s.checkDeposit(ctx, *in.OrderID, res.branch, in.TillSessionID != nil, in.AmountCents-applied, in.Applications); err != nil {
+			if err := s.checkDeposit(ctx, *in.OrderID, res.branch, in.AmountCents-applied, in.Applications); err != nil {
 				return err
 			}
 		}
@@ -362,6 +379,13 @@ func (s *Service) record1(ctx context.Context, res *resolved, card *account.Card
 			}
 			if status != "OPEN" {
 				return httpx.Conflict("the till session is not open: open a till session before taking a counter deposit")
+			}
+			// A check at the counter meets the same limit and ID rules a
+			// sale's check does, inside this transaction.
+			if in.Method == PaymentMethodCheck && s.tillCheckGuard != nil {
+				if err := s.tillCheckGuard.CheckTillCheckDeposit(ctx, in.CustomerID, in.AmountCents, in.IDChecked); err != nil {
+					return err
+				}
 			}
 		}
 		on := time.Time{}
@@ -414,12 +438,12 @@ func (s *Service) record1(ctx context.Context, res *resolved, card *account.Card
 // deposits already taken. When a payment names an order and applies its
 // entire amount at receipt (heldCents == 0), the order must still not be
 // cancelled and every settled invoice must belong to the named order.
-func (s *Service) checkDeposit(ctx context.Context, orderID, branchID uuid.UUID, requireOrderBranch bool, heldCents int64, apps []account.ApplyLine) error {
+func (s *Service) checkDeposit(ctx context.Context, orderID, branchID uuid.UUID, heldCents int64, apps []account.ApplyLine) error {
 	facts, err := s.repo.OrderDepositFacts(ctx, orderID)
 	if err != nil {
 		return err
 	}
-	if requireOrderBranch && facts.BranchID != branchID {
+	if facts.BranchID != branchID {
 		return httpx.Conflict("this order belongs to another branch: take its deposit there")
 	}
 	if facts.Cancelled() {
@@ -429,7 +453,7 @@ func (s *Service) checkDeposit(ctx context.Context, orderID, branchID uuid.UUID,
 		switch {
 		case facts.FullyInvoiced():
 			return httpx.Conflict("this order is fully invoiced: no deposit can be taken on it")
-		case facts.DepositedCents+heldCents > facts.TotalCents:
+		case heldCents > facts.BalanceCents():
 			return httpx.Conflict("the deposit is larger than the order's balance due after deposits")
 		}
 		return nil

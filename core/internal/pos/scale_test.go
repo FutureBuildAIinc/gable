@@ -39,7 +39,7 @@ func withScale() func(*fixture) {
 		f.service.WithScale(drv)
 		f.t.Cleanup(func() { drv.Close(); sim.Close() })
 		mustExec(f.t, f.db, `INSERT INTO scale_devices (id, branch_id, name, protocol, endpoint, certificate_no, location_note)
-			VALUES ($1, `+defaultBranch+`, 'Yard scale', 'SMA', 'sim://loopback', 'SIMULATED-COC', 'the bridge')`, f.scaleDeviceID)
+			VALUES ($1, $2, 'Yard scale', 'SMA', 'sim://loopback', 'SIMULATED-COC', 'the bridge')`, f.scaleDeviceID, f.branchID)
 	}
 }
 
