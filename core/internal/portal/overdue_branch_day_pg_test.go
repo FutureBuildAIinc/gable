@@ -5,6 +5,7 @@ package portal
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -323,6 +324,12 @@ func gc539Rows(t *testing.T, db *database.DB) (locations, invoices int) {
 	return locations, invoices
 }
 
+// errFixtureRolledBack ends the leg's transaction with a rollback. The
+// answers are read inside the transaction, and the rows the leg wrote are the
+// leg's own: they go with the rollback, so no branch, customer or invoice of
+// the fixture outlives the run. The clock's SET LOCALs go with them too.
+var errFixtureRolledBack = errors.New("gc539: the fixture transaction rolled back")
+
 // overdueLeg reads both surfaces in one transaction and checks that they say
 // the same thing about the same invoices, and that they say the branch's
 // day, not the session's.
@@ -346,9 +353,13 @@ func overdueLeg(t *testing.T, db *database.DB, clock *branchDayClock, phase over
 		}
 		world = w
 		got, err = readOverdueAnswers(ctx, db, w, instant)
-		return err
+		if err != nil {
+			return err
+		}
+		// The answers are read; the fixture's rows go with the rollback.
+		return errFixtureRolledBack
 	})
-	if err != nil {
+	if err != nil && !errors.Is(err, errFixtureRolledBack) {
 		t.Fatalf("read the two surfaces: %v", err)
 	}
 
