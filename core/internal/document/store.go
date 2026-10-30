@@ -20,13 +20,16 @@ func NewStore(db *database.DB) *Store { return &Store{db: db} }
 
 func (s *Store) Yard(ctx context.Context, branch uuid.UUID) (*Yard, error) {
 	var name, address, city, state, zip, phone, code *string
+	var country string
 	err := s.db.GetExecutor(ctx).QueryRow(ctx,
-		`SELECT name, address, city, state, zip, phone, code FROM locations WHERE id = $1`, branch).
-		Scan(&name, &address, &city, &state, &zip, &phone, &code)
+		`SELECT name, address, city, state, zip, phone, code,
+		        UPPER(COALESCE(NULLIF(country_code, ''), COALESCE((SELECT value FROM system_settings WHERE key = 'country.default'), '')))
+		 FROM locations WHERE id = $1`, branch).
+		Scan(&name, &address, &city, &state, &zip, &phone, &code, &country)
 	if err != nil {
 		return nil, fmt.Errorf("read the yard: %w", err)
 	}
-	y := &Yard{Address: str(address), City: str(city), State: str(state), Zip: str(zip), Phone: str(phone)}
+	y := &Yard{Address: str(address), City: str(city), State: str(state), Zip: str(zip), Phone: str(phone), Country: country}
 	if y.Name = str(name); y.Name == "" {
 		y.Name = str(code)
 	}

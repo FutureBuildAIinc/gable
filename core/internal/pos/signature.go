@@ -11,6 +11,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"github.com/gablelbm/gable/internal/taxzone"
 	"net/http"
 	"strings"
 	"time"
@@ -228,6 +229,7 @@ func (s *Service) ThermalReceipt(ctx context.Context, invoiceID uuid.UUID, print
 		JobName:       facts.jobName,
 		SubtotalCents: sale.SubtotalCents,
 		TaxCents:      sale.TaxCents,
+		TaxLines:      taxzone.Lines(facts.taxRateParts),
 		TotalCents:    sale.TotalCents,
 	}
 	for i := range lines {

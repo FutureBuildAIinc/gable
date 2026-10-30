@@ -96,7 +96,11 @@ type InvoiceSummary struct {
 	TaxRatePercent *string            `json:"tax_rate_percent"` // "8.875", null when the provider answered
 	TaxExempt      bool               `json:"tax_exempt"`
 	TaxSource      salesdoc.TaxSource `json:"tax_source"`
-	TotalCents     httpx.Cents        `json:"total_cents"`
+	// TaxRateParts is the zone the invoice was charged on, frozen at the
+	// sale (CP-10), with each part's cents on a Canadian invoice (CP-14
+	// A1): the documents print a line per part from it.
+	TaxRateParts []byte      `json:"-"`
+	TotalCents   httpx.Cents `json:"total_cents"`
 	// OpenCents is what is still owed: the total less the payments recorded
 	// against the invoice while it is unpaid or partial, zero when it is
 	// paid, written off or void. Until C2-4 stores amount_open this is read

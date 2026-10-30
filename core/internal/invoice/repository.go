@@ -109,7 +109,7 @@ const summaryColumns = `
 	to_char(i.invoice_date, 'YYYY-MM-DD'), to_char(i.due_date, 'YYYY-MM-DD'), i.payment_terms_id,
 	to_char(i.discount_due_date, 'YYYY-MM-DD'), ROUND(i.discount_percent * 10000)::bigint,
 	ROUND(COALESCE(i.subtotal, 0) * 100)::bigint, ROUND(COALESCE(i.tax_amount, 0) * 100)::bigint,
-	i.tax_rate::text, i.tax_exempt, i.tax_source, ROUND(i.total_amount * 100)::bigint,
+	i.tax_rate::text, i.tax_exempt, i.tax_source, i.tax_rate_parts, ROUND(i.total_amount * 100)::bigint,
 	` + openExpr + `, ` + overdueExpr + `,
 	i.paid_at, i.gl_entry_id, i.voided_at, i.voided_by, i.void_reason, i.created_at, i.updated_at`
 
@@ -131,7 +131,7 @@ func scanSummary(row pgx.Row, s *InvoiceSummary, extra ...any) error {
 		&status, &s.Revision, &s.Currency, &origin, &delivery, &s.PickedUpBy, &s.DeliveryID,
 		&s.InvoiceDate, &s.DueDate, &s.PaymentTermsID,
 		&s.DiscountDueDate, &discount,
-		&subtotal, &tax, &taxRate, &s.TaxExempt, &taxSource, &total,
+		&subtotal, &tax, &taxRate, &s.TaxExempt, &taxSource, &s.TaxRateParts, &total,
 		&open, &s.IsOverdue,
 		&paid, &s.GLEntryID, &voided, &s.VoidedBy, &s.VoidReason, &created, &updated,
 	}, extra...)

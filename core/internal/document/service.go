@@ -6,6 +6,8 @@ package document
 import (
 	"context"
 	"fmt"
+	"github.com/gablelbm/gable/internal/platform/httpx"
+	"github.com/gablelbm/gable/internal/taxzone"
 	"log/slog"
 	"strings"
 	"time"
@@ -42,6 +44,9 @@ type Yard struct {
 	State   string
 	Zip     string
 	Phone   string
+	// Country is the branch's own country, else the dealer's default
+	// (CP-17a): a CA branch's tax documents carry the GST/HST number.
+	Country string
 }
 
 // YardReader reads a branch's yard block.
@@ -222,6 +227,26 @@ func (b *branding) dealerBlock() []string {
 	return joinLines(d.DisplayName(), d.Phone, d.Email, d.Website)
 }
 
+// registrationLine is the GST/HST line every Canadian tax document prints
+// under the dealer block (CP-14 A1): the number as CRA writes it, or a plain
+// notice when none is on file (item 364: never a refusal). A dealer marked
+// not registered for GST/HST, and every US branch, print nothing.
+func (b *branding) registrationLine() string {
+	if b.dealer == nil || b.yard == nil || b.yard.Country != taxzone.CountryCanada || b.dealer.GSTHSTNotRegistered {
+		return ""
+	}
+	if n := strings.TrimSpace(b.dealer.GSTHSTNumber); n != "" {
+		return "GST/HST No. " + dealerprofile.FormatGSTHSTNumber(n)
+	}
+	return "GST/HST No.: not on file"
+}
+
+// taxLineText is one Canadian tax line as the documents print it:
+// "GST 5%: $1.65".
+func (b *branding) taxLineText(l taxzone.TaxLine) string {
+	return fmt.Sprintf("%s %s%%: %s", l.Label, l.RatePercent, b.style.Money(httpx.Cents(l.Cents)))
+}
+
 // legalName is the dealer's legal name when the lockup does not already say
 // it: the lockup leads with the trading name, so the legal name is its own
 // labelled line, never a second lockup line.
@@ -363,9 +388,10 @@ func block(m core.Maroto, left, right []string, size float64) {
 }
 
 // header writes the identity block every form opens with: the dealer's logo
-// and name and contact lines on the left, the issuing yard's own name and
-// address on the right, then the form's title.
-func (b *branding) header(m core.Maroto, title string, titleSize float64) {
+// and name and contact lines on the left (with any lines a tax document adds
+// under them, CP-14 A1), the issuing yard's own name and address on the
+// right, then the form's title.
+func (b *branding) header(m core.Maroto, title string, titleSize float64, underDealer ...string) {
 	if b.logo != nil {
 		ext := extension.Png
 		if b.logo.ContentType == "image/jpeg" {
@@ -376,7 +402,7 @@ func (b *branding) header(m core.Maroto, title string, titleSize float64) {
 			text.NewCol(10, ""),
 		)
 	}
-	block(m, b.dealerBlock(), b.yardBlock(), 9)
+	block(m, append(b.dealerBlock(), joinLines(underDealer...)...), b.yardBlock(), 9)
 	m.AddRow(16, text.NewCol(12, title, props.Text{Size: titleSize, Style: fontstyle.Bold, Align: align.Center, Top: 4}))
 }
 
@@ -421,7 +447,7 @@ func (s *Service) GenerateInvoicePDF(ctx context.Context, inv *invoice.Invoice, 
 	if inv.Status == invoice.InvoiceStatusVoid {
 		title = "INVOICE - VOID"
 	}
-	b.header(m, title, 18)
+	b.header(m, title, 18, b.registrationLine())
 
 	block(m,
 		joinLines(fmt.Sprintf("Bill To: %s", cust.Name), fmt.Sprintf("Account: %s", cust.AccountNumber), deref(cust.Address)),
@@ -491,13 +517,21 @@ func (s *Service) GenerateInvoicePDF(ctx context.Context, inv *invoice.Invoice, 
 		text.NewCol(12, "SUBTOTAL: "+b.style.Money(inv.SubtotalCents), props.Text{Top: 5, Align: align.Right, Size: 10}),
 	)
 
-	taxLabel := "TAX"
-	if inv.TaxRatePercent != nil {
-		taxLabel = fmt.Sprintf("TAX @ %s%%", *inv.TaxRatePercent)
+	// A Canadian invoice prints each frozen part as its own line, GST then
+	// PST (BC's PSTR s. 85(1), CP-14 A1); every other invoice its one line.
+	if lines := taxzone.Lines(inv.TaxRateParts); lines != nil {
+		for _, l := range lines {
+			m.AddRow(10, text.NewCol(12, b.taxLineText(l), props.Text{Align: align.Right, Size: 10}))
+		}
+	} else {
+		taxLabel := "TAX"
+		if inv.TaxRatePercent != nil {
+			taxLabel = fmt.Sprintf("TAX @ %s%%", *inv.TaxRatePercent)
+		}
+		m.AddRow(10,
+			text.NewCol(12, taxLabel+": "+b.style.Money(inv.TaxCents), props.Text{Align: align.Right, Size: 10}),
+		)
 	}
-	m.AddRow(10,
-		text.NewCol(12, taxLabel+": "+b.style.Money(inv.TaxCents), props.Text{Align: align.Right, Size: 10}),
-	)
 
 	m.AddRow(15,
 		text.NewCol(12, "TOTAL DUE: "+b.style.Money(inv.TotalCents), props.Text{Top: 5, Style: fontstyle.Bold, Align: align.Right, Size: 12}),

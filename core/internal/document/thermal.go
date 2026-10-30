@@ -6,6 +6,7 @@ package document
 import (
 	"context"
 	"fmt"
+	"github.com/gablelbm/gable/internal/taxzone"
 	"strings"
 	"time"
 
@@ -74,7 +75,11 @@ type ThermalReceipt struct {
 	SubtotalCents httpx.Cents
 	TaxCents      httpx.Cents
 	TaxLabel      string // "TAX", "HST", "Sales tax"; empty prints "Tax"
-	TotalCents    httpx.Cents
+	// TaxLines are a Canadian sale's parts from its invoice's frozen zone
+	// (CP-14 A1): each prints as its own line in place of the one tax line.
+	// Nil on a US sale.
+	TaxLines   []taxzone.TaxLine
+	TotalCents httpx.Cents
 	// RoundingCents is the cash rounding the branch's rule made on this
 	// sale: the difference between the cash the drawer kept and the exact
 	// cash the sale needed. It prints only when it is not zero, the way the
@@ -200,6 +205,9 @@ func (s *Service) GenerateThermalReceiptPDF(ctx context.Context, branch uuid.UUI
 				add(thermalRowTiny, text.NewCol(thermalGridSize, l, props.Text{Size: 7, Align: align.Center}))
 			}
 		}
+		if reg := b.registrationLine(); reg != "" {
+			add(thermalRowTiny, text.NewCol(thermalGridSize, reg, props.Text{Size: 7, Align: align.Center}))
+		}
 	}
 
 	// Yard identity block.
@@ -300,11 +308,17 @@ func (s *Service) GenerateThermalReceiptPDF(ctx context.Context, branch uuid.UUI
 
 	// Totals.
 	add(thermalRowBody, text.NewCol(thermalGridSize, "Subtotal: "+b.style.Money(r.SubtotalCents), props.Text{Size: 9, Align: align.Right}))
-	label := r.TaxLabel
-	if label == "" {
-		label = "Tax"
+	if r.TaxLines != nil {
+		for _, l := range r.TaxLines {
+			add(thermalRowBody, text.NewCol(thermalGridSize, b.taxLineText(l), props.Text{Size: 9, Align: align.Right}))
+		}
+	} else {
+		label := r.TaxLabel
+		if label == "" {
+			label = "Tax"
+		}
+		add(thermalRowBody, text.NewCol(thermalGridSize, label+": "+b.style.Money(r.TaxCents), props.Text{Size: 9, Align: align.Right}))
 	}
-	add(thermalRowBody, text.NewCol(thermalGridSize, label+": "+b.style.Money(r.TaxCents), props.Text{Size: 9, Align: align.Right}))
 	add(thermalRowLarge, text.NewCol(thermalGridSize, "Total: "+b.style.Money(r.TotalCents), props.Text{Size: 12, Style: fontstyle.Bold, Align: align.Right}))
 	if r.RoundingCents != 0 {
 		add(thermalRowBody, text.NewCol(thermalGridSize, "Cash rounding: "+b.style.Money(r.RoundingCents), props.Text{Size: 9, Align: align.Right}))
