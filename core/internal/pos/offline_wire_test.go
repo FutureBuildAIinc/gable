@@ -243,3 +243,62 @@ func TestOfflineSyncWire_AResolvedExceptionAnswersResolved(t *testing.T) {
 		t.Errorf("open_exception_count = %d, want 0", got)
 	}
 }
+
+// RULE (ADR 0011 5.3, on reconnect): an offline sale that replaced a cart
+// the page held as result unknown, and abandoned it, is asked about once:
+// "Was this the same customer and goods?". A no records the sale as for a
+// different customer, so it is listed for the manager; the answer is audited
+// and taken once; a sale that replaced nothing, a key and a second answer
+// are refused, with nothing written.
+func TestOfflineSyncWire_TheReplacedCartAnswer(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	f := newFixture(t, testutil.RequireDB(t))
+	offlinePolicyOn(t, f)
+	b := newOfflineBench(t, f)
+	cart := f.startSale(nil)
+	if r := f.addLine(cart, f.productLine("1")); r.status != http.StatusOK {
+		t.Fatalf("add line = %d: %s", r.status, r.raw)
+	}
+	raw, sale := b.build(t, saleSpec{lines: []offlineLine{line(f.productID, "1")}}, func(s *pos.SignedOfflineSale) { s.ReplacesSaleID = &cart })
+	plain, other := b.build(t, saleSpec{lines: []offlineLine{line(f.productID, "1")}})
+	if r := b.syncWire(t, raw, plain); r.status != http.StatusOK {
+		t.Fatalf("sync = %d: %s", r.status, r.raw)
+	}
+	answer := func(id string, same any) resp {
+		return f.do("POST", "/api/v1/pos/transactions/"+id+"/replaced-cart-answer", map[string]any{"same_goods": same},
+			"X-Test-Role", "cashier", "X-Test-Sub", uuid.NewString())
+	}
+	if r := answer(other.ClientID, false); r.status != http.StatusConflict {
+		t.Errorf("an answer on a sale that replaced nothing = %d %s, want 409", r.status, r.raw)
+	}
+	if r := answer(cart, false); r.status != http.StatusConflict {
+		t.Errorf("an answer on the abandoned cart itself = %d %s, want 409", r.status, r.raw)
+	}
+	if r := f.do("POST", "/api/v1/pos/transactions/"+sale.ClientID+"/replaced-cart-answer", map[string]any{},
+		"X-Test-Role", "cashier", "X-Test-Sub", uuid.NewString()); r.status != http.StatusBadRequest {
+		t.Errorf("an answer naming nothing = %d %s, want 400", r.status, r.raw)
+	}
+	if r := answer(sale.ClientID, false); r.status != http.StatusOK {
+		t.Fatalf("the answer = %d %s, want 200", r.status, r.raw)
+	}
+	if n := countOf(t, f.db, `SELECT count(*) FROM pos_transactions WHERE id = $1 AND different_customer`, sale.ClientID); n != 1 {
+		t.Errorf("a no did not list the sale as for a different customer")
+	}
+	if n := countOf(t, f.db, `SELECT count(*) FROM audit_log WHERE action = 'pos.offline_sale.replaced_cart_answered' AND entity_id = $1`, sale.ClientID); n != 1 {
+		t.Errorf("%d answer audit rows, want 1", n)
+	}
+	if r := answer(sale.ClientID, true); r.status != http.StatusConflict {
+		t.Errorf("a second answer = %d %s, want 409", r.status, r.raw)
+	}
+	keyed := keyedServer(f, uuid.NewString())
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/pos/transactions/"+sale.ClientID+"/replaced-cart-answer", strings.NewReader(`{"same_goods":true}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	keyed.Config.Handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusForbidden {
+		t.Errorf("an answer by a machine key = %d, want 403", rec.Code)
+	}
+	if n := countOf(t, f.db, `SELECT count(*) FROM audit_log WHERE action = 'pos.offline_sale.replaced_cart_answered' AND entity_id = $1`, sale.ClientID); n != 1 {
+		t.Errorf("%d answer audit rows after the refusals, want 1", n)
+	}
+}

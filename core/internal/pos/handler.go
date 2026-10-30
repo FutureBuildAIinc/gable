@@ -151,6 +151,9 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux, roleGuard ...func(http.Hand
 	mux.HandleFunc("POST /api/v1/pos/transactions/{id}/void", guard(h.VoidTransaction))
 	mux.HandleFunc("POST /api/v1/pos/transactions/{id}/overrides", guard(h.ApproveOverrideHandler))
 	mux.HandleFunc("POST /api/v1/pos/transactions/{id}/signature", guard(h.CaptureSignatureHandler))
+	// The clerk's answer for an offline sale that replaced a result unknown
+	// cart (CP-13 C2, ADR 0011 5.3).
+	mux.HandleFunc("POST /api/v1/pos/transactions/{id}/replaced-cart-answer", guard(h.AnswerReplacedCartHandler))
 
 	// History and search
 	mux.HandleFunc("GET /api/v1/pos/products/search", guard(h.SearchProducts))

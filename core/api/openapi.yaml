@@ -14963,6 +14963,56 @@ paths:
           $ref: "#/components/responses/ForbiddenEither"
         "500":
           $ref: "#/components/responses/InternalError"
+  /api/v1/pos/transactions/{id}/replaced-cart-answer:
+    post:
+      operationId: posReplacedCartAnswer
+      tags: [pos]
+      summary: Record the clerk's answer for an offline sale that replaced a cart
+      description: >-
+        On reconnect the counter asks once about an offline sale that kept the default link to the cart whose result was unknown and abandoned it at the sync (ADR 0011 5.3): was it the same customer and goods? A no records the sale as for a different customer, listed for the manager beside the abandoned cart; either answer is audited. A person's act at the counter, never a machine key (403). A sale that replaced no cart, a cart not abandoned by it, a sale declared at the time, and a second answer are refused 409, nothing written.
+      parameters:
+        - $ref: "#/components/parameters/XBranchId"
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [same_goods]
+              properties:
+                same_goods: {type: boolean}
+      responses:
+        "200":
+          description: The answer as recorded.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [sale_id, replaced_sale_id, same_goods]
+                properties:
+                  sale_id: {type: string, format: uuid}
+                  replaced_sale_id: {type: string, format: uuid}
+                  same_goods: {type: boolean}
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: "not_replacing, cart_not_abandoned, already_declared or answer_recorded (the ADR 0001 envelope)."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WireError"
+        "500":
+          $ref: "#/components/responses/InternalError"
   /api/v1/pos/sync:
     post:
       operationId: posSyncOffline

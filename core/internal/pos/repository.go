@@ -331,6 +331,8 @@ type Repository interface {
 	AdvanceDeviceMark(ctx context.Context, deviceID uuid.UUID, seq int64, digest string) error
 	ConfirmDeviceMark(ctx context.Context, register string, epoch, reported int64) (int64, error)
 	OpenOfflineExceptionCount(ctx context.Context, register string) (int64, error)
+	ReplacedCartFacts(ctx context.Context, saleID uuid.UUID) (*replacedCartFacts, error)
+	MarkDifferentCustomer(ctx context.Context, saleID uuid.UUID) error
 	OfflinePostedRecord(ctx context.Context, id uuid.UUID) (*offlinePosted, error)
 	OfflineExceptionsOf(ctx context.Context, id uuid.UUID) ([]offlineExceptionRow, error)
 	OfflineSequenceHolder(ctx context.Context, register string, epoch, seq int64, id uuid.UUID) (bool, error)

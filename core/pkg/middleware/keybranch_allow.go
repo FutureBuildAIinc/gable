@@ -471,6 +471,7 @@ var keyBranchRoutes = map[string]KeyBranchRouteNote{
 	"POST /api/v1/pos/transactions/{id}/items/{itemId}/weight":     {KeyBranchClassWalled, "pos_transactions.branch_id (the sale is read and locked before the write); TestKeyBranchPin_PosAndAccountRows"},
 	"POST /api/v1/pos/transactions/{id}/overrides":                 {KeyBranchClassRefused, "a manager approves one sale as a person: the admin or owner role, another person than the sale's cashier; the route itself refuses a machine key too"},
 	"POST /api/v1/pos/transactions/{id}/receipt/email":             {KeyBranchClassWalled, "pos_transactions.branch_id (the sale is read as the sale read reads it, before the invoice is named); TestPosReceipt_CashierPrintsAndEmailsTheSalesInvoice"},
+	"POST /api/v1/pos/transactions/{id}/replaced-cart-answer":      {KeyBranchClassRefused, "the clerk's answer about a replaced cart is a person's act at the counter: the route itself refuses a machine key, bound or not (CP-13 C2)"},
 	"POST /api/v1/pos/transactions/{id}/signature":                 {KeyBranchClassWalled, "pos_transactions.branch_id (the sale is held and read before the seal is written); TestKeyBranchPin_PosAndAccountRows"},
 	"POST /api/v1/pos/transactions/{id}/void":                      {KeyBranchClassWalled, "pos_transactions.branch_id (the transaction is read before any write)"},
 	"POST /api/v1/pricing/calculate-escalation":                    {KeyBranchClassStatedLimit, "a calculator over supplied inputs, no branch fact"},
