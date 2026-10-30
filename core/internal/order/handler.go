@@ -93,13 +93,32 @@ func actor(r *http.Request) string {
 	return ""
 }
 
-// callerRole reads the caller's role; empty when the auth chain set none (an
-// in process caller, a machine key).
+// callerRole is the role the hold release judges, over both the role and the
+// roles claims (ADR 0012 section 2): the first of admin, owner or finance the
+// caller holds, else the caller's primary role, else "none" when the claims
+// carry no role at all, so a person with claims and no role is refused. It is
+// empty when the auth chain set no claims (an in process caller, a machine
+// key, dev mode), which the release admits.
 func callerRole(r *http.Request) string {
-	if claims, ok := r.Context().Value(middleware.UserContextKey).(*middleware.UserClaims); ok && claims != nil {
-		return claims.Role
+	claims, ok := r.Context().Value(middleware.UserContextKey).(*middleware.UserClaims)
+	if !ok || claims == nil {
+		return ""
 	}
-	return ""
+	for _, want := range []string{"owner", "admin", "finance"} {
+		if middleware.ClaimsHaveAnyRole(claims, want) {
+			return want
+		}
+	}
+	if p := middleware.ClaimsPrimaryRole(claims); p != "" {
+		return p
+	}
+	return "none"
+}
+
+// auditRole is the role string an event records: the first mapped role in the
+// fixed order, so the row does not depend on the order of roles.
+func auditRole(r *http.Request) string {
+	return middleware.ClaimsPrimaryRole(middleware.ClaimsFromContext(r.Context()))
 }
 
 func (h *Handler) HandleCreateOrder(w http.ResponseWriter, r *http.Request) {
@@ -411,7 +430,7 @@ func (h *Handler) HandleExposureOverride(w http.ResponseWriter, r *http.Request)
 		httpx.WriteError(w, r, err)
 		return
 	}
-	err = h.service.OverrideExposure(r.Context(), id, body.Notes, actor(r), callerRole(r))
+	err = h.service.OverrideExposure(r.Context(), id, body.Notes, actor(r), auditRole(r))
 	if err != nil {
 		httpx.WriteError(w, r, err)
 		return

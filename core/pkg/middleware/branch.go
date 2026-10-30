@@ -391,3 +391,30 @@ func claimsHasAnyRole(claims *UserClaims, roles ...string) bool {
 func ClaimsHaveAnyRole(claims *UserClaims, roles ...string) bool {
 	return claimsHasAnyRole(claims, roles...)
 }
+
+// roleOrder is the fixed order of Gable roles (ADR 0012 section 5).
+var roleOrder = []string{"owner", "admin", "sales", "finance", "purchasing", "warehouse", "cashier", "driver"}
+
+// ClaimsPrimaryRole returns the first of the claims' mapped roles in the fixed
+// order owner, admin, sales, finance, purchasing, warehouse, cashier, driver,
+// so a recorded role string does not depend on the order of roles. A role
+// outside the mapped set (a legacy token's) is returned only when no mapped
+// role is held: the single role claim, else the first of roles. Nil claims
+// answer "". It is for audit rows; every decision asks ClaimsHaveAnyRole.
+func ClaimsPrimaryRole(claims *UserClaims) string {
+	if claims == nil {
+		return ""
+	}
+	for _, want := range roleOrder {
+		if claimsHasAnyRole(claims, want) {
+			return want
+		}
+	}
+	if claims.Role != "" {
+		return claims.Role
+	}
+	if len(claims.Roles) > 0 {
+		return claims.Roles[0]
+	}
+	return ""
+}
