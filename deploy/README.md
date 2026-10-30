@@ -159,6 +159,7 @@ sign in settings.
 | Value | Required in customer variant | What it is |
 |---|---|---|
 | `APPWRITE_ENDPOINT`, `APPWRITE_PROJECT_ID`, `APPWRITE_TEAM_ID`, `APPWRITE_API_KEY` | yes | The Appwrite project and its staff team (see the table above). The recipe refuses to start without them. |
+| `STAFF_SIGNIN_FLOOR_MS` | no | The least time every password sign in answer takes, in milliseconds (default 1000). It must sit above the Appwrite password hash cost or the two password refusals can be split by timing; a value under 250 or over 10000, or not a whole number, refuses the boot. |
 | `JWKS_URL` | no | Optional: an identity provider's JWKS endpoint URL, used by the core to verify bearer tokens. |
 | `AUTH_ISSUER` | no | When set, the core also checks that each token's `iss` claim matches this issuer string. |
 

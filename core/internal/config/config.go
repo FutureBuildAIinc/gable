@@ -79,6 +79,12 @@ type Config struct {
 	StaffSessionRefresh  time.Duration // STAFF_SESSION_REFRESH, membership re-read interval
 	StaffSessionSnapshot time.Duration // STAFF_SESSION_SNAPSHOT_MAX, oldest unconfirmed snapshot served
 
+	// StaffSigninFloorMS is the constant time floor every password sign in
+	// answer waits out, in milliseconds, so an unknown address cannot be
+	// told from a wrong password by timing. The default is one second; a
+	// value outside the accepted band refuses the boot (see Load).
+	StaffSigninFloorMS int // STAFF_SIGNIN_FLOOR_MS
+
 	// TrustedProxies lists the reverse proxy networks whose X-Forwarded-For
 	// is believed (TRUSTED_PROXIES, comma separated CIDRs or addresses).
 	// Empty by default: no forwarding header is trusted and the client is the
@@ -189,6 +195,18 @@ type Config struct {
 // worker's days to Duration conversion cannot overflow.
 const MaxOutboxRetentionDays = 3650
 
+// The sign in floor's band (STAFF_SIGNIN_FLOOR_MS). The default matches
+// staffauth.DefaultSignInFloor: one second, several times Appwrite's password
+// hash cost. The minimum keeps the floor above that slow path, so the two
+// password refusals cannot be split by timing even on a fast box; the maximum
+// keeps it under the server's 15 s write timeout, so a held answer can still
+// be written.
+const (
+	defaultStaffSigninFloorMS = 1000
+	minStaffSigninFloorMS     = 250
+	maxStaffSigninFloorMS     = 10000
+)
+
 // validateDraftFeedSettings refuses a zero or negative setting at boot,
 // except the retention, where zero or negative turns the purge off.
 func validateDraftFeedSettings(cfg *Config) error {
@@ -216,6 +234,20 @@ func validateDraftFeedSettings(cfg *Config) error {
 
 func Load() (*Config, error) {
 	_ = godotenv.Load() // Load .env if it exists, ignore if not
+
+	// The sign in floor is a security knob, not a convenience: a malformed
+	// value or one outside the band refuses the boot instead of quietly
+	// weakening or breaking the floor, and the typed value is never echoed
+	// back. An unset or blank value keeps the default.
+	staffSigninFloorMS := defaultStaffSigninFloorMS
+	if raw, ok := os.LookupEnv("STAFF_SIGNIN_FLOOR_MS"); ok && strings.TrimSpace(raw) != "" {
+		n, err := strconv.Atoi(strings.TrimSpace(raw))
+		if err != nil || n < minStaffSigninFloorMS || n > maxStaffSigninFloorMS {
+			return nil, fmt.Errorf("invalid STAFF_SIGNIN_FLOOR_MS: must be a whole number of milliseconds from %d to %d",
+				minStaffSigninFloorMS, maxStaffSigninFloorMS)
+		}
+		staffSigninFloorMS = n
+	}
 
 	cfg := &Config{
 		Port:        getEnv("PORT", "8080"),
@@ -275,6 +307,7 @@ func Load() (*Config, error) {
 		StaffSessionAbsolute: getEnvDuration("STAFF_SESSION_ABSOLUTE", 0),
 		StaffSessionRefresh:  getEnvDuration("STAFF_SESSION_REFRESH", 0),
 		StaffSessionSnapshot: getEnvDuration("STAFF_SESSION_SNAPSHOT_MAX", 0),
+		StaffSigninFloorMS:   staffSigninFloorMS,
 
 		// Logging
 		LogLevel: getEnv("LOG_LEVEL", "INFO"),

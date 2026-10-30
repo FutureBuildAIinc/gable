@@ -272,7 +272,13 @@ func Run() {
 		}, logger).WithFloorWatch(awClient, time.Minute).WithRedirects(awClient, cfg.PublicURL)
 		staffLinks = staffauth.NewLinks(db, awClient, auditLog)
 		go staffSvc.RunSweeper(sweepCtx, time.Hour)
-		staffHandler = staffauth.NewHandler(staffSvc, staffauth.HandlerConfig{Origin: cfg.PublicURL, Trusted: cfg.TrustedProxies})
+		staffHandler = staffauth.NewHandler(staffSvc, staffauth.HandlerConfig{
+			Origin: cfg.PublicURL, Trusted: cfg.TrustedProxies,
+			// The floor is validated to its band at config load, so the
+			// handler's own zero default and test only switch never apply
+			// here, and the value is never logged.
+			SignInFloor: time.Duration(cfg.StaffSigninFloorMS) * time.Millisecond,
+		})
 		am, err := middleware.NewAuthMiddleware(context.Background(), middleware.AuthConfig{
 			JWKSURL:     cfg.JWKSURL,
 			Issuer:      cfg.AuthIssuer,
