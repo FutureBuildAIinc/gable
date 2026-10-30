@@ -2776,7 +2776,7 @@ export class POSTerminal extends LitElement {
       ${this._tillFloatError ? html`<p role="alert" data-testid="till-float-error" style="margin:8px 0 0;font-size:13px;color:rgb(var(--gb-till-bad))">${this._tillFloatError}</p>` : nothing}
       <div style="display:flex;gap:8px;margin-top:20px">
         <button @click=${() => { this._showTillOpen = false; this._tillFloatError = ''; }} style="flex:1;padding:12px;background:transparent;border:1px solid rgb(var(--gb-till-edge));border-radius:8px;color:rgb(var(--gb-till-muted));font-size:14px;cursor:pointer">Cancel</button>
-        <button @click=${() => this._openTill()} ?disabled=${this._tillBusy} style="flex:2;padding:12px;background:rgb(var(--gb-till-accent));border:none;border-radius:8px;color:rgb(var(--gb-plate));font-size:15px;font-weight:700;cursor:pointer">${this._tillBusy ? 'Opening\u2026' : 'Open Till'}</button>
+        <button @click=${() => this._openTill()} ?disabled=${this._tillBusy} style="flex:2;padding:12px;background:rgb(var(--gb-till-accent));border:none;border-radius:8px;color:rgb(var(--gb-deep-space));font-size:15px;font-weight:700;cursor:pointer">${this._tillBusy ? 'Opening\u2026' : 'Open Till'}</button>
       </div>
     `);
   }
@@ -2909,7 +2909,7 @@ export class POSTerminal extends LitElement {
       ${this._closeCountError ? html`<p role="alert" data-testid="till-close-error" style="margin:8px 0 0;font-size:13px;color:rgb(var(--gb-till-bad))">${this._closeCountError}</p>` : nothing}
       <div style="display:flex;gap:8px;margin-top:20px">
         <button @click=${close} style="flex:1;padding:12px;background:transparent;border:1px solid rgb(var(--gb-till-edge));border-radius:8px;color:rgb(var(--gb-till-muted));font-size:14px;cursor:pointer">Cancel</button>
-        <button @click=${() => this._confirmCloseTill()} ?disabled=${this._tillBusy} style="flex:2;padding:12px;background:rgb(var(--gb-till-accent));border:none;border-radius:8px;color:rgb(var(--gb-plate));font-size:15px;font-weight:700;cursor:pointer">${this._tillBusy ? 'Posting\u2026' : 'Post Count & Close'}</button>
+        <button @click=${() => this._confirmCloseTill()} ?disabled=${this._tillBusy} style="flex:2;padding:12px;background:rgb(var(--gb-till-accent));border:none;border-radius:8px;color:rgb(var(--gb-deep-space));font-size:15px;font-weight:700;cursor:pointer">${this._tillBusy ? 'Posting\u2026' : 'Post Count & Close'}</button>
       </div>
     `);
   }
@@ -2932,7 +2932,7 @@ export class POSTerminal extends LitElement {
         style="margin-bottom:12px"></gable-date-field>
       ${this._returnSearchError ? html`<p role="alert" style="margin:0 0 12px;font-size:13px;color:rgb(var(--gb-till-bad))" data-testid="return-search-error">${this._returnSearchError}</p>` : nothing}
       <button @click=${() => void this._searchReturns()} ?disabled=${this._returnSearchBusy}
-        style="width:100%;padding:12px;background:rgb(var(--gb-till-accent));border:none;border-radius:8px;color:rgb(var(--gb-plate));font-size:15px;font-weight:700;cursor:pointer;margin-bottom:16px"
+        style="width:100%;padding:12px;background:rgb(var(--gb-till-accent));border:none;border-radius:8px;color:rgb(var(--gb-deep-space));font-size:15px;font-weight:700;cursor:pointer;margin-bottom:16px"
         data-testid="return-search-submit">${this._returnSearchBusy ? 'Searching\u2026' : 'Search'}</button>
       ${this._returnSearchResults.length > 0 ? html`
         <div style="max-height:340px;overflow-y:auto" data-testid="return-search-results">

@@ -136,7 +136,7 @@ export class StepUpDialog extends LitElement {
                         <button type="button" data-testid="step-up-cancel" @click=${() => this._cancel()}
                             style="flex:1;padding:12px;background:transparent;border:1px solid rgb(var(--gb-till-edge));border-radius:8px;color:rgb(var(--gb-till-muted));font-size:14px;cursor:pointer">Cancel</button>
                         <button type="button" data-testid="step-up-approve" @click=${() => void this._approve()} ?disabled=${this.busy}
-                            style="flex:2;padding:12px;background:rgb(var(--gb-till-accent));border:none;border-radius:8px;color:rgb(var(--gb-plate));font-size:15px;font-weight:700;cursor:pointer">${this.busy ? 'Asking\u2026' : 'Approve'}</button>
+                            style="flex:2;padding:12px;background:rgb(var(--gb-till-accent));border:none;border-radius:8px;color:rgb(var(--gb-deep-space));font-size:15px;font-weight:700;cursor:pointer">${this.busy ? 'Asking\u2026' : 'Approve'}</button>
                     </div>
                         `}
                 </div>

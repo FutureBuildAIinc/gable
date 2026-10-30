@@ -167,7 +167,7 @@ export class TillMovementDialog extends LitElement {
                 <button type="button" data-testid="movement-cancel" @click=${() => this.cancel()}
                     style="flex:1;padding:12px;background:transparent;border:1px solid rgb(var(--gb-till-edge));border-radius:8px;color:rgb(var(--gb-till-muted));font-size:14px;cursor:pointer">Cancel</button>
                 <button type="button" data-testid="movement-record" @click=${() => this.record()} ?disabled=${this.busy}
-                    style="flex:2;padding:12px;background:rgb(var(--gb-till-accent));border:none;border-radius:8px;color:rgb(var(--gb-plate));font-size:15px;font-weight:700;cursor:pointer">${this.busy ? 'Recording\u2026' : this.recordLabel()}</button>
+                    style="flex:2;padding:12px;background:rgb(var(--gb-till-accent));border:none;border-radius:8px;color:rgb(var(--gb-deep-space));font-size:15px;font-weight:700;cursor:pointer">${this.busy ? 'Recording\u2026' : this.recordLabel()}</button>
             </div>
         `;
     }

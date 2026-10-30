@@ -357,7 +357,7 @@ export class TintLineDialog extends LitElement {
                 <button type="button" data-testid="tint-cancel" @click=${() => this.cancel()}
                     style="flex:1;padding:12px;background:transparent;border:1px solid rgb(var(--gb-till-edge));border-radius:8px;color:rgb(var(--gb-till-muted));font-size:14px;cursor:pointer">Cancel</button>
                 <button type="button" data-testid="tint-add" @click=${() => this.add()} ?disabled=${this.busy || !color || this.components.length === 0}
-                    style="flex:2;padding:12px;background:rgb(var(--gb-till-accent));border:none;border-radius:8px;color:rgb(var(--gb-plate));font-size:15px;font-weight:700;cursor:pointer">${this.busy ? 'Adding\u2026' : `Add tinted line $${(price / 10000).toFixed(2)}`}</button>
+                    style="flex:2;padding:12px;background:rgb(var(--gb-till-accent));border:none;border-radius:8px;color:rgb(var(--gb-deep-space));font-size:15px;font-weight:700;cursor:pointer">${this.busy ? 'Adding\u2026' : `Add tinted line $${(price / 10000).toFixed(2)}`}</button>
             </div>
         `;
     }
