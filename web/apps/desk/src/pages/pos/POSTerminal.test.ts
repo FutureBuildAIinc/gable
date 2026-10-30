@@ -1103,6 +1103,21 @@ describe('the Panels board', () => {
       el.remove();
     });
 
+    it('styles a logged send apart from a sent one and a failed one', async () => {
+      svc.emailReceipt.mockResolvedValue({ status: 'queued', delivery_id: 'd-1' });
+      const el = await mount(done({ id: 'sale-9', invoice_id: 'inv-1', customer_id: 'cu1' }));
+      const noteClass = async (status: string) => {
+        deliveries.follow.mockResolvedValueOnce({ id: 'd-1', status, recipient: 'billing@example.test' });
+        q(el, 'pos-receipt-email').click();
+        await flush(el);
+        return q(el, 'pos-receipt-note').className;
+      };
+      expect(await noteClass('sent')).toContain('text-slate-400');
+      expect(await noteClass('logged')).toContain('text-amber-400');
+      expect(await noteClass('failed')).toContain('text-safety-red');
+      el.remove();
+    });
+
     it('sends the invoice for Email and says so, or says why not', async () => {
       svc.emailReceipt
         .mockResolvedValueOnce({ status: 'queued', delivery_id: 'd-1' })

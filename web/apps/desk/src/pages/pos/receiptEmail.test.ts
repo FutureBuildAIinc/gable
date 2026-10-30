@@ -2,7 +2,8 @@
 // SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
 
 // The counter's receipt email answer (CP-14): the Sale complete card's note
-// follows the delivery row, and only a failed send reads as an error.
+// follows the delivery row: a logged send reads as a warning, only a failed
+// send as an error.
 import { describe, it, expect } from 'vitest'
 import { receiptEmailAnswer } from './receiptEmail'
 import type { EmailDelivery } from '../../services/EmailDeliveryService'
@@ -30,30 +31,30 @@ describe('receiptEmailAnswer', () => {
   it('does not call a send with an unreadable record a failure', () => {
     const answer = receiptEmailAnswer(OUTCOME_UNKNOWN)
     expect(answer.note).toContain('sent on')
-    expect(answer.refused).toBe(false)
+    expect(answer.tone).toBe('plain')
   })
 
   it('says sent with the address, plainly', () => {
     const answer = receiptEmailAnswer(delivery('sent'))
     expect(answer.note).toBe('Receipt sent to billing@example.test')
-    expect(answer.refused).toBe(false)
+    expect(answer.tone).toBe('plain')
   })
 
   it('says a logged send as email not being set up, not as an error', () => {
     const answer = receiptEmailAnswer(delivery('logged'))
     expect(answer.note).toBe('Email is not set up on this server: the receipt was not sent')
-    expect(answer.refused).toBe(false)
+    expect(answer.tone).toBe('warn')
   })
 
   it('says a failed send as the error it is', () => {
     const answer = receiptEmailAnswer(delivery('failed'))
     expect(answer.note).toBe('The receipt was not sent: the mail server refused or could not be reached. Try again, or print it.')
-    expect(answer.refused).toBe(true)
+    expect(answer.tone).toBe('error')
   })
 
   it('says still sending when the send has not resolved', () => {
     const answer = receiptEmailAnswer(delivery('queued'))
     expect(answer.note).toBe('The receipt email is still being sent')
-    expect(answer.refused).toBe(false)
+    expect(answer.tone).toBe('plain')
   })
 })

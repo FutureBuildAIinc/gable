@@ -39,10 +39,14 @@ function sleep(ms: number): Promise<void> {
 }
 
 export const EmailDeliveryService = {
-    /** The document's sends, newest first. */
+    /**
+     * The invoice's sends, newest first. The desk emails only invoices (the
+     * counter's receipt is the sale's invoice), and the server holds a sales or
+     * cashier read to the document types the role sends, so the read names it.
+     */
     async listForDocument(documentId: string, limit = 20): Promise<EmailDelivery[]> {
         const response = await expectOk(
-            await fetchWithAuth(`${API_URL}/api/v1/email-deliveries?document_id=${documentId}&limit=${limit}`),
+            await fetchWithAuth(`${API_URL}/api/v1/email-deliveries?document_type=invoice&document_id=${documentId}&limit=${limit}`),
             'Failed to read the email sends',
         );
         const page = await response.json();

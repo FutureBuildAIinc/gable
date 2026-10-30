@@ -48,6 +48,7 @@ describe('EmailDeliveryService', () => {
     const called = new URL(fetchMock.mock.calls[0][0] as string, 'http://localhost')
     expect(called.pathname).toBe('/api/v1/email-deliveries')
     expect(called.searchParams.get('document_id')).toBe('doc-1')
+    expect(called.searchParams.get('document_type')).toBe('invoice')
     expect(called.searchParams.get('limit')).toBe('20')
   })
 
@@ -56,13 +57,15 @@ describe('EmailDeliveryService', () => {
       .mockResolvedValueOnce(new Response(JSON.stringify(page([row({ status: 'queued' })])), { status: 200, headers: { 'Content-Type': 'application/json' } }))
       .mockResolvedValueOnce(new Response(JSON.stringify(page([row({ status: 'logged' })])), { status: 200, headers: { 'Content-Type': 'application/json' } }))
     const settled = await EmailDeliveryService.follow('d-1', 'doc-1', 500, 5)
-    expect(settled?.status).toBe('logged')
+    expect(settled).not.toBe(OUTCOME_UNKNOWN)
+    expect((settled as EmailDelivery | undefined)?.status).toBe('logged')
   })
 
   it('returns the still queued row when the bound runs out, never a made up outcome', async () => {
     fetchMock.mockImplementation(async () => new Response(JSON.stringify(page([row({ status: 'queued' })])), { status: 200, headers: { 'Content-Type': 'application/json' } }))
     const unsettled = await EmailDeliveryService.follow('d-1', 'doc-1', 20, 5)
-    expect(unsettled?.status).toBe('queued')
+    expect(unsettled).not.toBe(OUTCOME_UNKNOWN)
+    expect((unsettled as EmailDelivery | undefined)?.status).toBe('queued')
   })
 
   it('returns undefined when the row never appears', async () => {

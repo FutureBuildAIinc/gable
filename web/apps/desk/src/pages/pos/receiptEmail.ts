@@ -11,14 +11,23 @@ import type { EmailDelivery } from '../../services/EmailDeliveryService.ts';
 import { OUTCOME_UNKNOWN } from '../../lib/emailOutcome.ts';
 import { emailOutcomeWords } from '../../lib/emailWords.ts';
 
+/** plain: sent or still sending; warn: nothing left the server (email not set up); error: a failed send. */
+export type ReceiptTone = 'plain' | 'warn' | 'error';
+
 export interface ReceiptEmailAnswer {
     note: string;
-    refused: boolean;
+    tone: ReceiptTone;
+}
+
+function toneOf(delivery: EmailDelivery | typeof OUTCOME_UNKNOWN | undefined): ReceiptTone {
+    if (delivery === OUTCOME_UNKNOWN) return 'plain';
+    if (delivery?.status === 'failed') return 'error';
+    return delivery?.status === 'logged' ? 'warn' : 'plain';
 }
 
 export function receiptEmailAnswer(delivery: EmailDelivery | typeof OUTCOME_UNKNOWN | undefined): ReceiptEmailAnswer {
     return {
         note: emailOutcomeWords(delivery, 'receipt'),
-        refused: delivery !== OUTCOME_UNKNOWN && delivery?.status === 'failed',
+        tone: toneOf(delivery),
     };
 }

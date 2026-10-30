@@ -2721,7 +2721,7 @@ export interface paths {
         put?: never;
         /**
          * Email a customer statement
-         * @description Renders the statement as the print route does and sends it to the customer's email address from a background task, answering 202 at once. The send is recorded in email_deliveries (GET /api/v1/email-deliveries) with the sender's answer or its error. A customer with no email address is a 400 naming customer. Same parameters, roles and branch rules as the print route.
+         * @description Renders the statement as the print route does and sends it to the customer's email address from a background task, answering 202 at once with the queued delivery row's delivery_id. The send resolves that row in email_deliveries (GET /api/v1/email-deliveries) to sent, logged or failed, with the sender's answer or its error. A customer with no email address is a 400 naming customer. Same parameters, roles and branch rules as the print route.
          */
         post: operations["arStatementEmail"];
         delete?: never;
@@ -2761,7 +2761,7 @@ export interface paths {
         put?: never;
         /**
          * Email a quote to its customer
-         * @description Renders the quote as the print route does and sends it to the customer's email address from a background task, answering 202 at once. The send is recorded in email_deliveries. A customer with no email address is a 400 naming customer.
+         * @description Renders the quote as the print route does and sends it to the customer's email address from a background task, answering 202 at once with the queued delivery row's delivery_id. The send resolves that row in email_deliveries to sent, logged or failed. A customer with no email address is a 400 naming customer.
          */
         post: operations["quoteEmail"];
         delete?: never;
@@ -12991,6 +12991,11 @@ export interface components {
         DocumentEmailQueued: {
             /** @enum {string} */
             status: "queued";
+            /**
+             * Format: uuid
+             * @description The queued email_deliveries row, already written; read its status (sent, logged or failed) from GET /api/v1/email-deliveries. Absent only when the row could not be written.
+             */
+            delivery_id?: string;
         };
         /**
          * @description The draft lifecycle, lowercase on the wire; promoted is terminal.
