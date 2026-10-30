@@ -123,6 +123,14 @@ describe('a finance caller', () => {
   });
 });
 
+describe('a token that names no role', () => {
+  it('leaves the writes to the server, as local development signs in', async () => {
+    roles.mockReturnValue([]);
+    const el = await mountAsync<GableOfflineCounter>('gable-offline-counter');
+    expect(el.querySelector('[data-testid="offline-save"]')).not.toBeNull();
+  });
+});
+
 describe('the draft and its policy', () => {
   it('round trips a policy to the same cents', () => {
     const p = policy({ sale_cap_cents: 5 });

@@ -122,10 +122,14 @@ function foldDevice(w: WireEnrolment): RegisterDevice {
     };
 }
 
-/** True for owner and admin: the roles the server lets write the offline policy, enrol and revoke and settle (finance reads only). */
+/**
+ * False for a caller whose token names roles and none is owner or admin (finance
+ * reads the offline figures and writes none). A token that names no role (local
+ * development) is left to the server, which refuses what it must.
+ */
 export function canManageOffline(): boolean {
     const roles = authCustody.roles ?? [];
-    return roles.includes('owner') || roles.includes('admin');
+    return roles.length === 0 || roles.includes('owner') || roles.includes('admin');
 }
 
 /** The manager's proof at the register: their staff number and own counter PIN. */
