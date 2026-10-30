@@ -277,48 +277,77 @@ test.describe('Invoices and credit memos', () => {
   });
 
   test('the status and overdue filters and the cursor walk the list', async ({ page, request }) => {
+    // Everything asserted below is about this spec's own customer and its four
+    // invoices, so another spec's rows (or the shared seed's) cannot change it.
+    const customer = await freshCustomer(request);
+    const partial = (await billedInvoice(request, customer)).invoice;
+    const unpaidA = (await billedInvoice(request, customer)).invoice;
+    const unpaidB = (await billedInvoice(request, customer)).invoice;
+    const paid = (await billedInvoice(request, customer)).invoice;
+    const part = await request.post('/api/v1/payments', {
+      data: { customer_id: customer.id, amount_cents: 100, method: 'cash', reference: `E2E-INV-PART-${RUN}`, applications: [{ invoice_id: partial.id, amount_cents: 100 }] },
+    });
+    expect(part.status(), await part.text()).toBe(201);
+    const full = await request.post('/api/v1/payments', {
+      data: { customer_id: customer.id, amount_cents: paid.total_cents, method: 'cash', reference: `E2E-INV-PAID-${RUN}`, applications: [{ invoice_id: paid.id, amount_cents: paid.total_cents }] },
+    });
+    expect(full.status(), await full.text()).toBe(201);
+    expect(((await (await request.get(`/api/v1/invoices/${partial.id}`)).json()) as { status: string }).status).toBe('partial');
+
     await signIn(page, 'Playwright Invoice Filters');
-    await page.goto('/invoices');
-    await expect(page.getByRole('heading', { name: 'Invoices', exact: true })).toBeVisible();
-
-    // The status filter: only that status in the table.
-    await pickOption(page.getByLabel('Status', { exact: true }), 'Partial');
-    await expect(page.getByText('Updating...')).toHaveCount(0);
-    const partialRows = page.locator('tbody tr');
-    await expect.poll(async () => partialRows.count()).toBeGreaterThan(0);
-    for (const text of await partialRows.allInnerTexts()) expect(text).toContain('Partial');
-
-    // The overdue toggle: every row carries the Overdue badge (the seed has overdue invoices).
-    await pickOption(page.getByLabel('Status', { exact: true }), 'All');
-    await page.getByLabel('Overdue only').check();
-    await expect(page.getByText('Updating...')).toHaveCount(0);
-    const overdueRows = page.locator('tbody tr');
-    await expect.poll(async () => overdueRows.count()).toBeGreaterThan(0);
-    expect(await overdueRows.count()).toBe(await page.getByTestId('overdue-badge').count());
-    const apiOverdue = (await (await request.get('/api/v1/invoices?overdue=true&include=total')).json()) as { total: number };
-    await expect(page.getByTestId('invoice-total')).toContainText(`${apiOverdue.total} invoice`);
-    await page.screenshot({ path: path.join(SHOTS_DIR, 'invoice-list-overdue.png') });
-    await page.getByLabel('Overdue only').uncheck();
-
-    // The overdue=false half of the API and the lowercase vocabulary: a bad status is a 400.
-    const notOverdue = (await (await request.get('/api/v1/invoices?overdue=false&limit=200')).json()) as { items: { is_overdue: boolean }[] };
-    expect(notOverdue.items.every((i) => !i.is_overdue)).toBe(true);
-    expect((await request.get('/api/v1/invoices?status=overdue')).status()).toBe(400);
-
-    // The cursor: five to a page, Load more appends the next five.
+    // The cursor: two to a page. The route is set before the list loads.
     await page.route('**/api/v1/invoices?*', (route) => {
       const url = new URL(route.request().url());
-      url.searchParams.set('limit', '5');
+      url.searchParams.set('limit', '2');
       return route.continue({ url: url.toString() });
     });
-    await page.reload();
-    await expect(page.locator('tbody tr')).toHaveCount(5);
-    const first = await page.locator('tbody tr').first().innerText();
+    await page.goto('/invoices');
+    await expect(page.getByRole('heading', { name: 'Invoices', exact: true })).toBeVisible();
+    await pickOption(page.getByLabel('Customer', { exact: true }), customer.name);
+    const rows = page.locator('tbody tr');
+    const rowFor = (inv: { number: string }) => page.locator('tbody tr', { hasText: inv.number });
+
+    // The cursor walk: two rows, Load more appends the other two, none repeated.
+    await expect(rows).toHaveCount(2);
+    const first = await rows.first().innerText();
     await page.getByRole('button', { name: 'Load more' }).click();
-    await expect(page.locator('tbody tr')).toHaveCount(10);
-    expect(await page.locator('tbody tr').first().innerText()).toBe(first);
+    await expect(rows).toHaveCount(4);
+    expect(await rows.first().innerText()).toBe(first);
     const numbers = await page.locator('tbody tr td:first-child').allInnerTexts();
-    expect(new Set(numbers).size).toBe(10);
+    expect(new Set(numbers).size).toBe(4);
+    await expect(page.getByRole('button', { name: 'Load more' })).toHaveCount(0);
+
+    // The status filter: only that status in the table, here the one partial invoice.
+    await pickOption(page.getByLabel('Status', { exact: true }), 'Partial');
+    await expect(rows).toHaveCount(1);
+    await expect(rowFor(partial)).toContainText('Partial');
+    await pickOption(page.getByLabel('Status', { exact: true }), 'Paid');
+    await expect(rows).toHaveCount(1);
+    await expect(rowFor(paid)).toContainText('Paid');
+    await pickOption(page.getByLabel('Status', { exact: true }), 'Unpaid');
+    await expect(rows).toHaveCount(2);
+    await expect(rowFor(unpaidA)).toContainText('Unpaid');
+    await expect(rowFor(unpaidB)).toContainText('Unpaid');
+    await pickOption(page.getByLabel('Status', { exact: true }), 'All');
+    await expect(rows).toHaveCount(2);
+
+    // The overdue toggle: nothing billed today is overdue, so the customer's list empties,
+    // and every row that does show carries the Overdue badge.
+    await page.getByLabel('Overdue only').check();
+    await expect(rows).toHaveCount(0);
+    expect(await rows.count()).toBe(await page.getByTestId('overdue-badge').count());
+    await page.getByLabel('Overdue only').uncheck();
+    await expect(rows).toHaveCount(2);
+
+    // The overdue half of the API for this customer, and the lowercase vocabulary: a bad status is a 400.
+    const overdue = (await (await request.get(`/api/v1/invoices?customer_id=${customer.id}&overdue=true&include=total`)).json()) as { items: unknown[]; total: number };
+    expect(overdue.items).toHaveLength(0);
+    expect(overdue.total).toBe(0);
+    const notOverdue = (await (await request.get(`/api/v1/invoices?customer_id=${customer.id}&overdue=false&limit=200`)).json()) as { items: { is_overdue: boolean }[] };
+    expect(notOverdue.items).toHaveLength(4);
+    expect(notOverdue.items.every((i) => !i.is_overdue)).toBe(true);
+    expect((await request.get('/api/v1/invoices?status=overdue')).status()).toBe(400);
+    await page.screenshot({ path: path.join(SHOTS_DIR, 'invoice-list-overdue.png') });
   });
 
   test('the portal lists the customer invoices with their numbers and the overdue badge', async ({ page }) => {
