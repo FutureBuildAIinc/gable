@@ -12,6 +12,9 @@ import type {
   AcknowledgmentRequest,
   OverrideRequest,
   IndexRefreshRequest,
+  MarketIndexImportPreview,
+  MarketIndexImportResult,
+  MarketIndexStaleness,
 } from '../types/exposure';
 
 const API_BASE = import.meta.env.VITE_API_URL || '';
@@ -101,6 +104,34 @@ export const ExposureService = {
       method: 'POST',
       body: JSON.stringify(req),
     })),
+
+  // ── Market index import (QE-07-b1) ────────────────────────────────
+  //
+  // The file is a CSV whose header names the columns: index_code, value and
+  // as_of_date are required, source and source_url are optional. The preview
+  // writes nothing and answers every row's fate; the apply writes the rows
+  // the preview accepted, through the same path a manual refresh takes.
+
+  previewIndexImport: async (file: File): Promise<MarketIndexImportPreview> => {
+    const form = new FormData();
+    form.append('file', file, file.name);
+    return json(await fetchWithAuth(`${API_BASE}/api/v1/market-indices/import/preview`, {
+      method: 'POST',
+      body: form,
+    }));
+  },
+
+  applyIndexImport: async (file: File): Promise<MarketIndexImportResult> => {
+    const form = new FormData();
+    form.append('file', file, file.name);
+    return json(await fetchWithAuth(`${API_BASE}/api/v1/market-indices/import/apply`, {
+      method: 'POST',
+      body: form,
+    }));
+  },
+
+  getIndexStaleness: async (): Promise<MarketIndexStaleness> =>
+    json(await fetchWithAuth(`${API_BASE}/api/v1/market-indices/staleness`)),
 
   // The per-customer escalation policy moved to CustomerService (the customer contract, lowercase
   // vocabulary and threshold_percent, written on the customer's revision).

@@ -44,6 +44,9 @@ const (
 	ResourceAISettings = "admin.settings.ai"
 	// ResourceRoutingSettings is the openrouteservice_api_key row.
 	ResourceRoutingSettings = "admin.settings.routing"
+	// ResourceMarketIndexSourceSettings is the single market_index_source row
+	// (migration 159): where a deployment's market index values come from.
+	ResourceMarketIndexSourceSettings = "admin.settings.market_index_source"
 )
 
 // The system_settings keys each resource reads and writes. The AI stack
@@ -121,6 +124,46 @@ type RoutingSettings struct {
 	Source     string  `json:"source"`
 	KeyHint    *string `json:"key_hint"`
 	Revision   int64   `json:"revision"`
+}
+
+// The market index source's values on the wire and in the row.
+const (
+	IndexSourceManual          = "manual"
+	IndexSourceFBConnect       = "fb_connect_feed"
+	IndexSourceStalenessDefault = 7
+)
+
+// MarketIndexSourceSettings is the market index source document: where index
+// values come from, whether a feed URL is stored, the header the feed key
+// rides in, whether a feed key is stored, the staleness threshold in days,
+// the last pull's result (null until the pull exists) and the resource
+// revision every write must precondition on.
+//
+// Two facts are never answered: the feed URL and the feed key's value. The
+// URL is itself a secret (it carries the feed's identity in its path), so it
+// is written and masked exactly like the key. The document says only whether
+// one is stored, and the screen masks both and replaces them whole.
+type MarketIndexSourceSettings struct {
+	Source        string           `json:"source"` // "manual" or "fb_connect_feed"
+	FeedURLSet    bool             `json:"feed_url_set"`
+	FeedKeyHeader string           `json:"feed_key_header"`
+	FeedKeySet    bool             `json:"feed_key_set"`
+	StalenessDays int              `json:"staleness_days"`
+	LastPullAt    *httpx.Timestamp `json:"last_pull_at"`
+	LastPullOK    *bool            `json:"last_pull_ok"`
+	LastError     *string          `json:"last_pull_error"`
+	Revision      int64            `json:"revision"`
+}
+
+// MarketIndexSourceSave is the market index source write: every field is
+// optional. The feed URL and the feed key are write only: nil leaves one,
+// an empty string clears it, a value replaces it (both sealed at rest).
+type MarketIndexSourceSave struct {
+	Source        *string
+	FeedURL       *string
+	FeedKeyHeader *string
+	FeedKey       *string
+	StalenessDays *int
 }
 
 // keyHint is the masked hint a configured key shows: four asterisks and its

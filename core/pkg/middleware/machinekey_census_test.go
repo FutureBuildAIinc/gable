@@ -246,6 +246,8 @@ var adminUsersRouteExpectations = map[string]string{
 	"GET /api/v1/admin/settings/ai":                       "admin:settings",
 	"PUT /api/v1/admin/settings/ai":                       "admin:settings",
 	"POST /api/v1/admin/settings/ai/test":                 "admin:settings",
+	"GET /api/v1/admin/settings/market-index-source":      "admin:settings",
+	"PUT /api/v1/admin/settings/market-index-source":      "admin:settings",
 	"DELETE /api/v1/admin/settings/routing":               "admin:settings",
 	"GET /api/v1/admin/settings/routing":                  "admin:settings",
 	"PUT /api/v1/admin/settings/routing":                  "admin:settings",

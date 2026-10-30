@@ -1,0 +1,369 @@
+// SPDX-License-Identifier: LicenseRef-OpenLBM-Commons-1.0
+// SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
+
+package techadmin_test
+
+// The market index source settings document (QE-07-b1): where a deployment's
+// market index values come from. Manual is the default and the fallback; the
+// FB Connect feed is configured here and pulled by a later slice.
+//
+// Two facts in this document are secrets and neither is ever answered: the
+// feed URL (it carries the feed's identity in its path, so the address is
+// itself the secret) and the feed key's value. Both are stored the way the
+// AI settings store theirs: sealed at rest with the payment vault, never
+// returned, never logged, never in an audit row's changes. The key rides in
+// an optional header, named by feed_key_header and empty by default.
+
+import (
+	"context"
+	"log/slog"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strings"
+	"sync"
+	"testing"
+
+	"github.com/gablelbm/gable/internal/techadmin"
+	"github.com/gablelbm/gable/pkg/audit"
+	"github.com/gablelbm/gable/pkg/middleware"
+)
+
+// lockedBuffer collects log output from the handler goroutine.
+type lockedBuffer struct {
+	mu  sync.Mutex
+	buf strings.Builder
+}
+
+func (b *lockedBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *lockedBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
+
+// fakeFeedKey is an obvious placeholder shaped like a feed credential: its
+// body is a repeated stub, never a real key.
+var fakeFeedKey = "fk_test_" + strings.Repeat("teststub", 4)
+
+// fakeFeedURL is the feed address's placeholder. The address is a secret in
+// its own right, so this string must never leave the server either.
+var fakeFeedURL = "https://connect.example.test/feed/fk_test_" + strings.Repeat("teststub", 4)
+
+// resetIndexSource returns the settings row to its seeded defaults, so each
+// test starts from manual and leaves nothing behind.
+func (f *fixture) resetIndexSource() {
+	_, _ = f.db.Pool.Exec(context.Background(),
+		`UPDATE market_index_source SET source = 'manual', feed_url = '', feed_key = NULL,
+		 feed_key_header = '', staleness_days = 7, last_pull_at = NULL, last_pull_ok = NULL,
+		 last_pull_error = NULL, revision = 1, updated_at = NOW()`)
+	_, _ = f.db.Pool.Exec(context.Background(),
+		`DELETE FROM audit_log WHERE entity_type = 'admin_settings'`)
+	_, _ = f.db.Pool.Exec(context.Background(),
+		`DELETE FROM events_outbox WHERE entity_type = 'admin_settings'`)
+}
+
+// RULE: a fresh deployment reads manual with the seven day staleness
+// threshold, no feed configured, and revision 1 on the ETag. The document
+// never carries a feed URL or a feed key: it says only whether one is stored.
+func TestQE07_IndexSourceDefaultsManual(t *testing.T) {
+	f := newFixture(t)
+	f.resetIndexSource()
+	t.Cleanup(f.resetIndexSource)
+	get := f.do("GET", "/api/v1/admin/settings/market-index-source", nil)
+	if get.status != http.StatusOK {
+		t.Fatalf("GET = %d: %s", get.status, get.raw)
+	}
+	if get.body["source"] != "manual" {
+		t.Errorf("source = %v, want manual", get.body["source"])
+	}
+	if num(t, get.body, "staleness_days") != 7 {
+		t.Errorf("staleness_days = %v, want 7", get.body["staleness_days"])
+	}
+	if get.body["feed_url_set"] != false {
+		t.Errorf("feed_url_set = %v, want false", get.body["feed_url_set"])
+	}
+	if get.body["feed_key_set"] != false {
+		t.Errorf("feed_key_set = %v, want false", get.body["feed_key_set"])
+	}
+	if get.body["feed_key_header"] != "" {
+		t.Errorf("feed_key_header = %v, want empty by default", get.body["feed_key_header"])
+	}
+	if get.body["last_pull_at"] != nil {
+		t.Errorf("last_pull_at = %v, want null until the pull exists", get.body["last_pull_at"])
+	}
+	for _, forbidden := range []string{"feed_url", "feed_key", "feed_key_hint"} {
+		if _, ok := get.body[forbidden]; ok {
+			t.Errorf("the document carries %s: %s", forbidden, get.raw)
+		}
+	}
+	if etag := get.header.Get("ETag"); etag != `"1"` {
+		t.Errorf("ETag = %q, want the revision", etag)
+	}
+	if num(t, get.body, "revision") != 1 {
+		t.Errorf("revision = %v, want 1", get.body["revision"])
+	}
+}
+
+// RULE: the feed URL and the feed key are write only. Both are secrets: the
+// address carries the feed's identity in its path, so it is written and
+// masked exactly like the key. Neither is ever returned, never logged, and
+// never in an audit row's changes (the row records only that they changed).
+// A write without a precondition is 428 and a stale one 409.
+func TestQE07_IndexSourceKeyNeverReturned(t *testing.T) {
+	f := newFixtureWith(t, func(s *techadmin.Service) *techadmin.Service {
+		return s.WithVault(testVault(t))
+	})
+	// The shared fixture wires no audit sink; the key's audit row is what
+	// this test reads, so the service gets the real logger.
+	f.svc.WithAuditLog(audit.NewLogger(f.db))
+	f.resetIndexSource()
+	// The settings row is one row for the whole database, so this test puts
+	// it back the way it found it: another package may read it while this
+	// one runs.
+	t.Cleanup(f.resetIndexSource)
+
+	// A write with no precondition is refused, nothing written.
+	bare := f.do("PUT", "/api/v1/admin/settings/market-index-source",
+		map[string]any{"source": "fb_connect_feed"})
+	if bare.status != http.StatusPreconditionRequired {
+		t.Fatalf("PUT without a precondition = %d, want 428", bare.status)
+	}
+
+	// Nothing the request touches may log either secret.
+	var logBuf lockedBuffer
+	quiet := slog.New(slog.NewTextHandler(&logBuf, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	prevLogger := slog.Default()
+	slog.SetDefault(quiet)
+	save := f.do("PUT", "/api/v1/admin/settings/market-index-source", map[string]any{
+		"source":          "fb_connect_feed",
+		"feed_url":        fakeFeedURL,
+		"feed_key_header": "X-FB-Connect-Key",
+		"feed_key":        fakeFeedKey,
+		"staleness_days":  3,
+	}, "If-Match", `"1"`)
+	if save.status != http.StatusOK {
+		slog.SetDefault(prevLogger)
+		t.Fatalf("PUT = %d: %s", save.status, save.raw)
+	}
+	slog.SetDefault(prevLogger)
+	for _, secret := range []string{fakeFeedKey, fakeFeedURL} {
+		if strings.Contains(logBuf.String(), secret) {
+			t.Errorf("the save logged a secret: %s", logBuf.String())
+		}
+	}
+	if save.body["source"] != "fb_connect_feed" {
+		t.Errorf("saved document = %v", save.body)
+	}
+	if save.body["feed_url_set"] != true {
+		t.Errorf("feed_url_set = %v, want true", save.body["feed_url_set"])
+	}
+	if save.body["feed_key_set"] != true {
+		t.Errorf("feed_key_set = %v, want true", save.body["feed_key_set"])
+	}
+	// The header's name is configuration, not a credential, and is answered.
+	if save.body["feed_key_header"] != "X-FB-Connect-Key" {
+		t.Errorf("feed_key_header = %v, want the header's name", save.body["feed_key_header"])
+	}
+	for _, forbidden := range []string{"feed_url", "feed_key", "feed_key_hint"} {
+		if _, ok := save.body[forbidden]; ok {
+			t.Errorf("the answer carries %s: %s", forbidden, save.raw)
+		}
+	}
+	for _, secret := range []string{fakeFeedKey, fakeFeedURL} {
+		if strings.Contains(string(save.raw), secret) {
+			t.Errorf("the save's answer holds a secret: %s", save.raw)
+		}
+	}
+	if etag := save.header.Get("ETag"); etag != `"2"` {
+		t.Errorf("ETag after save = %q, want the moved revision", etag)
+	}
+
+	// The stored row is sealed, not the secret itself.
+	var storedURL, storedKey string
+	err := f.db.Pool.QueryRow(context.Background(),
+		`SELECT feed_url, COALESCE(feed_key, '') FROM market_index_source`).Scan(&storedURL, &storedKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, stored := range map[string]string{"feed_url": storedURL, "feed_key": storedKey} {
+		if !strings.HasPrefix(stored, "enc:v1:") {
+			t.Errorf("the stored %s is not sealed: %.20s...", name, stored)
+		}
+	}
+	for _, secret := range []string{fakeFeedKey, fakeFeedURL} {
+		if strings.Contains(storedURL+storedKey, secret) {
+			t.Errorf("the stored row holds a secret")
+		}
+	}
+
+	// The read never carries either one.
+	get := f.do("GET", "/api/v1/admin/settings/market-index-source", nil)
+	if get.status != http.StatusOK {
+		t.Fatalf("GET = %d: %s", get.status, get.raw)
+	}
+	for _, secret := range []string{fakeFeedKey, fakeFeedURL} {
+		if strings.Contains(string(get.raw), secret) {
+			t.Errorf("the GET holds a secret: %s", get.raw)
+		}
+	}
+	if get.body["feed_url_set"] != true || get.body["feed_key_set"] != true {
+		t.Errorf("the read lost the stored facts: %v", get.body)
+	}
+
+	// Neither the audit trail nor the events feed holds one, and the audit
+	// row records only that they changed.
+	for _, q := range []string{
+		`SELECT COALESCE(string_agg(changes::text, ' '), '') FROM audit_log WHERE entity_type = 'admin_settings'`,
+		`SELECT COALESCE(string_agg(data::text, ' '), '') FROM events_outbox WHERE entity_type = 'admin_settings'`,
+	} {
+		var all string
+		if err := f.db.Pool.QueryRow(context.Background(), q).Scan(&all); err != nil {
+			t.Fatalf("%s: %v", q, err)
+		}
+		for _, secret := range []string{fakeFeedKey, fakeFeedURL} {
+			if strings.Contains(all, secret) {
+				t.Errorf("a secret found by %s", q)
+			}
+		}
+	}
+	for _, marker := range []string{"feed_key_changed", "feed_url_changed"} {
+		var changed bool
+		if err := f.db.Pool.QueryRow(context.Background(),
+			`SELECT COALESCE((changes->>'`+marker+`')::boolean, false) FROM audit_log
+			 WHERE entity_type = 'admin_settings' AND action = 'settings.saved'`).Scan(&changed); err != nil {
+			t.Fatal(err)
+		}
+		if !changed {
+			t.Errorf("the audit row does not record that %s changed", marker)
+		}
+	}
+
+	// A stale revision is a 409, and a second save that leaves the secrets
+	// keeps them.
+	stale := f.do("PUT", "/api/v1/admin/settings/market-index-source",
+		map[string]any{"staleness_days": 5}, "If-Match", `"1"`)
+	if stale.status != http.StatusConflict {
+		t.Fatalf("PUT on a stale revision = %d, want 409", stale.status)
+	}
+	keep := f.do("PUT", "/api/v1/admin/settings/market-index-source",
+		map[string]any{"staleness_days": 5}, "If-Match", `"2"`)
+	if keep.status != http.StatusOK {
+		t.Fatalf("PUT = %d: %s", keep.status, keep.raw)
+	}
+	if keep.body["feed_key_set"] != true || keep.body["feed_url_set"] != true {
+		t.Errorf("a save that leaves the secrets lost them: %v", keep.body)
+	}
+
+	// An empty feed_url clears the address, an empty feed_key clears the key.
+	clearURL := f.do("PUT", "/api/v1/admin/settings/market-index-source",
+		map[string]any{"feed_url": ""}, "If-Match", `"3"`)
+	if clearURL.status != http.StatusOK {
+		t.Fatalf("PUT clear url = %d: %s", clearURL.status, clearURL.raw)
+	}
+	if clearURL.body["feed_url_set"] != false || clearURL.body["feed_key_set"] != true {
+		t.Errorf("an empty URL did not clear only the URL: %v", clearURL.body)
+	}
+	clearKey := f.do("PUT", "/api/v1/admin/settings/market-index-source",
+		map[string]any{"feed_key": "", "feed_key_header": ""}, "If-Match", `"4"`)
+	if clearKey.status != http.StatusOK {
+		t.Fatalf("PUT clear key = %d: %s", clearKey.status, clearKey.raw)
+	}
+	if clearKey.body["feed_key_set"] != false || clearKey.body["feed_key_header"] != "" {
+		t.Errorf("an empty key did not clear the header: %v", clearKey.body)
+	}
+}
+
+// RULE: the feed URL is refused when it is not an absolute https address,
+// and the feed key's header is refused when it is not a header name. The
+// header is optional: it is empty by default.
+func TestQE07_IndexSourceFeedRefusals(t *testing.T) {
+	f := newFixture(t)
+	f.resetIndexSource()
+	t.Cleanup(f.resetIndexSource)
+	for name, body := range map[string]map[string]any{
+		"a relative address":  {"feed_url": "connect.example.test/feed"},
+		"a plaintext address": {"feed_url": "http://connect.example.test/feed"},
+		"credentials in the address": {"feed_url": "https://user:pass@connect.example.test/feed"},
+		"a header that is not a name": {"feed_key_header": "X FB Key"},
+		"a header with a colon":         {"feed_key_header": "X-FB:Key"},
+	} {
+		body["revision"] = 1
+		put := f.do("PUT", "/api/v1/admin/settings/market-index-source", body, "If-Match", `"1"`)
+		if put.status != http.StatusBadRequest {
+			t.Errorf("PUT with %s = %d, want 400", name, put.status)
+		}
+	}
+}
+
+// RULE: the contract's settings document names no secret either. The
+// document is the only way the settings are read, so a schema that named
+// the URL or the key would be a way to read them whatever the model says.
+func TestQE07_IndexSourceContractNamesNoSecret(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("..", "..", "api", "openapi.yaml"))
+	if err != nil {
+		t.Fatalf("read the contract: %v", err)
+	}
+	doc := string(raw)
+	start := strings.Index(doc, "    MarketIndexSourceSettings:")
+	if start < 0 {
+		t.Fatal("the contract names no MarketIndexSourceSettings schema")
+	}
+	end := strings.Index(doc[start:], "\n    AdminSaveMarketIndexSourceRequest:")
+	if end < 0 {
+		t.Fatal("the contract's settings schema has no end")
+	}
+	schema := doc[start : start+end]
+	for _, forbidden := range []string{"feed_url:", "feed_key:", "feed_key_hint:"} {
+		if strings.Contains(schema, forbidden) {
+			t.Errorf("the settings schema names %s: %s", forbidden, schema)
+		}
+	}
+	for _, wanted := range []string{"feed_url_set:", "feed_key_set:", "feed_key_header:"} {
+		if !strings.Contains(schema, wanted) {
+			t.Errorf("the settings schema does not name %s: %s", wanted, schema)
+		}
+	}
+}
+
+// RULE: only an administrator or owner reaches the market index source
+// settings; any other role is a 403 before anything is read or written. The
+// PUT's own 400 on an empty body proves the allowed roles reach the handler.
+func TestQE07_IndexSourceAdminOnly(t *testing.T) {
+	svc := techadmin.NewService(nil)
+	mux := http.NewServeMux()
+	techadmin.NewHandler(svc).RegisterRoutes(mux, middleware.RequireRole("admin", "owner"))
+	call := func(role, method, path string, body string) *httptest.ResponseRecorder {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(method, path, strings.NewReader(body))
+		if body != "" {
+			req.Header.Set("Content-Type", "application/json")
+		}
+		if role != "" {
+			ctx := context.WithValue(req.Context(), middleware.UserContextKey, &middleware.UserClaims{Role: role})
+			req = req.WithContext(ctx)
+		}
+		mux.ServeHTTP(rec, req)
+		return rec
+	}
+	const path = "/api/v1/admin/settings/market-index-source"
+	for _, role := range []string{"sales", "finance", "warehouse", "cashier", "driver"} {
+		if rec := call(role, http.MethodGet, path, ""); rec.Code != http.StatusForbidden {
+			t.Errorf("GET as %s = %d, want 403", role, rec.Code)
+		}
+		if rec := call(role, http.MethodPut, path, "{}"); rec.Code != http.StatusForbidden {
+			t.Errorf("PUT as %s = %d, want 403", role, rec.Code)
+		}
+	}
+	for _, role := range []string{"admin", "owner"} {
+		if rec := call(role, http.MethodPut, path, ""); rec.Code != http.StatusBadRequest {
+			t.Errorf("PUT as %s = %d, want the handler's own 400", role, rec.Code)
+		}
+	}
+}

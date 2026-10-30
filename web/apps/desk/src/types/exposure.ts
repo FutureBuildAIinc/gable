@@ -128,6 +128,74 @@ export interface MarketIndexHistory {
   recorded_at: string;
   recorded_by?: string;
   source: string;
+  /** The day the value is for, as the source states it (YYYY-MM-DD). */
+  as_of_date?: string | null;
+  /** Where the value came from. */
+  source_url?: string;
+  /** When the value was fetched. */
+  fetched_at?: string | null;
+}
+
+/** One row of a market index CSV import and its fate. */
+export type ImportRowStatus = 'accepted' | 'unchanged' | 'refused';
+
+/** One row of a market index CSV import and its fate. */
+export interface MarketIndexImportRow {
+  /** The line in the file, the header being line 1. */
+  line: number;
+  index_code: string;
+  index_id?: string;
+  index_name?: string;
+  /** The value as the file carries it. */
+  value: string;
+  /** The day the value is for, as the file carries it. */
+  as_of_date: string;
+  source: string;
+  source_url?: string;
+  status: ImportRowStatus;
+  /** Why the row was refused; empty when it was accepted. */
+  reason?: string;
+}
+
+/** What a market index file would do (POST /market-indices/import/preview). */
+export interface MarketIndexImportPreview {
+  rows: MarketIndexImportRow[];
+  accepted_count: number;
+  unchanged_count: number;
+  refused_count: number;
+  indices_affected: number;
+}
+
+/** What a market index file did (POST /market-indices/import/apply). */
+export interface MarketIndexImportResult {
+  rows: MarketIndexImportRow[];
+  applied_count: number;
+  changed_indices: number;
+  /** The exposure scans that ran, one per index whose value moved. */
+  scans: number;
+  unchanged_count: number;
+  refused_count: number;
+}
+
+/** One active index and the day of its newest stored value. */
+export interface MarketIndexFreshness {
+  index_id: string;
+  index_code: string;
+  name: string;
+  current_value: number;
+  /** The day the newest value is for (YYYY-MM-DD); null when it carries no day. */
+  newest_date: string | null;
+  /** How many days old the newest value is; -1 when the index has no value. */
+  days_old: number;
+  stale: boolean;
+}
+
+/** How old the market index values are (GET /market-indices/staleness). */
+export interface MarketIndexStaleness {
+  threshold_days: number;
+  stale: boolean;
+  stale_indices: MarketIndexFreshness[];
+  indices: MarketIndexFreshness[];
 }
 
 export interface AcknowledgmentRequest {

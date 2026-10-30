@@ -50,6 +50,8 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux, roleGuard ...func(http.Hand
 	mux.HandleFunc("GET /api/v1/admin/settings/routing", guard(h.GetRoutingSettings))
 	mux.HandleFunc("PUT /api/v1/admin/settings/routing", guard(h.SaveRoutingSettings))
 	mux.HandleFunc("DELETE /api/v1/admin/settings/routing", guard(h.DeleteRoutingSettings))
+	mux.HandleFunc("GET /api/v1/admin/settings/market-index-source", guard(h.GetMarketIndexSourceSettings))
+	mux.HandleFunc("PUT /api/v1/admin/settings/market-index-source", guard(h.SaveMarketIndexSourceSettings))
 }
 
 func writeJSON(w http.ResponseWriter, status int, body any) {
@@ -341,4 +343,45 @@ func (h *Handler) DeleteRoutingSettings(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// --- market index source settings ---
+
+func (h *Handler) GetMarketIndexSourceSettings(w http.ResponseWriter, r *http.Request) {
+	if err := noQuery(r); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	out, err := h.service.GetMarketIndexSourceSettings(r.Context())
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	httpx.WriteRevisionETag(w, out.Revision)
+	writeJSON(w, http.StatusOK, out)
+}
+
+func (h *Handler) SaveMarketIndexSourceSettings(w http.ResponseWriter, r *http.Request) {
+	if err := noQuery(r); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	var req SaveMarketIndexSourceRequest
+	if err := httpx.DecodeJSON(r, &req); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	save, revision, err := req.Parse()
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	out, err := h.service.SaveMarketIndexSourceSettings(r.Context(), save,
+		Precondition{IfMatch: r.Header.Get("If-Match"), Revision: revision})
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	httpx.WriteRevisionETag(w, out.Revision)
+	writeJSON(w, http.StatusOK, out)
 }

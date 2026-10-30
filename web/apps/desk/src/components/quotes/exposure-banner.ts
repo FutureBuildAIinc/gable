@@ -8,6 +8,7 @@ import { ExposureService } from '../../services/ExposureService';
 import type { ExposureState, QuoteExposureDetail, QuoteExposureEvent } from '../../types/exposure';
 import { ShieldAlert, TrendingUp, ArrowRight } from 'lucide';
 import './acknowledgment-modal.ts';
+import './index-staleness-banner.ts';
 
 const STATE_META: Record<ExposureState, { label: string; ring: string; text: string; bg: string }> = {
   OK:           { label: 'On Track',     ring: 'border-white/10',        text: 'text-zinc-400',       bg: 'bg-white/5' },
@@ -85,7 +86,12 @@ export class GableExposureBanner extends LitElement {
 
   render() {
     const d = this.detail;
-    if (!d || d.exposure_state === 'OK') return nothing;
+    // The market index staleness notice rides with this banner (QE-07-b1): a
+    // quote's exposure is computed from the index values, so an index value
+    // older than the dealer allows is worth saying on the quote itself. It
+    // shows even when this quote carries no exposure of its own.
+    const stale = html`<gable-index-staleness-banner></gable-index-staleness-banner>`;
+    if (!d || d.exposure_state === 'OK') return html`<div class="space-y-4">${stale}</div>`;
 
     const meta = STATE_META[d.exposure_state] || STATE_META.OK;
     const move = this._latestMove(d.events || []);
@@ -94,6 +100,8 @@ export class GableExposureBanner extends LitElement {
     const actionNote = d.required_action ? ACTION_LABELS[d.required_action] : '';
 
     return html`
+      <div class="space-y-4">
+      ${stale}
       <div class="rounded-xl border ${meta.ring} ${meta.bg} p-5">
         <div class="flex items-start justify-between gap-4 flex-wrap">
           <div class="flex items-start gap-3">
@@ -156,6 +164,7 @@ export class GableExposureBanner extends LitElement {
         @close=${() => { this.ackOpen = false; }}
         @acknowledged=${() => { this.ackOpen = false; this._load(); }}>
       </gable-acknowledgment-modal>
+      </div>
     `;
   }
 }

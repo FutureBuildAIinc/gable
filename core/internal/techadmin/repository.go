@@ -47,6 +47,10 @@ type Repository interface {
 	ReadRevision(ctx context.Context, resource string) (int64, error)
 	LockRevision(ctx context.Context, resource string) (int64, error)
 	BumpRevision(ctx context.Context, resource string, to int64) error
+
+	ReadMarketIndexSource(ctx context.Context) (*MarketIndexSourceRow, error)
+	LockMarketIndexSource(ctx context.Context) (*MarketIndexSourceRow, error)
+	UpdateMarketIndexSource(ctx context.Context, row *MarketIndexSourceRow, toRevision int64) error
 }
 
 type PostgresRepository struct {
@@ -247,5 +251,80 @@ func (r *PostgresRepository) LockRevision(ctx context.Context, resource string) 
 func (r *PostgresRepository) BumpRevision(ctx context.Context, resource string, to int64) error {
 	_, err := r.db.GetExecutor(ctx).Exec(ctx,
 		`UPDATE admin_revisions SET revision = $2, updated_at = NOW() WHERE resource = $1`, resource, to)
+	return err
+}
+
+// MarketIndexSourceRow is the single market_index_source row (migration 159).
+// FeedURL and FeedKey hold the stored form, sealed when a vault sealed them;
+// the service never opens the URL, and opens the key only to learn whether
+// one is stored.
+type MarketIndexSourceRow struct {
+	Source        string
+	FeedURL       string
+	FeedKeyHeader string
+	FeedKey       string
+	StalenessDays int
+	LastPullAt    *time.Time
+	LastPullOK    *bool
+	LastError     *string
+	Revision      int64
+}
+
+const marketIndexSourceColumns = `source, feed_url, feed_key_header, COALESCE(feed_key, ''), staleness_days,
+	last_pull_at, last_pull_ok, last_pull_error, revision`
+
+func scanMarketIndexSource(scan func(dest ...any) error) (*MarketIndexSourceRow, error) {
+	var row MarketIndexSourceRow
+	err := scan(&row.Source, &row.FeedURL, &row.FeedKeyHeader, &row.FeedKey, &row.StalenessDays,
+		&row.LastPullAt, &row.LastPullOK, &row.LastError, &row.Revision)
+	if err != nil {
+		return nil, err
+	}
+	return &row, nil
+}
+
+// ReadMarketIndexSource reads the settings row without locking (the GET
+// path); the migration seeds it, so no row is an infrastructure fault.
+func (r *PostgresRepository) ReadMarketIndexSource(ctx context.Context) (*MarketIndexSourceRow, error) {
+	row, err := scanMarketIndexSource(func(dest ...any) error {
+		return r.db.GetExecutor(ctx).QueryRow(ctx,
+			`SELECT `+marketIndexSourceColumns+` FROM market_index_source WHERE singleton`).Scan(dest...)
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	return row, nil
+}
+
+// LockMarketIndexSource takes the settings row FOR UPDATE: the revision
+// check and the write it allows are one database act (ADR 0001 section 11),
+// and every writer of the row serializes here.
+func (r *PostgresRepository) LockMarketIndexSource(ctx context.Context) (*MarketIndexSourceRow, error) {
+	row, err := scanMarketIndexSource(func(dest ...any) error {
+		return r.db.GetExecutor(ctx).QueryRow(ctx,
+			`SELECT `+marketIndexSourceColumns+` FROM market_index_source WHERE singleton FOR UPDATE`).Scan(dest...)
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	return row, nil
+}
+
+// UpdateMarketIndexSource writes the settings row and moves its revision to
+// toRevision. The caller holds the row lock, so the revision cannot move
+// between the check and this write.
+func (r *PostgresRepository) UpdateMarketIndexSource(ctx context.Context, row *MarketIndexSourceRow, toRevision int64) error {
+	_, err := r.db.GetExecutor(ctx).Exec(ctx,
+		`UPDATE market_index_source
+		 SET source = $1, feed_url = $2, feed_key_header = $3, feed_key = NULLIF($4, ''),
+		     staleness_days = $5, revision = $6, updated_at = NOW()
+		 WHERE singleton`,
+		row.Source, row.FeedURL, row.FeedKeyHeader, row.FeedKey, row.StalenessDays, toRevision)
 	return err
 }

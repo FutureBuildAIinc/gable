@@ -222,6 +222,18 @@ func registerExposureRoutes(mux *http.ServeMux, r exposureRoutes) {
 	// dealer wide reference data, stated limits of the allowlist.
 	pricing.NewIndexAdminHandler(r.Escalators, r.Exposure, r.Scanner, r.DB, r.Logger).
 		RegisterRoutes(mux, indexAdminGuard())
+
+	// The market index import and the staleness answer (QE-07-b1). The
+	// import writes index values and re-checks every branch's quotes the
+	// way the refresh does, so it is admin and owner only and the route
+	// allowlist gate refuses a branch bound key both the import and the
+	// staleness read: the import writes dealer wide values and the staleness
+	// answer is dealer wide reference data, a stated limit of the allowlist.
+	indexSource := pricing.NewIndexSourceRepository(r.DB)
+	pricing.NewIndexImportHandler(
+		pricing.NewIndexImportService(r.Escalators, indexSource, r.DB, r.Scanner, r.Logger),
+		pricing.NewIndexStalenessService(indexSource),
+	).RegisterRoutes(mux, indexAdminGuard())
 }
 
 // indexAdminGuard is the market index admin surface's role guard. The refresh

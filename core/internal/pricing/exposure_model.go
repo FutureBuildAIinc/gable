@@ -86,6 +86,32 @@ type MarketIndexHistory struct {
 	RecordedAt    time.Time `json:"recorded_at"`
 	RecordedBy    string    `json:"recorded_by,omitempty"`
 	Source        string    `json:"source"`
+
+	// AsOfDate is the day the value is for, as the source states it, written
+	// as a calendar day (YYYY-MM-DD). It is null for a value typed by hand,
+	// whose only date is when it was recorded. SourceURL is where the value
+	// came from, and FetchedAt when it was fetched. Together they say which
+	// day a value belongs to, so a value for one index, day and source is
+	// stored once and an import of the same file twice changes nothing.
+	AsOfDate  *string    `json:"as_of_date,omitempty"`
+	SourceURL string     `json:"source_url,omitempty"`
+	FetchedAt *time.Time `json:"fetched_at,omitempty"`
+}
+
+// dayFormat is the wire's form of a calendar day.
+const dayFormat = "2006-01-02"
+
+// dayString formats a calendar day as the wire's YYYY-MM-DD.
+func dayString(t time.Time) string { return t.Format(dayFormat) }
+
+// dayPtr formats a calendar day as the wire's YYYY-MM-DD, or nil when there
+// is no day.
+func dayPtr(t *time.Time) *string {
+	if t == nil {
+		return nil
+	}
+	s := dayString(*t)
+	return &s
 }
 
 // ProductCategoryIndexDefault maps a product category to its default market index.

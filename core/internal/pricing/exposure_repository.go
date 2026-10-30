@@ -80,22 +80,28 @@ func (r *PostgresExposureRepository) InsertHistory(ctx context.Context, h *Marke
 }
 
 func (r *PostgresExposureRepository) GetHistoryByID(ctx context.Context, id uuid.UUID) (*MarketIndexHistory, error) {
-	q := `SELECT id, market_index_id, value, recorded_at, COALESCE(recorded_by, ''), source
+	q := `SELECT id, market_index_id, value, recorded_at, COALESCE(recorded_by, ''), source,
+	             as_of_date, COALESCE(source_url, ''), fetched_at
 	      FROM market_index_history WHERE id = $1`
 	var h MarketIndexHistory
+	var asOf, fetched *time.Time
 	err := r.db.GetExecutor(ctx).QueryRow(ctx, q, id).Scan(
-		&h.ID, &h.MarketIndexID, &h.Value, &h.RecordedAt, &h.RecordedBy, &h.Source)
+		&h.ID, &h.MarketIndexID, &h.Value, &h.RecordedAt, &h.RecordedBy, &h.Source,
+		&asOf, &h.SourceURL, &fetched)
 	if err != nil {
 		if err == pgx.ErrNoRows {
 			return nil, nil
 		}
 		return nil, fmt.Errorf("get market_index_history: %w", err)
 	}
+	h.AsOfDate = dayPtr(asOf)
+	h.FetchedAt = fetched
 	return &h, nil
 }
 
 func (r *PostgresExposureRepository) ListHistory(ctx context.Context, indexID uuid.UUID, from, to time.Time) ([]MarketIndexHistory, error) {
-	q := `SELECT id, market_index_id, value, recorded_at, COALESCE(recorded_by, ''), source
+	q := `SELECT id, market_index_id, value, recorded_at, COALESCE(recorded_by, ''), source,
+	             as_of_date, COALESCE(source_url, ''), fetched_at
 	      FROM market_index_history
 	      WHERE market_index_id = $1 AND recorded_at >= $2 AND recorded_at <= $3
 	      ORDER BY recorded_at DESC`
@@ -108,9 +114,13 @@ func (r *PostgresExposureRepository) ListHistory(ctx context.Context, indexID uu
 	var out []MarketIndexHistory
 	for rows.Next() {
 		var h MarketIndexHistory
-		if err := rows.Scan(&h.ID, &h.MarketIndexID, &h.Value, &h.RecordedAt, &h.RecordedBy, &h.Source); err != nil {
+		var asOf, fetched *time.Time
+		if err := rows.Scan(&h.ID, &h.MarketIndexID, &h.Value, &h.RecordedAt, &h.RecordedBy, &h.Source,
+			&asOf, &h.SourceURL, &fetched); err != nil {
 			return nil, fmt.Errorf("scan market_index_history: %w", err)
 		}
+		h.AsOfDate = dayPtr(asOf)
+		h.FetchedAt = fetched
 		out = append(out, h)
 	}
 	return out, nil
