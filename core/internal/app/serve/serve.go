@@ -755,7 +755,9 @@ func Run() {
 		os.Exit(1)
 	}
 	if staffHandler != nil {
-		staffHandler.WithAllowed(signinSvc.Allowed).RegisterRoutes(mux)
+		staffHandler.WithEmailPasswordGuard(func(ctx context.Context) bool { return signinSvc.Allowed(ctx, signinmethods.MethodEmailPassword) })
+		staffHandler.WithAllowed(signinSvc.Allowed)
+		staffHandler.RegisterRoutes(mux)
 		staffLinks.RegisterRoutes(mux, middleware.RequireRole("admin", "owner"))
 	}
 	signinmethods.NewHandler(signinSvc, cfg.AuthMode).RegisterRoutes(mux, signinmethods.Guards{
@@ -928,6 +930,7 @@ func Run() {
 		logger.Warn("the simulated scale is wired: a demo stack only, never a production configuration")
 	}
 	wall.pos(mux, posHandler, "admin", "owner", "cashier")
+	docSvc.WithInvoiceTenders(posSvc)
 	wall.posReceipts(mux, docHandler, posSvc, "admin", "owner", "cashier")
 
 	// Accounts Payable Module: the vendor invoice routes on the wire contract
