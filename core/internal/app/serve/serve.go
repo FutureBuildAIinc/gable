@@ -236,7 +236,7 @@ func Run() {
 
 	// ADR 0012: when APPWRITE_ENDPOINT is set, Appwrite is the identity
 	// provider and its server must clear the 2.0.0 floor. A server below the
-	// floor stops the boot; an unreachable one only warns, since no sign in
+	// floor stops the boot; an unreadable one only warns, since no sign in
 	// path is wired to it yet.
 	if cfg.AppwriteEndpoint != "" {
 		awClient := &appwrite.Client{
@@ -244,17 +244,15 @@ func Run() {
 			ProjectID: cfg.AppwriteProjectID,
 			APIKey:    cfg.AppwriteAPIKey,
 		}
-		vctx, vcancel := context.WithTimeout(context.Background(), 10*time.Second)
-		version, err := awClient.Version(vctx)
-		vcancel()
+		state, err := appwrite.CheckStart(context.Background(), awClient)
 		switch {
-		case err != nil:
-			logger.Warn("Appwrite unreachable at start; continuing without it", "endpoint", cfg.AppwriteEndpoint, "error", err)
-		case appwrite.CheckFloor(version) != nil:
-			logger.Error("Appwrite server below the 2.0.0 floor", "endpoint", cfg.AppwriteEndpoint, "version", version)
+		case errors.Is(err, appwrite.ErrUnsupportedVersion):
+			logger.Error("Appwrite server below the 2.0.0 floor", "endpoint", cfg.AppwriteEndpoint, "error", err)
 			os.Exit(1)
+		case state == appwrite.StartRedirectsClosed:
+			logger.Warn("Appwrite version unreadable at start; provider redirect methods stay closed", "endpoint", cfg.AppwriteEndpoint)
 		default:
-			logger.Info("Appwrite identity provider", "endpoint", cfg.AppwriteEndpoint, "version", version)
+			logger.Info("Appwrite identity provider", "endpoint", cfg.AppwriteEndpoint)
 		}
 	}
 

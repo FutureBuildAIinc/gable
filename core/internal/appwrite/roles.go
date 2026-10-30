@@ -48,6 +48,7 @@ var (
 	ErrEmailUnverified       = errors.New("appwrite: user email is not verified")
 	ErrOwnerRole             = errors.New("appwrite: membership holds the appwrite owner role")
 	ErrNoGableRoles          = errors.New("appwrite: membership holds no gable role")
+	ErrMFAEnabled            = errors.New("appwrite: account has multi factor authentication on, which Gable does not support yet")
 )
 
 // Admit decides whether an Appwrite account may enter Gable. It refuses an
@@ -66,6 +67,9 @@ func Admit(user User, m Membership, found bool) error {
 	}
 	if !user.EmailVerification {
 		return ErrEmailUnverified
+	}
+	if user.MFA {
+		return ErrMFAEnabled
 	}
 	for _, r := range m.Roles {
 		if r == "owner" {
