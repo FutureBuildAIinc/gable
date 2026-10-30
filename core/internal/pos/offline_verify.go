@@ -12,6 +12,7 @@ import (
 
 	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/gablelbm/gable/internal/salesdoc"
+	"github.com/gablelbm/gable/internal/taxzone"
 	"github.com/gablelbm/gable/internal/units"
 	"github.com/google/uuid"
 )
@@ -60,9 +61,61 @@ type OfflineSnapshotPolicy struct {
 }
 
 // OfflineSnapshotTax is the branch rate the device taxes with.
+//
+// A Canadian branch's register also carries the branch zone's parts (CP-14
+// A1): the device prices each part on its own, prints each as its own line,
+// and signs each part's cents; BranchRate is then the parts' combined rate.
+// A US branch's snapshot carries none of these, so it is unchanged.
 type OfflineSnapshotTax struct {
-	BranchRate         string `json:"branch_rate"`
-	ProviderConfigured bool   `json:"provider_configured"`
+	BranchRate         string           `json:"branch_rate"`
+	ProviderConfigured bool             `json:"provider_configured"`
+	ZoneID             string           `json:"zone_id,omitempty"`
+	DataSource         string           `json:"data_source,omitempty"`
+	Country            string           `json:"country,omitempty"`
+	Province           string           `json:"province,omitempty"`
+	Parts              []OfflineTaxPart `json:"parts,omitempty"`
+}
+
+// OfflineTaxPart is one part of a Canadian branch's zone as the register
+// holds it: its name, its rate and the label it prints (GST, PST).
+type OfflineTaxPart struct {
+	Name  string `json:"name"`
+	Rate  string `json:"rate"`
+	Label string `json:"label"`
+}
+
+// offlineTaxParts prices a Canadian offline sale part by part (CP-14 A1) and
+// checks the device's signed part cents against it: a sale whose parts do
+// not match its snapshot's is refused, never split again silently. It
+// answers the tax and the zone the invoice freezes; a snapshot with no parts
+// answers nothing and the caller keeps the one rounding.
+func offlineTaxParts(tax *OfflineSnapshotTax, sale *SignedOfflineSale, taxable int64, exempt bool) (int64, *taxzone.Snapshot, *offlineRefusal) {
+	if len(tax.Parts) == 0 || exempt {
+		if len(sale.TaxLines) > 0 {
+			return 0, nil, refuse("tax_unverified", "the sale carries tax parts its snapshot does not")
+		}
+		return 0, nil, nil
+	}
+	zoneID, _ := uuid.Parse(tax.ZoneID)
+	snap := &taxzone.Snapshot{ZoneID: zoneID, CombinedRate: tax.BranchRate, DataSource: tax.DataSource,
+		Country: tax.Country, Province: tax.Province}
+	for _, p := range tax.Parts {
+		snap.Parts = append(snap.Parts, taxzone.Part{Name: p.Name, Rate: p.Rate})
+	}
+	want, err := snap.Price(httpx.Cents(taxable))
+	if err != nil {
+		return 0, nil, refuse("tax_unverified", "the snapshot's tax parts cannot be read")
+	}
+	if len(sale.TaxLines) != len(snap.Parts) {
+		return 0, nil, refuse("tax_unverified", "the sale carries %d tax parts and its snapshot %d", len(sale.TaxLines), len(snap.Parts))
+	}
+	for i, p := range snap.Parts {
+		got := sale.TaxLines[i]
+		if got.Name != p.Name || got.Rate != p.Rate || got.Label != tax.Parts[i].Label || got.Cents != *p.Cents {
+			return 0, nil, refuse("tax_unverified", "the sale's %s is %d cents and its taxable lines at the snapshot's rate make %d", p.Name, got.Cents, *p.Cents)
+		}
+	}
+	return int64(want), snap, nil
 }
 
 // OfflineSnapshotWalkIn is the walk-in customer.
@@ -286,7 +339,13 @@ func (s *Service) verifyOfflineSale(ctx context.Context, branch uuid.UUID, dev *
 		return nil, refuse("tax_unverified", "the sale's tax rate is not its snapshot's")
 	}
 	wantTax := int64(0)
-	if !exempt {
+	partsTax, zone, pr := offlineTaxParts(&snap.Tax, sale, taxable, exempt)
+	if pr != nil {
+		return nil, pr
+	}
+	if zone != nil {
+		wantTax = partsTax
+	} else if !exempt {
 		wantTax = int64(salesdoc.TaxAt(httpx.Cents(taxable), wantRate))
 	}
 	if sale.TaxCents != wantTax {
@@ -390,7 +449,7 @@ func (s *Service) verifyOfflineSale(ctx context.Context, branch uuid.UUID, dev *
 	}
 
 	v := &offlineVerdict{snapshotID: snapID, taxCents: sale.TaxCents, taxRate: sale.TaxRate, exempt: exempt,
-		businessDate: session.BusinessDate, item: it}
+		zone: zone, businessDate: session.BusinessDate, item: it}
 	return v, nil
 }
 

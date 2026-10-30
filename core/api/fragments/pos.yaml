@@ -3854,6 +3854,20 @@ components:
         change_cents: {type: integer, format: int64}
         tax_rate: {type: string}
         tax_exempt: {type: boolean}
+        tax_lines:
+          type: array
+          description: >-
+            A Canadian sale's tax parts as the device priced them (CP-14), in its
+            snapshot's order; each must match the part the server prices from the
+            snapshot or the sale is refused tax_unverified. Absent on a US sale.
+          items:
+            type: object
+            required: [name, rate, label, cents]
+            properties:
+              name: {type: string}
+              rate: {type: string}
+              label: {type: string, description: "The printed label, as the snapshot's part carries it."}
+              cents: {type: integer, format: int64}
         queue_count: {type: integer, format: int64}
         queue_total_cents: {type: integer, format: int64}
         confirmed_mark: {type: integer, format: int64}
@@ -4694,8 +4708,25 @@ components:
           type: object
           required: [branch_rate, provider_configured]
           properties:
-            branch_rate: {type: string, description: "The branch's rate as a decimal string."}
+            branch_rate: {type: string, description: "The branch's rate as a decimal string; on a Canadian branch, its zone's parts combined."}
             provider_configured: {type: boolean}
+            zone_id: {type: string, format: uuid, description: "A Canadian branch's own tax zone (CP-14); absent on a US branch."}
+            data_source: {type: string, description: "Where the Canadian zone's rates came from; absent on a US branch."}
+            country: {type: string, description: "CA on a Canadian branch; absent otherwise."}
+            province: {type: string, description: "The Canadian branch's province (BC); absent otherwise."}
+            parts:
+              type: array
+              description: >-
+                A Canadian branch's tax parts (CP-14): the register prices each part
+                on its own, rounded on its own, prints each as its own line and signs
+                each part's cents as the sale's tax_lines. Absent on a US branch.
+              items:
+                type: object
+                required: [name, rate, label]
+                properties:
+                  name: {type: string, description: "GOODS_TAX or PROVINCIAL_SALES_TAX."}
+                  rate: {type: string, description: "The part's rate as a decimal string."}
+                  label: {type: string, description: "The printed label: GST, HST, PST or RST."}
         walk_in_customer:
           type: object
           required: [id, currency]

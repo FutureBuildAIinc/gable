@@ -23,6 +23,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/gablelbm/gable/internal/taxzone"
 	"net/http"
 	"sort"
 	"strconv"
@@ -229,6 +230,28 @@ func (s *Service) buildSnapshot(ctx context.Context, register string, branch uui
 	if !ok {
 		return nil, conflict("branch_rate_missing", "the branch has no tax rate: set it before the register sells offline")
 	}
+	// A Canadian branch's register carries its zone's parts (CP-14 A1), so
+	// an offline sale prints GST and PST as their own lines; no zone is the
+	// same refusal the live counter gives.
+	tax := OfflineSnapshotTax{BranchRate: rate, ProviderConfigured: s.tax != nil && s.tax.ProviderConfigured()}
+	ca, err := s.repo.Canada(ctx, taxzone.CanadaInput{BranchID: branch, On: day})
+	if err != nil {
+		if h, ok := taxzone.AsPartsNotConfigured(err); ok {
+			return nil, h
+		}
+		return nil, err
+	}
+	if ca.Canadian {
+		tax.BranchRate = ca.Zone.CombinedRate
+		tax.ZoneID = ca.Zone.ZoneID.String()
+		tax.DataSource = ca.Zone.DataSource
+		tax.Country = ca.Zone.Country
+		tax.Province = ca.Zone.Province
+		for _, p := range ca.Zone.Parts {
+			tax.Parts = append(tax.Parts, OfflineTaxPart{Name: p.Name, Rate: p.Rate,
+				Label: taxzone.Label(ca.Zone.Country, ca.Zone.Province, p.Name)})
+		}
+	}
 	walkIn, currency, err := s.repo.WalkInCustomer(ctx)
 	if err != nil {
 		return nil, err
@@ -262,7 +285,7 @@ func (s *Service) buildSnapshot(ctx context.Context, register string, branch uui
 			MaxCheckCents: policy.CheckCapCents, DefaultCheckLimitCents: defaultCheck, AccountCapCents: policy.AccountCapCents,
 			MaxQueueCount: int64(policy.MaxQueued), MaxQueueTotalCents: policy.QueueTotalCapCents, AllowedTenders: tenders,
 			RequireIDForTenders: requireID, CashRoundingMode: string(rounding)},
-		Tax:            OfflineSnapshotTax{BranchRate: rate, ProviderConfigured: s.tax != nil && s.tax.ProviderConfigured()},
+		Tax:            tax,
 		WalkInCustomer: OfflineSnapshotWalkIn{ID: walkIn.String(), Currency: currency},
 		PriceSheet:     []OfflineSnapshotPrice{},
 	}, Products: []snapshotProductDoc{}, Accounts: []snapshotAccountDoc{}}

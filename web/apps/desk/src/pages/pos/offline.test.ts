@@ -12,7 +12,7 @@ import { emptyQueue, offlineSnapshot } from '../../test/fakeOfflineCore';
 import type { OfflineQueueItem, OfflineSignedSale } from '../../types/offline';
 import {
   NEEDS_CONNECTION, QUEUE_HOLDS_CLOSE, RE_ENROL, RECEIPT_PRICES_NOTE, UNKNOWN_HOLDS_CLOSE,
-  carryCart, isLostAnswer, receiptLines, snapshotRefusalWords, syncWords, tenderAvailability, tillCloseWait,
+  carryCart, isLostAnswer, ratePercent, receiptLines, snapshotRefusalWords, syncWords, tenderAvailability, tillCloseWait,
 } from './offline';
 
 const line = (id: string, type = 'product', product = `p-${id}`) => ({
@@ -101,6 +101,36 @@ describe('the offline receipt', () => {
     expect(lines.join(' ')).not.toMatch(/invoice|IN-/i);
     expect(lines).toContain('Total $11.91');
     expect(lines).toContain('Change $0.09');
+  });
+
+  it('prints one Tax line for a US sale, exactly as before (CP-14 A1)', () => {
+    const lines = receiptLines(signed, null);
+    expect(lines).toContain('Tax $0.91');
+    expect(lines.some((l) => l.startsWith('GST') || l.startsWith('PST'))).toBe(false);
+  });
+
+  it('prints GST and PST as their own lines on a Canadian sale, under $100 too (CP-14 A1)', () => {
+    const bc = {
+      ...signed, subtotal_cents: 2750, tax_cents: 331, total_cents: 3081, change_cents: 0,
+      tenders: [{ method: 'cash', amount_cents: 3081, reference: null }],
+      tax_lines: [
+        { name: 'GOODS_TAX', rate: '0.050000', label: 'GST', cents: 138 },
+        { name: 'PROVINCIAL_SALES_TAX', rate: '0.070000', label: 'PST', cents: 193 },
+      ],
+    } as unknown as OfflineSignedSale;
+    const lines = receiptLines(bc, null);
+    expect(lines).toContain('GST 5%: $1.38');
+    expect(lines).toContain('PST 7%: $1.93');
+    expect(lines.some((l) => l.startsWith('Tax '))).toBe(false);
+    expect(lines.indexOf('GST 5%: $1.38')).toBeLessThan(lines.indexOf('Total $30.81'));
+  });
+
+  it('turns a part rate into the printed percent without trailing zeros', () => {
+    expect(ratePercent('0.050000')).toBe('5');
+    expect(ratePercent('0.070000')).toBe('7');
+    expect(ratePercent('0.130000')).toBe('13');
+    expect(ratePercent('0.052500')).toBe('5.25');
+    expect(ratePercent('0.088750')).toBe('8.875');
   });
 });
 

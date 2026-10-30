@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/gablelbm/gable/internal/taxzone"
 	"net/http"
 	"sort"
 	"strings"
@@ -106,11 +107,14 @@ type OfflineSyncResult struct {
 // the item for the audit row, and back from the body the warnings the sale
 // was sold past.
 type offlineVerdict struct {
-	snapshotID   uuid.UUID
-	batchID      string
-	taxCents     int64
-	taxRate      string
-	exempt       bool
+	snapshotID uuid.UUID
+	batchID    string
+	taxCents   int64
+	taxRate    string
+	exempt     bool
+	// zone is a Canadian sale's parts with the cents the device signed
+	// (CP-14 A1), frozen onto its invoice; nil on a US sale.
+	zone         *taxzone.Snapshot
 	businessDate time.Time
 	item         *offlineItem
 	warnings     []uuid.UUID

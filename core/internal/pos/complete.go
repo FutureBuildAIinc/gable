@@ -477,6 +477,7 @@ func (s *Service) completeSaleTx(ctx context.Context, saleID uuid.UUID, ifMatch 
 			// call and no resolver, so nothing waits on the provider
 			taxCents = verdict.taxCents
 			taxExempt = verdict.exempt
+			zone = verdict.zone
 			if taxExempt {
 				taxSource = string(salesdoc.TaxSourceExempt)
 			} else {

@@ -28,7 +28,7 @@ use crate::offline::model::{
     CartPreview, EnrolmentPublic, EnrolmentRecord, HighWaterMark, OfflineError, OfflineSnapshot,
     PriorEpochMark, QueueItemState, QueueStatusView, QueuedSaleEntry, SignSaleRequest,
     SignedOfflineSale, SignedSaleLine, SignedSaleTender, SignedTally, SignedTallyRow,
-    SnapshotPriceRow, SnapshotProduct, SnapshotRefresh, StoreMeta, SyncBatchOutcome,
+    SignedTaxLine, SnapshotPriceRow, SnapshotProduct, SnapshotRefresh, StoreMeta, SyncBatchOutcome,
     SyncOutcomeItem, SyncReport,
 };
 use crate::offline::server::{refusal_of, OfflineServer};
@@ -614,6 +614,7 @@ impl OfflineCounter {
             lines: priced.lines.clone(),
             subtotal_cents: priced.subtotal_cents,
             tax_cents: priced.tax_cents,
+            tax_lines: priced.tax_lines.clone(),
             total_cents: priced.total_cents,
             change_cents,
             tender_refusal,
@@ -881,6 +882,7 @@ impl OfflineCounter {
             change_cents: stage.change_cents,
             tax_rate: priced.tax_rate.clone(),
             tax_exempt: priced.tax_exempt,
+            tax_lines: priced.tax_lines.clone(),
             queue_count: stage.queue_count,
             queue_total_cents: stage.queue_total_cents,
             confirmed_mark: mark.confirmed_seq,
@@ -1118,6 +1120,7 @@ struct PricedCart<'a> {
     lines: Vec<SignedSaleLine>,
     subtotal_cents: i64,
     tax_cents: i64,
+    tax_lines: Vec<SignedTaxLine>,
     total_cents: i64,
 }
 
@@ -1483,10 +1486,28 @@ fn price_cart_lines<'a>(
         });
     }
 
+    // A Canadian branch's parts are each priced and rounded on their own,
+    // the tax their sum (CP-14 A1); any other branch keeps the one rounding.
+    let mut tax_lines = Vec::new();
     let tax_cents = if tax_exempt {
         0
-    } else {
+    } else if snapshot.tax.parts.is_empty() {
         tax_at(taxable_cents, rate_scaled)
+    } else {
+        let mut sum = 0;
+        for part in &snapshot.tax.parts {
+            let scaled =
+                parse_tax_rate(&part.rate).map_err(|m| OfflineError::new("invalid_tax_rate", m))?;
+            let cents = tax_at(taxable_cents, scaled);
+            sum += cents;
+            tax_lines.push(SignedTaxLine {
+                name: part.name.clone(),
+                rate: part.rate.clone(),
+                label: part.label.clone(),
+                cents,
+            });
+        }
+        sum
     };
     let total_cents = subtotal_cents + tax_cents;
 
@@ -1537,6 +1558,7 @@ fn price_cart_lines<'a>(
         tax_exempt,
         tax_rate: derived_tax_rate,
         lines: signed_lines,
+        tax_lines,
         subtotal_cents,
         tax_cents,
         total_cents,

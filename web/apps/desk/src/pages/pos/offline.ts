@@ -173,6 +173,15 @@ export function lineNote(line: { level_fallback: boolean }): string | null {
 
 const cents = formatCents;
 
+/** A part's decimal rate ("0.050000") as the percent a tax line prints ("5"), without trailing zeros. */
+export function ratePercent(rate: string): string {
+    const [whole, frac = ''] = rate.trim().split('.');
+    const digits = (whole.replace(/^0+/, '') + frac.padEnd(6, '0')).padStart(7, '0');
+    const intPart = digits.slice(0, digits.length - 4).replace(/^0+(?=\d)/, '');
+    const fracPart = digits.slice(digits.length - 4).replace(/0+$/, '');
+    return fracPart ? `${intPart}.${fracPart}` : intPart;
+}
+
 /**
  * The offline receipt (ADR 0011 section 4): OFFLINE SALE, the offline
  * reference, each line's price charged with its level price mark, the prices
@@ -186,7 +195,13 @@ export function receiptLines(sale: OfflineSignedSale, customerName: string | nul
         out.push(`${l.quantity} ${l.uom} ${l.sku} ${l.description}  ${cents(l.line_total_cents)}${l.level_fallback ? '  level price' : ''}`);
     }
     out.push(`Subtotal ${cents(sale.subtotal_cents)}`);
-    out.push(sale.tax_exempt ? 'Tax exempt' : `Tax ${cents(sale.tax_cents)}`);
+    // A Canadian sale prints each tax part as its own line (CP-14 A1: BC's PST
+    // must stand apart from GST); a US sale keeps its one Tax line.
+    if (!sale.tax_exempt && sale.tax_lines && sale.tax_lines.length > 0) {
+        for (const t of sale.tax_lines) out.push(`${t.label} ${ratePercent(t.rate)}%: ${cents(t.cents)}`);
+    } else {
+        out.push(sale.tax_exempt ? 'Tax exempt' : `Tax ${cents(sale.tax_cents)}`);
+    }
     out.push(`Total ${cents(sale.total_cents)}`);
     for (const t of sale.tenders) out.push(`${t.method.toUpperCase()} ${cents(t.amount_cents)}`);
     if (sale.change_cents > 0) out.push(`Change ${cents(sale.change_cents)}`);

@@ -87,7 +87,16 @@ export interface OfflineSnapshot {
     issued_at: string;
     till_session: { id: string; cashier_id: string; opened_at: string; business_date: string; opening_float_cents: number };
     policy: OfflinePolicy;
-    tax: { branch_rate: string; provider_configured: boolean };
+    /** A Canadian branch also carries its zone's parts (CP-14 A1); a US branch none. */
+    tax: {
+        branch_rate: string;
+        provider_configured: boolean;
+        zone_id?: string;
+        data_source?: string;
+        country?: string;
+        province?: string;
+        parts?: Array<{ name: string; rate: string; label: string }>;
+    };
     walk_in_customer: { id: string; currency: string };
     products: OfflineProduct[];
     accounts: OfflineAccount[];
@@ -154,6 +163,14 @@ export interface OfflineSignedLine {
     taxable: boolean;
 }
 
+/** One tax part of a Canadian offline sale as the core priced it (CP-14 A1): printed as its own line. */
+export interface OfflineTaxLine {
+    name: string;
+    rate: string;
+    label: string;
+    cents: number;
+}
+
 export interface OfflineCartPreview {
     snapshot_id: string;
     currency: string;
@@ -162,6 +179,7 @@ export interface OfflineCartPreview {
     lines: OfflineSignedLine[];
     subtotal_cents: number;
     tax_cents: number;
+    tax_lines?: OfflineTaxLine[];
     total_cents: number;
     change_cents: number | null;
     tender_refusal: OfflineError | null;
@@ -188,6 +206,7 @@ export interface OfflineSignedSale {
     change_cents: number;
     tax_rate: string;
     tax_exempt: boolean;
+    tax_lines?: OfflineTaxLine[];
     lines: OfflineSignedLine[];
     tenders: Array<{ method: string; amount_cents: number; reference: string | null }>;
     replaces_sale_id?: string;

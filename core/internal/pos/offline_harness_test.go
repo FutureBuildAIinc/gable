@@ -280,7 +280,19 @@ func (b *offlineBench) build(t *testing.T, spec saleSpec, edit ...func(*pos.Sign
 			taxable += line.LineTotalCents
 		}
 	}
-	if !exempt {
+	if !exempt && len(snap.Tax.Parts) > 0 {
+		// a Canadian branch's parts, each priced and rounded on its own, as
+		// the Rust core prices them (CP-14 A1)
+		for _, p := range snap.Tax.Parts {
+			r, _, err := salesdoc.ParseTaxRate(p.Rate)
+			if err != nil {
+				t.Fatal(err)
+			}
+			c := int64(salesdoc.TaxAt(httpx.Cents(taxable), r))
+			sale.TaxLines = append(sale.TaxLines, pos.SignedTaxLine{Name: p.Name, Rate: p.Rate, Label: p.Label, Cents: c})
+			sale.TaxCents += c
+		}
+	} else if !exempt {
 		sale.TaxCents = int64(salesdoc.TaxAt(httpx.Cents(taxable), scaled))
 	}
 	sale.TotalCents = sale.SubtotalCents + sale.TaxCents

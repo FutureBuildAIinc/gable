@@ -22,29 +22,32 @@ import (
 // figures from here and verifies them against the snapshot it names; it never
 // prices the sale again.
 type SignedOfflineSale struct {
-	ClientID        string             `json:"client_id"`
-	RegisterID      string             `json:"register_id"`
-	DeviceEpoch     int64              `json:"device_epoch"`
-	DeviceSeq       int64              `json:"device_seq"`
-	PrevDigest      string             `json:"prev_digest"`
-	OfflineRef      string             `json:"offline_ref"`
-	SnapshotID      string             `json:"snapshot_id"`
-	TillSessionID   string             `json:"till_session_id"`
-	CashierID       string             `json:"cashier_id"`
-	CustomerID      *string            `json:"customer_id"`
-	BuyerContactID  *string            `json:"buyer_contact_id"`
-	CustomerPO      *string            `json:"customer_po"`
-	JobID           *string            `json:"job_id"`
-	PickedUpBy      *string            `json:"picked_up_by"`
-	BusinessDate    string             `json:"business_date"`
-	SoldAt          string             `json:"sold_at"`
-	Currency        string             `json:"currency"`
-	SubtotalCents   int64              `json:"subtotal_cents"`
-	TaxCents        int64              `json:"tax_cents"`
-	TotalCents      int64              `json:"total_cents"`
-	ChangeCents     int64              `json:"change_cents"`
-	TaxRate         string             `json:"tax_rate"`
-	TaxExempt       bool               `json:"tax_exempt"`
+	ClientID       string  `json:"client_id"`
+	RegisterID     string  `json:"register_id"`
+	DeviceEpoch    int64   `json:"device_epoch"`
+	DeviceSeq      int64   `json:"device_seq"`
+	PrevDigest     string  `json:"prev_digest"`
+	OfflineRef     string  `json:"offline_ref"`
+	SnapshotID     string  `json:"snapshot_id"`
+	TillSessionID  string  `json:"till_session_id"`
+	CashierID      string  `json:"cashier_id"`
+	CustomerID     *string `json:"customer_id"`
+	BuyerContactID *string `json:"buyer_contact_id"`
+	CustomerPO     *string `json:"customer_po"`
+	JobID          *string `json:"job_id"`
+	PickedUpBy     *string `json:"picked_up_by"`
+	BusinessDate   string  `json:"business_date"`
+	SoldAt         string  `json:"sold_at"`
+	Currency       string  `json:"currency"`
+	SubtotalCents  int64   `json:"subtotal_cents"`
+	TaxCents       int64   `json:"tax_cents"`
+	TotalCents     int64   `json:"total_cents"`
+	ChangeCents    int64   `json:"change_cents"`
+	TaxRate        string  `json:"tax_rate"`
+	TaxExempt      bool    `json:"tax_exempt"`
+	// TaxLines are a Canadian sale's parts as the device priced them (CP-14
+	// A1), in its snapshot's order; signed when present, absent on a US sale.
+	TaxLines        []SignedTaxLine    `json:"tax_lines,omitempty"`
 	QueueCount      int64              `json:"queue_count"`
 	QueueTotalCents int64              `json:"queue_total_cents"`
 	ConfirmedMark   int64              `json:"confirmed_mark"`
@@ -57,6 +60,16 @@ type SignedOfflineSale struct {
 	DifferentCustomer bool    `json:"different_customer,omitempty"`
 	UnknownCartID     *string `json:"unknown_cart_id,omitempty"`
 	DeviceSig         string  `json:"device_sig"`
+}
+
+// SignedTaxLine is one tax part of a signed Canadian offline sale: the
+// part's name, rate and printed label as its snapshot held them, and its own
+// cents.
+type SignedTaxLine struct {
+	Name  string `json:"name"`
+	Rate  string `json:"rate"`
+	Label string `json:"label"`
+	Cents int64  `json:"cents"`
 }
 
 // SignedSaleLine is one line of a signed offline sale.

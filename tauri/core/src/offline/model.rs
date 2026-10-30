@@ -65,10 +65,45 @@ pub enum CashRoundingMode {
     Nearest5Cents,
 }
 
+/// The branch's tax as the register holds it. A Canadian branch also
+/// carries its zone's parts (CP-14 A1): each part is priced on its own,
+/// rounded on its own, printed as its own line and signed as one of the
+/// sale's `tax_lines`; `branch_rate` is then the parts combined. A US
+/// branch's snapshot carries no parts.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SnapshotTax {
     pub branch_rate: String,
     pub provider_configured: bool,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub zone_id: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub data_source: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub country: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub province: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub parts: Vec<SnapshotTaxPart>,
+}
+
+/// One part of a Canadian branch's zone: its name, rate and printed label.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SnapshotTaxPart {
+    pub name: String,
+    pub rate: String,
+    pub label: String,
+}
+
+/// One tax part of a Canadian sale as the core priced it (CP-14 A1): the
+/// part's name, rate and label from the snapshot, and its own cents. Signed
+/// when present; the server prices the same part from the same snapshot and
+/// refuses a sale whose part differs.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SignedTaxLine {
+    pub name: String,
+    pub rate: String,
+    pub label: String,
+    pub cents: i64,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -348,6 +383,10 @@ pub struct SignedOfflineSale {
     pub change_cents: i64,
     pub tax_rate: String,
     pub tax_exempt: bool,
+    /// A Canadian sale's parts (CP-14 A1), absent on a US sale so its
+    /// canonical form is unchanged.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tax_lines: Vec<SignedTaxLine>,
     pub queue_count: i64,
     pub queue_total_cents: i64,
     pub confirmed_mark: i64,
@@ -498,6 +537,9 @@ pub struct CartPreview {
     pub lines: Vec<SignedSaleLine>,
     pub subtotal_cents: i64,
     pub tax_cents: i64,
+    /// A Canadian cart's tax parts, as the receipt prints them (CP-14 A1).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tax_lines: Vec<SignedTaxLine>,
     pub total_cents: i64,
     /// The change the tenders leave, when tenders were named and they pass.
     pub change_cents: Option<i64>,

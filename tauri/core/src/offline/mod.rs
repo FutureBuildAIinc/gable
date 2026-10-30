@@ -22,10 +22,10 @@ pub use model::{
     CartPreview, CashRoundingMode, EnrolmentPublic, EnrolmentRecord, HighWaterMark, OfflineError,
     OfflineSnapshot, PriorEpochMark, QueueItemState, QueueStatusView, QueuedSaleEntry,
     SignLineRequest, SignSaleRequest, SignTenderRequest, SignedOfflineSale, SignedSaleLine,
-    SignedSaleTender, SignedTally, SignedTallyRow, SnapshotAccount, SnapshotBuyer, SnapshotJob,
-    SnapshotPolicy, SnapshotPriceRow, SnapshotProduct, SnapshotRefresh, SnapshotTax,
-    SnapshotTillSession, SnapshotUnitRow, SnapshotWalkIn, StoreMeta, SyncBatchOutcome,
-    SyncOutcomeItem, SyncReport, TallyRequestInput, TallyRowRequestInput,
+    SignedSaleTender, SignedTally, SignedTallyRow, SignedTaxLine, SnapshotAccount, SnapshotBuyer,
+    SnapshotJob, SnapshotPolicy, SnapshotPriceRow, SnapshotProduct, SnapshotRefresh, SnapshotTax,
+    SnapshotTaxPart, SnapshotTillSession, SnapshotUnitRow, SnapshotWalkIn, StoreMeta,
+    SyncBatchOutcome, SyncOutcomeItem, SyncReport, TallyRequestInput, TallyRowRequestInput,
 };
 pub use server::{HttpOfflineServer, OfflineServer, ServerAnswer, TokenSource};
 pub use store::{
@@ -84,6 +84,11 @@ mod tests {
             tax: SnapshotTax {
                 branch_rate: "0.082500".to_string(),
                 provider_configured: false,
+                zone_id: String::new(),
+                data_source: String::new(),
+                country: String::new(),
+                province: String::new(),
+                parts: Vec::new(),
             },
             walk_in_customer: SnapshotWalkIn {
                 id: "00000000-0000-0000-0000-000000000001".to_string(),
@@ -1614,6 +1619,91 @@ mod tests {
         assert_eq!(signed.tax_cents, preview.tax_cents);
         assert_eq!(signed.lines, preview.lines);
         assert_eq!(signed.change_cents, 500);
+    }
+
+    // CP-14 A1: a Canadian branch's snapshot carries its zone's parts. The
+    // core prices each part on its own, rounded on its own, the tax is their
+    // sum, the preview and the signed sale carry the same parts with their
+    // labels, and the parts are signed. A US snapshot's sale carries none, so
+    // its canonical form has no tax_lines key at all.
+    #[test]
+    fn a_canadian_snapshot_prices_gst_and_pst_each_on_its_own_and_signs_them() {
+        let (counter, db_path) = enrolled_counter("cp14-parts");
+        let mut snap = sample_snapshot();
+        snap.tax.branch_rate = "0.120000".to_string();
+        snap.tax.zone_id = "eeeeeeee-0000-0000-0000-000000000014".to_string();
+        snap.tax.data_source = "seed".to_string();
+        snap.tax.country = "CA".to_string();
+        snap.tax.province = "BC".to_string();
+        snap.tax.parts = vec![
+            SnapshotTaxPart {
+                name: "GOODS_TAX".into(),
+                rate: "0.050000".into(),
+                label: "GST".into(),
+            },
+            SnapshotTaxPart {
+                name: "PROVINCIAL_SALES_TAX".into(),
+                rate: "0.070000".into(),
+                label: "PST".into(),
+            },
+        ];
+        counter.install_test_snapshot(snap).unwrap();
+        let mut req = walk_in_sale_request("77777777-7777-7777-7777-7777777777d1", "3", 0);
+        req.tenders.clear();
+        let preview = counter.price_cart(Some(GABLE_ORIGIN), req.clone()).unwrap();
+        let taxable = preview.subtotal_cents;
+        let (gst, pst) = (tax_at(taxable, 50_000), tax_at(taxable, 70_000));
+        assert_eq!(
+            preview.tax_lines,
+            vec![
+                SignedTaxLine {
+                    name: "GOODS_TAX".into(),
+                    rate: "0.050000".into(),
+                    label: "GST".into(),
+                    cents: gst
+                },
+                SignedTaxLine {
+                    name: "PROVINCIAL_SALES_TAX".into(),
+                    rate: "0.070000".into(),
+                    label: "PST".into(),
+                    cents: pst
+                },
+            ]
+        );
+        assert_eq!(preview.tax_cents, gst + pst);
+        assert_eq!(preview.total_cents, taxable + gst + pst);
+        req.tenders = vec![SignTenderRequest {
+            method: "cash".into(),
+            amount_cents: preview.total_cents,
+            reference: None,
+            id_checked: false,
+            id_type: None,
+        }];
+        let signed = counter
+            .sign_and_queue_sale(Some(GABLE_ORIGIN), req)
+            .unwrap();
+        let _ = std::fs::remove_file(&db_path);
+        assert_eq!(signed.tax_lines, preview.tax_lines);
+        assert_eq!(signed.tax_cents, gst + pst);
+        let canonical = String::from_utf8(canonical_sale_bytes(&signed).unwrap()).unwrap();
+        assert!(
+            canonical.contains("\"tax_lines\":[{\"cents\":"),
+            "{canonical}"
+        );
+    }
+
+    #[test]
+    fn a_us_snapshot_signs_no_tax_lines() {
+        let (counter, db_path) = enrolled_counter("cp14-us");
+        counter.install_test_snapshot(sample_snapshot()).unwrap();
+        let req = walk_in_sale_request("77777777-7777-7777-7777-7777777777d2", "3", 10_000);
+        let signed = counter
+            .sign_and_queue_sale(Some(GABLE_ORIGIN), req)
+            .unwrap();
+        let _ = std::fs::remove_file(&db_path);
+        assert!(signed.tax_lines.is_empty());
+        let canonical = String::from_utf8(canonical_sale_bytes(&signed).unwrap()).unwrap();
+        assert!(!canonical.contains("tax_lines"), "{canonical}");
     }
 
     // C2 (ADR 0011 sections 1 and 4): a tender the branch does not take

@@ -18364,6 +18364,15 @@ export interface components {
             change_cents: number;
             tax_rate: string;
             tax_exempt: boolean;
+            /** @description A Canadian sale's tax parts as the device priced them (CP-14), in its snapshot's order; each must match the part the server prices from the snapshot or the sale is refused tax_unverified. Absent on a US sale. */
+            tax_lines?: {
+                name: string;
+                rate: string;
+                /** @description The printed label, as the snapshot's part carries it. */
+                label: string;
+                /** Format: int64 */
+                cents: number;
+            }[];
             /** Format: int64 */
             queue_count: number;
             /** Format: int64 */
@@ -19424,9 +19433,29 @@ export interface components {
                 cash_rounding_mode: "OFF" | "NEAREST_5_CENTS";
             };
             tax: {
-                /** @description The branch's rate as a decimal string. */
+                /** @description The branch's rate as a decimal string; on a Canadian branch, its zone's parts combined. */
                 branch_rate: string;
                 provider_configured: boolean;
+                /**
+                 * Format: uuid
+                 * @description A Canadian branch's own tax zone (CP-14); absent on a US branch.
+                 */
+                zone_id?: string;
+                /** @description Where the Canadian zone's rates came from; absent on a US branch. */
+                data_source?: string;
+                /** @description CA on a Canadian branch; absent otherwise. */
+                country?: string;
+                /** @description The Canadian branch's province (BC); absent otherwise. */
+                province?: string;
+                /** @description A Canadian branch's tax parts (CP-14): the register prices each part on its own, rounded on its own, prints each as its own line and signs each part's cents as the sale's tax_lines. Absent on a US branch. */
+                parts?: {
+                    /** @description GOODS_TAX or PROVINCIAL_SALES_TAX. */
+                    name: string;
+                    /** @description The part's rate as a decimal string. */
+                    rate: string;
+                    /** @description The printed label: GST, HST, PST or RST. */
+                    label: string;
+                }[];
             };
             walk_in_customer: {
                 /** Format: uuid */
