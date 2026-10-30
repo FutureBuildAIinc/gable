@@ -8,12 +8,14 @@
 // Contacts are on the customer contract (types/customer.ts); the activity feed reads the name only.
 export type { Contact } from './customer';
 
-export type ActivityType = 'call' | 'meeting' | 'email' | 'note';
+export type ActivityType = 'call' | 'meeting' | 'email' | 'note' | 'follow_up';
 
 export interface Activity {
     id: string;
     customer_id: string;
     contact_id: string | null;
+    /** The quote the activity belongs to; null when it was logged on the customer alone. */
+    quote_id: string | null;
     activity_type: ActivityType;
     description: string;
     logged_by: string | null;

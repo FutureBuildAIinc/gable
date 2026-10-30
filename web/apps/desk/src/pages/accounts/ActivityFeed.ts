@@ -15,6 +15,8 @@ export class GableActivityFeed extends LitElement {
     createRenderRoot() { return this; }
 
     @property({ type: String }) customerId = '';
+    /** When set, the feed shows this quote's activities instead of the customer's. */
+    @property({ type: String, attribute: 'quote-id' }) quoteId = '';
 
     @state() private activities: Activity[] = [];
     @state() private contacts: Contact[] = [];
@@ -23,13 +25,13 @@ export class GableActivityFeed extends LitElement {
 
     connectedCallback() {
         super.connectedCallback();
-        if (this.customerId) {
+        if (this.customerId || this.quoteId) {
             this._fetchData();
         }
     }
 
     updated(changedProperties: Map<string, unknown>) {
-        if (changedProperties.has('customerId') && this.customerId) {
+        if ((changedProperties.has('customerId') || changedProperties.has('quoteId')) && (this.customerId || this.quoteId)) {
             this._fetchData();
         }
     }
@@ -38,8 +40,10 @@ export class GableActivityFeed extends LitElement {
         try {
             this.loading = true;
             const [activities, conts] = await Promise.all([
-                crmApi.listAllActivities(this.customerId),
-                CustomerService.listContacts(this.customerId, { limit: 200 }),
+                this.quoteId
+                    ? crmApi.listAllQuoteActivities(this.quoteId)
+                    : crmApi.listAllActivities(this.customerId),
+                this.customerId ? CustomerService.listContacts(this.customerId, { limit: 200 }) : Promise.resolve({ items: [] as Contact[] }),
             ]);
             this.activities = activities;
             this.contacts = conts.items;
@@ -59,6 +63,7 @@ export class GableActivityFeed extends LitElement {
             case 'meeting': return '\u{1F91D}';
             case 'email': return '\u{2709}\u{FE0F}';
             case 'note': return '\u{1F4DD}';
+            case 'follow_up': return '\u{1F5D2}\u{FE0F}';
             default: return '\u{1F4CC}';
         }
     }
@@ -155,6 +160,7 @@ export class GableActivityFeed extends LitElement {
                 ${this.showLogModal ? html`
                     <gable-log-activity-modal
                         customer-id=${this.customerId}
+                        quote-id=${this.quoteId}
                         .contacts=${this.contacts}
                         @close=${this._closeLogModal}
                         @success=${() => {

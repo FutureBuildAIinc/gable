@@ -6,12 +6,14 @@ import { customElement, state, property } from 'lit/decorators.js';
 import { icon } from '../../lib/icons.ts';
 import { router } from '../../lib/router.ts';
 import { ToastService } from '../../lib/toast-service.ts';
-import { ArrowRight, ShoppingCart, BarChart3, ListChecks, Send, Check, X, List, FilePlus, Pencil, Truck, Package } from 'lucide';
+import { ArrowRight, ShoppingCart, BarChart3, ListChecks, Send, Check, X, List, FilePlus, Pencil, Truck, Package, Clock } from 'lucide';
 import { QuoteService, QuoteApiError, quoteErrorMessage } from '../../services/QuoteService.ts';
+import type { QuoteFollowUpFilter } from '../../services/QuoteService.ts';
 import type { QuoteSummary, QuoteStatus } from '../../types/quote.ts';
 import { formatCents } from '../../lib/utils.ts';
 import { onBranchChanged } from '../../lib/branch-listener.ts';
-import { formatDate } from '../../lib/dates.ts';
+import { formatDate, formatDay } from '../../lib/dates.ts';
+import { followUpDay, followUpOverdue } from '../../lib/followUp.ts';
 
 @customElement('gable-quote-view-tabs')
 export class GableQuoteViewTabs extends LitElement {
@@ -95,11 +97,31 @@ export class GableQuoteList extends LitElement {
             .filter((v): v is QuoteStatus => (GableQuoteList.STATUSES as string[]).includes(v));
     }
 
+    private static readonly FOLLOW_UPS: QuoteFollowUpFilter[] = ['due', 'overdue', 'mine'];
+
+    /** The follow up queue the list is narrowed to, from ?follow_up= on the page URL. */
+    private get followUpFilter(): QuoteFollowUpFilter | null {
+        const raw = (new URLSearchParams(window.location.search).get('follow_up') ?? '').trim().toLowerCase();
+        return (GableQuoteList.FOLLOW_UPS as string[]).includes(raw) ? (raw as QuoteFollowUpFilter) : null;
+    }
+
+    /** The queue tab the reader picks; the choice is in the URL, so a link carries it. */
+    private setFollowUpFilter(kind: QuoteFollowUpFilter | null) {
+        const params = new URLSearchParams(window.location.search);
+        if (kind) params.set('follow_up', kind);
+        else params.delete('follow_up');
+        const q = params.toString();
+        history.replaceState(null, '', q ? `${window.location.pathname}?${q}` : window.location.pathname);
+        this.loading = true;
+        void this.loadQuotes();
+    }
+
     private async loadQuotes() {
         try {
             this.error = null;
             const page = await QuoteService.list({
                 status: this.statusFilter,
+                followUp: this.followUpFilter ?? undefined,
                 limit: GableQuoteList.PAGE_SIZE,
                 includeTotal: true,
             });
@@ -120,6 +142,7 @@ export class GableQuoteList extends LitElement {
         try {
             const page = await QuoteService.list({
                 status: this.statusFilter,
+                followUp: this.followUpFilter ?? undefined,
                 limit: GableQuoteList.PAGE_SIZE,
                 cursor: this.nextCursor,
             });
@@ -208,6 +231,31 @@ export class GableQuoteList extends LitElement {
                     </div>
                 </div>
 
+                <!-- The follow up queues: the tabs narrow the page on the server -->
+                <div class="flex gap-1 border-b border-white/10" role="tablist" aria-label="Quote queues">
+                    ${[
+                        { id: null as QuoteFollowUpFilter | null, label: 'All quotes' },
+                        { id: 'due' as QuoteFollowUpFilter | null, label: 'Follow ups due' },
+                        { id: 'overdue' as QuoteFollowUpFilter | null, label: 'Overdue' },
+                        { id: 'mine' as QuoteFollowUpFilter | null, label: 'Mine' },
+                    ].map(tab => html`
+                        <button
+                            role="tab"
+                            aria-selected=${this.followUpFilter === tab.id ? 'true' : 'false'}
+                            @click=${() => this.setFollowUpFilter(tab.id)}
+                            data-testid="follow-up-tab-${tab.id ?? 'all'}"
+                            class="flex items-center gap-2 px-4 py-2.5 text-sm font-medium transition-colors border-b-2 -mb-px ${
+                                this.followUpFilter === tab.id
+                                    ? 'text-gable-green border-gable-green'
+                                    : 'text-zinc-500 border-transparent hover:text-white hover:border-white/20'
+                            }"
+                        >
+                            ${tab.id === 'due' ? icon(Clock, 14) : nothing}
+                            ${tab.label}
+                        </button>
+                    `)}
+                </div>
+
                 <div class="bg-slate-steel border border-white/10 rounded-lg overflow-hidden">
                     <table class="w-full text-left text-sm" aria-label="Quotes list">
                         <thead>
@@ -217,6 +265,7 @@ export class GableQuoteList extends LitElement {
                                 <th class="p-4 font-medium text-muted-foreground">Customer</th>
                                 <th class="p-4 font-medium text-muted-foreground">Source</th>
                                 <th class="p-4 font-medium text-muted-foreground">Fulfillment</th>
+                                <th class="p-4 font-medium text-muted-foreground">Follow up</th>
                                 <th class="p-4 font-medium text-muted-foreground">State</th>
                                 <th class="p-4 font-medium text-muted-foreground text-right">Total</th>
                                 <th class="p-4 font-medium text-muted-foreground text-right">Actions</th>
@@ -225,16 +274,20 @@ export class GableQuoteList extends LitElement {
                         <tbody class="divide-y divide-white/5">
                             ${this.loading ? html`
                                 <tr>
-                                    <td colspan="8" class="p-8 text-center text-muted-foreground">Loading quotes...</td>
+                                    <td colspan="9" class="p-8 text-center text-muted-foreground">Loading quotes...</td>
                                 </tr>
                             ` : this.quotes.length === 0 ? html`
                                 <tr>
-                                    <td colspan="8" class="p-8 text-center text-muted-foreground">
-                                        No quotes found. Create your first quote to get started.
+                                    <td colspan="9" class="p-8 text-center text-muted-foreground">
+                                        ${this.followUpFilter
+                                            ? 'No follow ups are due. A follow up you set shows here on its day.'
+                                            : 'No quotes found. Create your first quote to get started.'}
                                     </td>
                                 </tr>
                             ` : this.quotes.map(quote => {
                                 const isBusy = this.converting === quote.id || this.updatingState === quote.id;
+                                const followUp = followUpDay(quote.follow_up_at);
+                                const overdue = followUpOverdue(quote.follow_up_at);
                                 return html`
                                     <tr class="hover:bg-white/5 transition-colors cursor-pointer" @click=${() => router.navigate(`/quotes/${quote.id}`)}>
                                         <td class="p-4 font-mono text-white/80">${quote.number}</td>
@@ -259,6 +312,21 @@ export class GableQuoteList extends LitElement {
                                                     ${icon(Package, 12)} Pickup
                                                 </span>
                                             `}
+                                        </td>
+                                        <td class="p-4">
+                                            ${followUp ? html`
+                                                <div class="flex items-center gap-1.5">
+                                                    <span class="font-mono text-xs ${overdue ? 'text-rose-400' : 'text-white/80'}" data-testid="follow-up-cell">${formatDay(followUp)}</span>
+                                                    ${overdue ? html`
+                                                        <span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider text-rose-400 bg-rose-500/15 border border-rose-500/20" data-testid="follow-up-overdue">
+                                                            ${icon(Clock, 10, 'w-2.5 h-2.5')} Overdue
+                                                        </span>
+                                                    ` : nothing}
+                                                </div>
+                                                ${quote.follow_up_owner_name ? html`
+                                                    <div class="text-[10px] text-zinc-500 mt-0.5">${quote.follow_up_owner_name}</div>
+                                                ` : nothing}
+                                            ` : html`<span class="text-xs text-zinc-500" data-testid="follow-up-cell">—</span>`}
                                         </td>
                                         <td class="p-4">
                                             <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border uppercase ${this.stateColors[quote.status] || ''}">

@@ -4,6 +4,7 @@
 import type {
     Quote,
     QuoteAnalytics,
+    QuoteFollowUpRequest,
     QuotePage,
     QuoteRequest,
     QuoteStatus,
@@ -14,6 +15,9 @@ import { fetchWithAuth } from './fetchClient';
 import { ifMatch, parseApiError } from './apiError';
 
 const API_URL = import.meta.env.VITE_API_URL || '';
+
+/** The follow up queue the quote list narrows to. */
+export type QuoteFollowUpFilter = 'due' | 'overdue' | 'mine';
 
 export {
     ApiError as QuoteApiError,
@@ -27,6 +31,8 @@ export interface ListQuotesParams {
     /** Server side filter; sent as a comma separated lowercase list. */
     status?: QuoteStatus | QuoteStatus[];
     customerId?: string;
+    /** Narrows the page to the follow up queue. */
+    followUp?: QuoteFollowUpFilter;
     limit?: number;
     cursor?: string | null;
     /** Ask for the total row count (include=total). */
@@ -38,6 +44,7 @@ export function buildListQuery(params: ListQuotesParams = {}): string {
     const statuses = Array.isArray(params.status) ? params.status : params.status ? [params.status] : [];
     if (statuses.length > 0) q.set('status', statuses.join(','));
     if (params.customerId) q.set('customer_id', params.customerId);
+    if (params.followUp) q.set('follow_up', params.followUp);
     if (params.limit) q.set('limit', String(params.limit));
     if (params.cursor) q.set('cursor', params.cursor);
     if (params.includeTotal) q.set('include', 'total');
@@ -115,6 +122,19 @@ export const QuoteService = {
                 headers: { 'If-Match': ifMatch(revision) },
             }),
             'Failed to convert quote to order',
+        );
+        return response.json();
+    },
+
+    /** Sets the follow up date and owner, or clears both with a null date. */
+    async setFollowUp(id: string, request: QuoteFollowUpRequest, revision: number): Promise<Quote> {
+        const response = await expectOk(
+            await fetchWithAuth(`${API_URL}/api/v1/quotes/${id}/follow-up`, {
+                method: 'PUT',
+                headers: { ...JSON_HEADERS, 'If-Match': ifMatch(revision) },
+                body: JSON.stringify(request),
+            }),
+            'Failed to set the follow up',
         );
         return response.json();
     },
