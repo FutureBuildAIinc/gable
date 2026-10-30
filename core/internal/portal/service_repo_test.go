@@ -779,6 +779,11 @@ func (f *fakeOrderRepo) TaxZone(context.Context, string, string, string, time.Ti
 	return nil, nil
 }
 
+// Canada answers a US branch: the fake's orders take the US path (CP-14 A1).
+func (f *fakeOrderRepo) Canada(context.Context, taxzone.CanadaInput) (taxzone.CanadaResult, error) {
+	return taxzone.CanadaResult{}, nil
+}
+
 func (f *fakeOrderRepo) BranchTaxRate(context.Context, uuid.UUID) (*string, error) {
 	rate := "0.000000"
 	return &rate, nil
