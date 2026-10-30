@@ -326,6 +326,10 @@ type Repository interface {
 	// BranchCashRoundingMode reads the branch's cash rounding rule (CP-18).
 	// A branch that has never set it rounds nothing.
 	BranchCashRoundingMode(ctx context.Context, branchID uuid.UUID) (RoundingMode, error)
+	// BranchCardSurcharge reads the branch's card fee rule (CP-15); off at zero when never set.
+	BranchCardSurcharge(ctx context.Context, branchID uuid.UUID) (CardSurcharge, error)
+	writeBranchCardSurcharge(ctx context.Context, cs CardSurcharge) error
+	settingsBranch(ctx context.Context) (*uuid.UUID, error)
 
 	// Offline sync
 	SaleExists(ctx context.Context, id uuid.UUID) (bool, error)

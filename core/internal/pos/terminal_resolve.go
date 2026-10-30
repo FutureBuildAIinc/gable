@@ -455,6 +455,9 @@ func (s *Service) settleSaleLeg(ctx context.Context, sale *Sale, intent *payment
 		g, a, l, b := ref, intent.AnswerAuthCode, intent.AnswerLast4, intent.AnswerBrand
 		tender.GatewayTxID, tender.AuthCode, tender.CardLast4, tender.CardBrand = &g, &a, &l, &b
 		tender.SurchargeCents = httpx.Cents(intent.AnswerFeeCents)
+		if err := s.flagUnexpectedSurcharge(ctx, sale.BranchID, sale.ID, intent.AnswerFeeCents, entry.UserID); err != nil {
+			return err
+		}
 		if err := s.repo.AddTender(ctx, tender); err != nil {
 			return err
 		}

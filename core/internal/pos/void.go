@@ -377,6 +377,12 @@ func (s *Service) runVoidTx(ctx context.Context, saleID uuid.UUID, ifMatch strin
 					return err
 				}
 				mergeEffects(&fxAll, rfx)
+				// the processor returned the fee with the card refund
+				// (CP-15): it leaves the surcharge income account too
+				if err := s.bookFeeRefund(ctx, RefundIntent{ID: uuid.New(), SaleID: saleID, FeeCents: int64(t.SurchargeCents)},
+					&sale.BranchID, actor); err != nil {
+					return err
+				}
 			}
 		}
 		// The store credit the sale paid with goes back to its credit memos

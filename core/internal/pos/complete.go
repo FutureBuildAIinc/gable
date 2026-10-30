@@ -933,6 +933,9 @@ func (s *Service) completeSaleTx(ctx context.Context, saleID uuid.UUID, ifMatch 
 				tender.GatewayTxID, tender.AuthCode = &g, &a
 				tender.CardLast4, tender.CardBrand = &l, &b
 				tender.SurchargeCents = httpx.Cents(charges[i].FeeCents)
+				if err := s.flagUnexpectedSurcharge(ctx, sale.BranchID, saleID, charges[i].FeeCents, actor); err != nil {
+					return err
+				}
 				// the terminal leg's money is booked in this transaction: the
 				// leg is spent with it, so it can back no second sale
 				if charges[i].IntentID != uuid.Nil {
