@@ -38799,7 +38799,7 @@ components:
         start_url:
           type: [string, "null"]
           description: >-
-            Where the method starts: the portal login for the form method, the start route for every other.
+            Where the method starts: the staff sign in for the form method, the start route for every other.
         issuer_url:
           type: [string, "null"]
           description: The oidc issuer URL, null for every other method.
