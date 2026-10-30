@@ -77,17 +77,6 @@ type offlineArithmeticFixture struct {
 		ExpectedLinearFeet string `json:"expected_linear_feet"`
 		ExpectedBoardFeet  string `json:"expected_board_feet"`
 	} `json:"tallies"`
-	Tenders []struct {
-		Name                  string          `json:"name"`
-		TotalCents            int64           `json:"total_cents"`
-		Tenders               []OfflineTender `json:"tenders"`
-		Refused               bool            `json:"refused"`
-		ExpectedTenderedCents int64           `json:"expected_tendered_cents"`
-		ExpectedCashCents     int64           `json:"expected_cash_cents"`
-		ExpectedAccountCents  int64           `json:"expected_account_cents"`
-		ExpectedChangeCents   int64           `json:"expected_change_cents"`
-		ExpectedCode          *string         `json:"expected_code"`
-	} `json:"tenders"`
 }
 
 // RULE (ADR 0011 section 7): the Go salesdoc arithmetic and the Rust offline
@@ -96,8 +85,9 @@ type offlineArithmeticFixture struct {
 // other than its row's price unit, a contract price in its own unit, a cost
 // derived level in the unit it derives from, exact and refused stock
 // conversions, stock unit restatements (converted when the old unit remains in
-// the current set, refused when gone), tally linear and board feet, and tender
-// sums and change.
+// the current set, refused when gone), and tally linear and board feet. The
+// fixture's tender half runs in package pos (offline_tender_fixture_test.go),
+// through the live cash rounding.
 func TestOfflineArithmeticFixture(t *testing.T) {
 	rawBytes, err := os.ReadFile("testdata/offline-arithmetic.json")
 	if err != nil {
@@ -258,36 +248,6 @@ func TestOfflineArithmeticFixture(t *testing.T) {
 			}
 			if got.BoardFeet == nil || got.BoardFeet.WireString() != tc.ExpectedBoardFeet {
 				t.Errorf("board_feet = %v, want %s", got.BoardFeet, tc.ExpectedBoardFeet)
-			}
-		})
-	}
-
-	for _, tc := range fix.Tenders {
-		t.Run("tender/"+tc.Name, func(t *testing.T) {
-			res, err := SettleOfflineTenders(httpx.Cents(tc.TotalCents), tc.Tenders)
-			if tc.Refused {
-				if err == nil {
-					t.Fatalf("SettleOfflineTenders succeeded (%+v), want refusal", res)
-				}
-				if tc.ExpectedCode != nil && res.RefusalCode != *tc.ExpectedCode {
-					t.Errorf("refusal code = %q, want %q", res.RefusalCode, *tc.ExpectedCode)
-				}
-				return
-			}
-			if err != nil {
-				t.Fatalf("SettleOfflineTenders: %v", err)
-			}
-			if int64(res.TenderedCents) != tc.ExpectedTenderedCents {
-				t.Errorf("tendered = %d, want %d", res.TenderedCents, tc.ExpectedTenderedCents)
-			}
-			if int64(res.CashCents) != tc.ExpectedCashCents {
-				t.Errorf("cash = %d, want %d", res.CashCents, tc.ExpectedCashCents)
-			}
-			if int64(res.AccountCents) != tc.ExpectedAccountCents {
-				t.Errorf("account = %d, want %d", res.AccountCents, tc.ExpectedAccountCents)
-			}
-			if int64(res.ChangeCents) != tc.ExpectedChangeCents {
-				t.Errorf("change = %d, want %d", res.ChangeCents, tc.ExpectedChangeCents)
 			}
 		})
 	}

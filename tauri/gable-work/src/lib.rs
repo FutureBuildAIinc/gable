@@ -44,7 +44,7 @@ pub mod commands {
 
     use gable_shell_core::offline::{
         EnrolmentPublic, OfflineCounter, OfflineError, OfflineSnapshot, QueueStatusView,
-        SignSaleRequest, SignedOfflineSale, SyncBatchOutcome,
+        SignSaleRequest, SignedOfflineSale,
     };
     use gable_shell_core::shell::{self, TokenState};
 
@@ -88,23 +88,6 @@ pub mod commands {
     }
 
     #[tauri::command]
-    pub async fn enrol_offline_register(
-        window: tauri::WebviewWindow,
-        counter: tauri::State<'_, Arc<OfflineCounter>>,
-        register_id: String,
-        device_epoch: i64,
-        gable_url: String,
-    ) -> Result<EnrolmentPublic, OfflineError> {
-        let url = window.url().map_err(|_| OfflineError::origin_denied())?;
-        let counter = counter.inner().clone();
-        tauri::async_runtime::spawn_blocking(move || {
-            counter.enrol_register(Some(url.as_str()), &register_id, device_epoch, &gable_url)
-        })
-        .await
-        .map_err(|_| OfflineError::keychain_unavailable())?
-    }
-
-    #[tauri::command]
     pub async fn offline_enrolment_status(
         window: tauri::WebviewWindow,
         counter: tauri::State<'_, Arc<OfflineCounter>>,
@@ -114,21 +97,6 @@ pub mod commands {
         tauri::async_runtime::spawn_blocking(move || counter.enrolment_status(Some(url.as_str())))
             .await
             .map_err(|_| OfflineError::keychain_unavailable())?
-    }
-
-    #[tauri::command]
-    pub async fn store_offline_snapshot(
-        window: tauri::WebviewWindow,
-        counter: tauri::State<'_, Arc<OfflineCounter>>,
-        snapshot: OfflineSnapshot,
-    ) -> Result<(), OfflineError> {
-        let url = window.url().map_err(|_| OfflineError::origin_denied())?;
-        let counter = counter.inner().clone();
-        tauri::async_runtime::spawn_blocking(move || {
-            counter.store_snapshot(Some(url.as_str()), snapshot)
-        })
-        .await
-        .map_err(|_| OfflineError::keychain_unavailable())?
     }
 
     #[tauri::command]
@@ -169,21 +137,6 @@ pub mod commands {
             .await
             .map_err(|_| OfflineError::keychain_unavailable())?
     }
-
-    #[tauri::command]
-    pub async fn record_offline_sync_outcomes(
-        window: tauri::WebviewWindow,
-        counter: tauri::State<'_, Arc<OfflineCounter>>,
-        outcome: SyncBatchOutcome,
-    ) -> Result<QueueStatusView, OfflineError> {
-        let url = window.url().map_err(|_| OfflineError::origin_denied())?;
-        let counter = counter.inner().clone();
-        tauri::async_runtime::spawn_blocking(move || {
-            counter.record_sync_outcomes(Some(url.as_str()), outcome)
-        })
-        .await
-        .map_err(|_| OfflineError::keychain_unavailable())?
-    }
 }
 
 pub fn run() {
@@ -202,13 +155,10 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::core_token,
             commands::clear_tokens,
-            commands::enrol_offline_register,
             commands::offline_enrolment_status,
-            commands::store_offline_snapshot,
             commands::load_offline_snapshot,
             commands::sign_and_queue_offline_sale,
-            commands::offline_queue_status,
-            commands::record_offline_sync_outcomes
+            commands::offline_queue_status
         ])
         .setup(move |app| {
             let data_dir = app
@@ -476,12 +426,7 @@ mod tests {
         let counter = OfflineCounter::new(profile_id(), custody.clone(), &db_path, Some(fence));
 
         counter
-            .enrol_register(
-                Some("https://gable.yard.internal:8443/pos"),
-                "REG-01",
-                1,
-                "https://gable.yard.internal:8443/",
-            )
+            .enrol_register(Some("https://gable.yard.internal:8443/pos"), "REG-01", 1)
             .expect("enrol succeeds from /pos on the loaded Gable origin");
 
         let resolved =

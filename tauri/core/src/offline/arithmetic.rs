@@ -8,6 +8,7 @@
 //!
 //! No floating-point type appears anywhere in this module.
 
+use crate::offline::model::CashRoundingMode;
 use serde::{Deserialize, Serialize};
 
 pub const QUANTITY_SCALE: u32 = 4;
@@ -494,6 +495,47 @@ pub struct TenderSettlement {
     pub cash_cents: i64,
     pub account_cents: i64,
     pub change_cents: i64,
+    /// The drawer's difference from the exact cash leg under the branch's
+    /// cash rounding rule: positive on a round up.
+    pub rounding_cents: i64,
+}
+
+/// Rounds a cash amount in cents to the nearest five cents, symmetrically,
+/// as `pos.RoundCash` does (CP-18): endings 1, 2, 6 and 7 go down, 3, 4, 8
+/// and 9 go up, 0 and 5 stay. Returns the rounded amount and its signed
+/// difference from the input.
+pub fn round_cash(cents: i64) -> (i64, i64) {
+    let magnitude = cents.abs();
+    let rounded = match magnitude % 5 {
+        0 => magnitude,
+        1 => magnitude - 1,
+        2 => magnitude - 2,
+        3 => magnitude + 2,
+        _ => magnitude + 1,
+    };
+    let rounded = if cents < 0 { -rounded } else { rounded };
+    (rounded, rounded - cents)
+}
+
+/// Whether one cash payment can stand a rounding difference, as the live
+/// completion decides: the change comes out of the cash tenders in the order
+/// they were taken, and the largest payment left must hold it on its own.
+fn cash_leg_carries(tenders: &[OfflineTenderCalc], change: i64, diff: i64) -> bool {
+    let mut largest = 0;
+    let mut left = change;
+    for t in tenders {
+        if !t.method.trim().eq_ignore_ascii_case("cash") {
+            continue;
+        }
+        let mut amount = t.amount_cents;
+        if left > 0 {
+            let give = amount.min(left);
+            amount -= give;
+            left -= give;
+        }
+        largest = largest.max(amount);
+    }
+    largest > 0 && largest >= diff
 }
 
 /// Refusal when offline tender settlement fails.
@@ -505,16 +547,21 @@ pub struct TenderRefusal {
 }
 
 /// Sums an offline sale's tenders and computes change from cash, matching
-/// `salesdoc.SettleOfflineTenders`.
+/// `salesdoc.SettleOfflineTenders` with the live `pos.RoundCashFor`: under
+/// the branch's cash rounding rule the cash leg rounds, the change falls out
+/// of the rounded leg, and where no single cash payment can stand the
+/// difference the cash is taken exactly.
 pub fn settle_tenders(
     total_cents: i64,
     tenders: &[OfflineTenderCalc],
+    rounding: CashRoundingMode,
 ) -> Result<TenderSettlement, TenderRefusal> {
     let mut out = TenderSettlement {
         tendered_cents: 0,
         cash_cents: 0,
         account_cents: 0,
         change_cents: 0,
+        rounding_cents: 0,
     };
     if tenders.is_empty() {
         return Err(TenderRefusal {
@@ -560,7 +607,25 @@ pub fn settle_tenders(
             partial: out,
         });
     }
-    let change = out.tendered_cents - total_cents;
+    let mut change = out.tendered_cents - total_cents;
+    let cash_leg_exact = out.cash_cents - change;
+    if rounding == CashRoundingMode::Nearest5Cents && cash_leg_exact > 0 {
+        let (rounded, diff) = round_cash(cash_leg_exact);
+        if diff != 0 && cash_leg_carries(tenders, out.cash_cents - rounded, diff) {
+            change = out.cash_cents - rounded;
+            out.rounding_cents = diff;
+            if change < 0 {
+                return Err(TenderRefusal {
+                    code: "insufficient_tender",
+                    message: format!(
+                        "the cash due is {rounded} cents once the branch rounds it to the nearest five cents, and the tenders carry {}",
+                        out.cash_cents
+                    ),
+                    partial: out,
+                });
+            }
+        }
+    }
     if change < 0 {
         return Err(TenderRefusal {
             code: "insufficient_tender",

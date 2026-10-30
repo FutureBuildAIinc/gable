@@ -220,7 +220,9 @@
       "expected_cash_cents": 5000,
       "expected_account_cents": 0,
       "expected_change_cents": 850,
-      "expected_code": null
+      "expected_code": null,
+      "cash_rounding_mode": "OFF",
+      "expected_rounding_cents": 0
     },
     {
       "name": "split_account_and_cash_gives_change_from_cash",
@@ -240,7 +242,9 @@
       "expected_cash_cents": 3000,
       "expected_account_cents": 10000,
       "expected_change_cents": 500,
-      "expected_code": null
+      "expected_code": null,
+      "cash_rounding_mode": "OFF",
+      "expected_rounding_cents": 0
     },
     {
       "name": "insufficient_tender_refused",
@@ -256,7 +260,9 @@
       "expected_cash_cents": 4000,
       "expected_account_cents": 0,
       "expected_change_cents": 0,
-      "expected_code": "insufficient_tender"
+      "expected_code": "insufficient_tender",
+      "cash_rounding_mode": "OFF",
+      "expected_rounding_cents": 0
     },
     {
       "name": "non_cash_over_tender_refused",
@@ -272,7 +278,9 @@
       "expected_cash_cents": 0,
       "expected_account_cents": 0,
       "expected_change_cents": 0,
-      "expected_code": "change_from_cash"
+      "expected_code": "change_from_cash",
+      "cash_rounding_mode": "OFF",
+      "expected_rounding_cents": 0
     },
     {
       "name": "two_account_legs_refused",
@@ -292,7 +300,201 @@
       "expected_cash_cents": 0,
       "expected_account_cents": 5000,
       "expected_change_cents": 0,
-      "expected_code": "one_account_leg"
+      "expected_code": "one_account_leg",
+      "cash_rounding_mode": "OFF",
+      "expected_rounding_cents": 0
+    },
+    {
+      "name": "rounding_cash_leg_ending_2_goes_down",
+      "cash_rounding_mode": "NEAREST_5_CENTS",
+      "total_cents": 1002,
+      "tenders": [
+        {
+          "method": "cash",
+          "amount_cents": 2000
+        }
+      ],
+      "refused": false,
+      "expected_tendered_cents": 2000,
+      "expected_cash_cents": 2000,
+      "expected_account_cents": 0,
+      "expected_change_cents": 1000,
+      "expected_rounding_cents": -2,
+      "expected_code": null
+    },
+    {
+      "name": "rounding_cash_leg_ending_3_goes_up",
+      "cash_rounding_mode": "NEAREST_5_CENTS",
+      "total_cents": 1003,
+      "tenders": [
+        {
+          "method": "cash",
+          "amount_cents": 2000
+        }
+      ],
+      "refused": false,
+      "expected_tendered_cents": 2000,
+      "expected_cash_cents": 2000,
+      "expected_account_cents": 0,
+      "expected_change_cents": 995,
+      "expected_rounding_cents": 2,
+      "expected_code": null
+    },
+    {
+      "name": "rounding_cash_leg_ending_7_goes_down",
+      "cash_rounding_mode": "NEAREST_5_CENTS",
+      "total_cents": 4157,
+      "tenders": [
+        {
+          "method": "cash",
+          "amount_cents": 5000
+        }
+      ],
+      "refused": false,
+      "expected_tendered_cents": 5000,
+      "expected_cash_cents": 5000,
+      "expected_account_cents": 0,
+      "expected_change_cents": 845,
+      "expected_rounding_cents": -2,
+      "expected_code": null
+    },
+    {
+      "name": "rounding_cash_leg_ending_8_goes_up",
+      "cash_rounding_mode": "NEAREST_5_CENTS",
+      "total_cents": 4158,
+      "tenders": [
+        {
+          "method": "cash",
+          "amount_cents": 5000
+        }
+      ],
+      "refused": false,
+      "expected_tendered_cents": 5000,
+      "expected_cash_cents": 5000,
+      "expected_account_cents": 0,
+      "expected_change_cents": 840,
+      "expected_rounding_cents": 2,
+      "expected_code": null
+    },
+    {
+      "name": "rounding_cash_leg_ending_5_does_not_move",
+      "cash_rounding_mode": "NEAREST_5_CENTS",
+      "total_cents": 4155,
+      "tenders": [
+        {
+          "method": "cash",
+          "amount_cents": 5000
+        }
+      ],
+      "refused": false,
+      "expected_tendered_cents": 5000,
+      "expected_cash_cents": 5000,
+      "expected_account_cents": 0,
+      "expected_change_cents": 845,
+      "expected_rounding_cents": 0,
+      "expected_code": null
+    },
+    {
+      "name": "rounding_off_takes_the_cash_exactly",
+      "cash_rounding_mode": "OFF",
+      "total_cents": 1003,
+      "tenders": [
+        {
+          "method": "cash",
+          "amount_cents": 2000
+        }
+      ],
+      "refused": false,
+      "expected_tendered_cents": 2000,
+      "expected_cash_cents": 2000,
+      "expected_account_cents": 0,
+      "expected_change_cents": 997,
+      "expected_rounding_cents": 0,
+      "expected_code": null
+    },
+    {
+      "name": "rounding_exact_cash_short_once_rounded_up_refused",
+      "cash_rounding_mode": "NEAREST_5_CENTS",
+      "total_cents": 1003,
+      "tenders": [
+        {
+          "method": "cash",
+          "amount_cents": 1003
+        }
+      ],
+      "refused": true,
+      "expected_tendered_cents": 1003,
+      "expected_cash_cents": 1003,
+      "expected_account_cents": 0,
+      "expected_change_cents": 0,
+      "expected_rounding_cents": 2,
+      "expected_code": "insufficient_tender"
+    },
+    {
+      "name": "rounding_moves_the_cash_leg_only_beside_an_account_leg",
+      "cash_rounding_mode": "NEAREST_5_CENTS",
+      "total_cents": 12503,
+      "tenders": [
+        {
+          "method": "account",
+          "amount_cents": 10000
+        },
+        {
+          "method": "cash",
+          "amount_cents": 3000
+        }
+      ],
+      "refused": false,
+      "expected_tendered_cents": 13000,
+      "expected_cash_cents": 3000,
+      "expected_account_cents": 10000,
+      "expected_change_cents": 495,
+      "expected_rounding_cents": 2,
+      "expected_code": null
+    },
+    {
+      "name": "rounding_never_touches_a_check",
+      "cash_rounding_mode": "NEAREST_5_CENTS",
+      "total_cents": 1003,
+      "tenders": [
+        {
+          "method": "check",
+          "amount_cents": 1003
+        }
+      ],
+      "refused": false,
+      "expected_tendered_cents": 1003,
+      "expected_cash_cents": 0,
+      "expected_account_cents": 0,
+      "expected_change_cents": 0,
+      "expected_rounding_cents": 0,
+      "expected_code": null
+    },
+    {
+      "name": "rounding_no_cash_payment_stands_the_difference_takes_it_exactly",
+      "cash_rounding_mode": "NEAREST_5_CENTS",
+      "total_cents": 3,
+      "tenders": [
+        {
+          "method": "cash",
+          "amount_cents": 1
+        },
+        {
+          "method": "cash",
+          "amount_cents": 1
+        },
+        {
+          "method": "cash",
+          "amount_cents": 1
+        }
+      ],
+      "refused": false,
+      "expected_tendered_cents": 3,
+      "expected_cash_cents": 3,
+      "expected_account_cents": 0,
+      "expected_change_cents": 0,
+      "expected_rounding_cents": 0,
+      "expected_code": null
     }
   ]
 }

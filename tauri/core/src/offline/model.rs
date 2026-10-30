@@ -47,6 +47,22 @@ pub struct SnapshotPolicy {
     pub allow_price_override: bool,
     #[serde(default)]
     pub allow_discount: bool,
+    /// The branch's cash rounding rule (CP-18, `locations.cash_rounding_mode`):
+    /// the core rounds the cash leg under it, as the live counter does.
+    #[serde(default)]
+    pub cash_rounding_mode: CashRoundingMode,
+}
+
+/// A branch's cash rounding rule, the twin of `pos.RoundingMode`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum CashRoundingMode {
+    /// The cash is taken exactly as tendered.
+    #[default]
+    #[serde(rename = "OFF")]
+    Off,
+    /// The cash leg rounds to the nearest five cents, symmetrically.
+    #[serde(rename = "NEAREST_5_CENTS")]
+    Nearest5Cents,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -144,6 +160,18 @@ pub struct EnrolmentRecord {
     pub signing_seed_hex: String,
     pub public_key_hex: String,
     pub gable_url: String,
+    /// The epoch this enrolment replaced and the last sequence the device
+    /// assigned under it, kept for the unknown tail report (ADR 0011 5.1).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub previous_epoch: Option<PriorEpochMark>,
+}
+
+/// The keychain mark of the epoch a re-enrolment replaced.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PriorEpochMark {
+    pub device_epoch: i64,
+    pub last_seq: i64,
+    pub confirmed_seq: i64,
 }
 
 impl Drop for EnrolmentRecord {

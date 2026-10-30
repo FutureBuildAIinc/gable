@@ -12,18 +12,19 @@ pub mod store;
 
 pub use arithmetic::{
     complete_tally, convert_stock, extend, format_decimal_quantity, format_wire_quantity,
-    parse_quantity, parse_tax_rate, resolve_line_pair, resolve_stock_move, settle_tenders, tax_at,
-    CompletedTally, InexactStockError, OfflineTenderCalc, Pair, StockMoveError, TallyRowCalc,
-    TenderRefusal, TenderSettlement, UnitSetEntry, ONE_QTY, QUANTITY_MAX, QUANTITY_SCALE,
-    TAX_RATE_SCALE,
+    parse_quantity, parse_tax_rate, resolve_line_pair, resolve_stock_move, round_cash,
+    settle_tenders, tax_at, CompletedTally, InexactStockError, OfflineTenderCalc, Pair,
+    StockMoveError, TallyRowCalc, TenderRefusal, TenderSettlement, UnitSetEntry, ONE_QTY,
+    QUANTITY_MAX, QUANTITY_SCALE, TAX_RATE_SCALE,
 };
 pub use model::{
-    EnrolmentPublic, EnrolmentRecord, HighWaterMark, OfflineError, OfflineSnapshot, QueueItemState,
-    QueueStatusView, QueuedSaleEntry, SignLineRequest, SignSaleRequest, SignTenderRequest,
-    SignedOfflineSale, SignedSaleLine, SignedSaleTender, SignedTally, SignedTallyRow,
-    SnapshotAccount, SnapshotBuyer, SnapshotJob, SnapshotPolicy, SnapshotPriceRow, SnapshotProduct,
-    SnapshotTax, SnapshotTillSession, SnapshotUnitRow, SnapshotWalkIn, StoreMeta, SyncBatchOutcome,
-    SyncOutcomeItem, TallyRequestInput, TallyRowRequestInput,
+    CashRoundingMode, EnrolmentPublic, EnrolmentRecord, HighWaterMark, OfflineError,
+    OfflineSnapshot, PriorEpochMark, QueueItemState, QueueStatusView, QueuedSaleEntry,
+    SignLineRequest, SignSaleRequest, SignTenderRequest, SignedOfflineSale, SignedSaleLine,
+    SignedSaleTender, SignedTally, SignedTallyRow, SnapshotAccount, SnapshotBuyer, SnapshotJob,
+    SnapshotPolicy, SnapshotPriceRow, SnapshotProduct, SnapshotTax, SnapshotTillSession,
+    SnapshotUnitRow, SnapshotWalkIn, StoreMeta, SyncBatchOutcome, SyncOutcomeItem,
+    TallyRequestInput, TallyRowRequestInput,
 };
 pub use store::{
     canonical_sale_bytes, sha256_hex, verify_sale_signature, CrashPoint, OfflineCounter,
@@ -76,6 +77,7 @@ mod tests {
                 require_id_for_tenders: vec!["check".to_string(), "account".to_string()],
                 allow_price_override: false,
                 allow_discount: false,
+                cash_rounding_mode: CashRoundingMode::Off,
             },
             tax: SnapshotTax {
                 branch_rate: "0.082500".to_string(),
@@ -374,11 +376,13 @@ mod tests {
         name: String,
         total_cents: i64,
         tenders: Vec<OfflineTenderCalc>,
+        cash_rounding_mode: CashRoundingMode,
         refused: bool,
         expected_tendered_cents: i64,
         expected_cash_cents: i64,
         expected_account_cents: i64,
         expected_change_cents: i64,
+        expected_rounding_cents: i64,
         expected_code: Option<String>,
     }
 
@@ -506,7 +510,7 @@ mod tests {
         }
 
         for tc in &fix.tenders {
-            let res = settle_tenders(tc.total_cents, &tc.tenders);
+            let res = settle_tenders(tc.total_cents, &tc.tenders, tc.cash_rounding_mode);
             if tc.refused {
                 let err = res.expect_err(&tc.name);
                 assert_eq!(
@@ -525,6 +529,11 @@ mod tests {
                 assert_eq!(got.cash_cents, tc.expected_cash_cents, "{}", tc.name);
                 assert_eq!(got.account_cents, tc.expected_account_cents, "{}", tc.name);
                 assert_eq!(got.change_cents, tc.expected_change_cents, "{}", tc.name);
+                assert_eq!(
+                    got.rounding_cents, tc.expected_rounding_cents,
+                    "rounding/{}",
+                    tc.name
+                );
             }
         }
     }
@@ -542,7 +551,7 @@ mod tests {
             OfflineCounter::new(PROFILE_ID, custody.clone(), &db_path, Some(fence.clone()));
 
         let enrolled = counter
-            .enrol_register(Some(GABLE_ORIGIN), "REG-01", 3, GABLE_ORIGIN)
+            .enrol_register(Some(GABLE_ORIGIN), "REG-01", 3)
             .expect("enrol succeeds");
         assert_eq!(enrolled.public_key_hex.len(), 64);
 
@@ -559,7 +568,7 @@ mod tests {
         assert!(pairs.contains(&(PROFILE_ID.to_string(), "offline-counter:mark".to_string())));
 
         counter
-            .store_snapshot(Some(GABLE_ORIGIN), sample_snapshot())
+            .install_test_snapshot(sample_snapshot())
             .expect("snapshot stored");
         let signed = counter
             .sign_and_queue_sale(
@@ -582,14 +591,14 @@ mod tests {
             OfflineCounter::new(PROFILE_ID, unavailable_custody, &db_path, Some(fence));
         assert_eq!(
             closed_counter
-                .enrol_register(Some(GABLE_ORIGIN), "REG-01", 4, GABLE_ORIGIN)
+                .enrol_register(Some(GABLE_ORIGIN), "REG-01", 4)
                 .unwrap_err()
                 .code,
             "keychain_unavailable"
         );
         assert_eq!(
             closed_counter
-                .store_snapshot(Some(GABLE_ORIGIN), sample_snapshot())
+                .install_test_snapshot(sample_snapshot())
                 .unwrap_err()
                 .code,
             "keychain_unavailable"
@@ -633,11 +642,9 @@ mod tests {
         let counter = OfflineCounter::new(PROFILE_ID, custody, &db_path, Some(fence));
 
         counter
-            .enrol_register(Some(GABLE_ORIGIN), "REG-01", 3, GABLE_ORIGIN)
+            .enrol_register(Some(GABLE_ORIGIN), "REG-01", 3)
             .unwrap();
-        counter
-            .store_snapshot(Some(GABLE_ORIGIN), sample_snapshot())
-            .unwrap();
+        counter.install_test_snapshot(sample_snapshot()).unwrap();
 
         // Remove the SQLite store while the keychain still holds the live enrolment.
         std::fs::remove_file(&db_path).unwrap();
@@ -659,11 +666,11 @@ mod tests {
 
         // Re-enrolling at epoch 4 restores offline selling.
         counter
-            .enrol_register(Some(GABLE_ORIGIN), "REG-01", 4, GABLE_ORIGIN)
+            .enrol_register(Some(GABLE_ORIGIN), "REG-01", 4)
             .unwrap();
         let mut snap4 = sample_snapshot();
         snap4.device_epoch = 4;
-        counter.store_snapshot(Some(GABLE_ORIGIN), snap4).unwrap();
+        counter.install_test_snapshot(snap4).unwrap();
         let sale = counter
             .sign_and_queue_sale(
                 Some(GABLE_ORIGIN),
@@ -689,11 +696,9 @@ mod tests {
         let counter = OfflineCounter::new(PROFILE_ID, custody, &db_path, Some(fence));
 
         counter
-            .enrol_register(Some(GABLE_ORIGIN), "REG-01", 3, GABLE_ORIGIN)
+            .enrol_register(Some(GABLE_ORIGIN), "REG-01", 3)
             .unwrap();
-        counter
-            .store_snapshot(Some(GABLE_ORIGIN), sample_snapshot())
-            .unwrap();
+        counter.install_test_snapshot(sample_snapshot()).unwrap();
 
         let sale1 = counter
             .sign_and_queue_sale(
@@ -763,12 +768,12 @@ mod tests {
             OfflineCounter::new(PROFILE_ID, custody.clone(), &db_path, Some(fence.clone()));
 
         let enrolled = counter
-            .enrol_register(Some(GABLE_ORIGIN), "REG-01", 3, GABLE_ORIGIN)
+            .enrol_register(Some(GABLE_ORIGIN), "REG-01", 3)
             .unwrap();
         let mut snap = sample_snapshot();
         snap.policy.max_queue_count = 10;
         snap.policy.max_queue_total_cents = 1_000_000;
-        counter.store_snapshot(Some(GABLE_ORIGIN), snap).unwrap();
+        counter.install_test_snapshot(snap).unwrap();
 
         // Crash 1: after SQLite write, before keychain mark update.
         counter.set_crash_point(Some(CrashPoint::AfterStoreWriteBeforeKeychainMark));
@@ -850,11 +855,9 @@ mod tests {
         let counter = OfflineCounter::new(PROFILE_ID, custody, &db_path, Some(fence));
 
         counter
-            .enrol_register(Some(GABLE_ORIGIN), "REG-01", 3, GABLE_ORIGIN)
+            .enrol_register(Some(GABLE_ORIGIN), "REG-01", 3)
             .unwrap();
-        counter
-            .store_snapshot(Some(GABLE_ORIGIN), sample_snapshot())
-            .unwrap();
+        counter.install_test_snapshot(sample_snapshot()).unwrap();
 
         // 1. Caller naming device_seq or prev_digest is refused.
         let mut with_seq =
@@ -1026,7 +1029,7 @@ mod tests {
         let counter = OfflineCounter::new(PROFILE_ID, custody.clone(), &db_path, Some(fence));
 
         counter
-            .enrol_register(Some(GABLE_ORIGIN), "REG-01", 1, GABLE_ORIGIN)
+            .enrol_register(Some(GABLE_ORIGIN), "REG-01", 1)
             .unwrap();
         assert_eq!(
             counter
@@ -1050,5 +1053,413 @@ mod tests {
         );
 
         let _ = std::fs::remove_file(&db_path);
+    }
+
+    // RULE (CP-18, ADR 0011 section 5.1): on a branch that rounds cash, the
+    // core signs the change the live counter gives: 10 studs at 3.85 with tax
+    // at 8.25% is 41.68, the cash leg rounds to 41.70, and 50.00 tendered
+    // gives 8.30 back, not 8.32.
+    #[test]
+    fn the_core_signs_the_change_from_the_branchs_rounded_cash_leg() {
+        let db_path = temp_db_path("rounding");
+        let custody = Arc::new(MemoryCustody::new());
+        let fence = OriginFence::from_starts(&[GABLE_ORIGIN]).unwrap();
+        let counter = OfflineCounter::new(PROFILE_ID, custody, &db_path, Some(fence));
+        counter
+            .enrol_register(Some(GABLE_ORIGIN), "REG-01", 3)
+            .unwrap();
+        let mut snap = sample_snapshot();
+        snap.policy.cash_rounding_mode = CashRoundingMode::Nearest5Cents;
+        counter.install_test_snapshot(snap).unwrap();
+        let signed = counter
+            .sign_and_queue_sale(
+                Some(GABLE_ORIGIN),
+                walk_in_sale_request("77777777-7777-7777-7777-7777777777c1", "10", 5_000),
+            )
+            .unwrap();
+        let _ = std::fs::remove_file(&db_path);
+        assert_eq!(
+            signed.total_cents, 4_168,
+            "the invoice keeps the exact total"
+        );
+        assert_eq!(signed.change_cents, 830);
+        assert_eq!(round_cash(4_168), (4_170, 2));
+    }
+
+    // READER RED 1: a page on the Gable origin must never supply the snapshot
+    // the core prices and signs from. No webview command stores one (nor
+    // enrols the register, nor writes the sync outcomes), the Gable origin's
+    // grant names none, and a counter whose core has fetched no snapshot of
+    // its own signs nothing.
+    #[test]
+    fn reader_red_page_supplied_snapshot_is_refused() {
+        const WORK_BUILD: &str = include_str!("../../../gable-work/build.rs");
+        const WORK_LIB: &str = include_str!("../../../gable-work/src/lib.rs");
+        for page_held in [
+            "store_offline_snapshot",
+            "enrol_offline_register",
+            "record_offline_sync_outcomes",
+        ] {
+            assert!(
+                !WORK_BUILD.contains(&format!("\"{page_held}\"")),
+                "{page_held} is declared as a webview command"
+            );
+            assert!(
+                !WORK_LIB.contains(&format!("fn {page_held}")),
+                "{page_held} is a webview command"
+            );
+            let grant = format!("allow-{}", page_held.replace('_', "-"));
+            assert!(
+                !crate::shell::WORK_REMOTE_PERMISSIONS.contains(&grant.as_str()),
+                "{grant} is granted to the Gable origin"
+            );
+        }
+
+        let db_path = temp_db_path("rr1");
+        let custody = Arc::new(MemoryCustody::new());
+        let fence = OriginFence::from_starts(&[GABLE_ORIGIN]).unwrap();
+        let counter = OfflineCounter::new(PROFILE_ID, custody, &db_path, Some(fence));
+        counter
+            .enrol_register(Some(GABLE_ORIGIN), "REG-01", 3)
+            .unwrap();
+        let signed = counter.sign_and_queue_sale(
+            Some(GABLE_ORIGIN),
+            walk_in_sale_request("77777777-7777-7777-7777-7777777777a1", "10", 100),
+        );
+        let _ = std::fs::remove_file(&db_path);
+        assert_eq!(
+            signed.map(|s| s.total_cents).unwrap_err().code,
+            "snapshot_missing",
+            "the core signed with no snapshot of its own"
+        );
+    }
+
+    // READER RED 2: a re-enrolment never wipes an unsynced queue, never reuses
+    // the epoch, never takes its URL from an argument, and keeps the replaced
+    // epoch's mark for the unknown tail report.
+    #[test]
+    fn reader_red_page_reenrol_cannot_wipe_unsynced_queue_or_repoint_shell() {
+        use crate::custody::{Address, Custody, OfflineSlot};
+
+        let db_path = temp_db_path("rr2");
+        let custody = Arc::new(MemoryCustody::new());
+        let fence = OriginFence::from_starts(&[GABLE_ORIGIN]).unwrap();
+        let counter = OfflineCounter::new(PROFILE_ID, custody.clone(), &db_path, Some(fence));
+        counter
+            .enrol_register(Some(GABLE_ORIGIN), "REG-01", 3)
+            .unwrap();
+        counter.install_test_snapshot(sample_snapshot()).unwrap();
+        let sold = counter
+            .sign_and_queue_sale(
+                Some(GABLE_ORIGIN),
+                walk_in_sale_request("77777777-7777-7777-7777-7777777777a2", "10", 5_000),
+            )
+            .unwrap();
+        assert_eq!(
+            counter
+                .queue_status(Some(GABLE_ORIGIN))
+                .unwrap()
+                .waiting_count,
+            1
+        );
+
+        let same_epoch = counter.enrol_register(Some(GABLE_ORIGIN), "REG-01", 3);
+        let unsynced = counter.enrol_register(Some(GABLE_ORIGIN), "REG-01", 4);
+        let elsewhere = counter.enrol_register(Some("https://attacker.example/"), "REG-01", 4);
+        let url = counter.enrolled_gable_url().unwrap();
+        let waiting = counter
+            .queue_status(Some(GABLE_ORIGIN))
+            .map(|q| q.waiting_count)
+            .unwrap_or(-1);
+        assert_eq!(same_epoch.unwrap_err().code, "epoch_not_newer");
+        assert_eq!(unsynced.unwrap_err().code, "queue_not_drained");
+        assert_eq!(elsewhere.unwrap_err().code, "origin_denied");
+        assert_eq!(url.as_deref(), Some("https://gable.yard.internal/"));
+        assert_eq!(waiting, 1, "the unsynced sale is still queued");
+
+        // Once the server has settled the queue, a new epoch enrols and the
+        // replaced epoch's mark is kept for the unknown tail.
+        counter
+            .record_sync_outcomes(
+                Some(GABLE_ORIGIN),
+                SyncBatchOutcome {
+                    confirmed_seq: sold.device_seq,
+                    items: vec![SyncOutcomeItem {
+                        client_id: sold.client_id.clone(),
+                        device_seq: sold.device_seq,
+                        status: QueueItemState::Synced,
+                        invoice_id: None,
+                        invoice_number: None,
+                        reason_code: None,
+                        reason_message: None,
+                    }],
+                },
+            )
+            .unwrap();
+        counter
+            .enrol_register(Some(GABLE_ORIGIN), "REG-01", 4)
+            .unwrap();
+        let addr = Address::offline(PROFILE_ID, OfflineSlot::Enrolment).unwrap();
+        let rec: EnrolmentRecord =
+            serde_json::from_str(&custody.get(&addr).unwrap().unwrap()).unwrap();
+        let _ = std::fs::remove_file(&db_path);
+        assert_eq!(
+            rec.previous_epoch,
+            Some(PriorEpochMark {
+                device_epoch: 3,
+                last_seq: 1,
+                confirmed_seq: 1
+            })
+        );
+    }
+
+    // READER RED 3: two concurrent sign calls (the commands run on
+    // spawn_blocking threads) must never assign one sequence twice.
+    #[test]
+    fn reader_red_concurrent_signs_never_share_a_sequence() {
+        let db_path = temp_db_path("rr3");
+        let custody = Arc::new(MemoryCustody::new());
+        let fence = OriginFence::from_starts(&[GABLE_ORIGIN]).unwrap();
+        let counter = Arc::new(OfflineCounter::new(
+            PROFILE_ID,
+            custody,
+            &db_path,
+            Some(fence),
+        ));
+        counter
+            .enrol_register(Some(GABLE_ORIGIN), "REG-01", 3)
+            .unwrap();
+        let mut snap = sample_snapshot();
+        snap.policy.max_queue_count = 100_000;
+        snap.policy.max_queue_total_cents = i64::MAX / 4;
+        counter.install_test_snapshot(snap).unwrap();
+        let mut seqs = Vec::new();
+        let mut errors = Vec::new();
+        for round in 0..40 {
+            let barrier = Arc::new(std::sync::Barrier::new(2));
+            let hs: Vec<_> = (0..2)
+                .map(|k| {
+                    let c = counter.clone();
+                    let b = barrier.clone();
+                    std::thread::spawn(move || {
+                        b.wait();
+                        c.sign_and_queue_sale(
+                            Some(GABLE_ORIGIN),
+                            walk_in_sale_request(
+                                &format!("77777777-7777-7777-{:04}-{:012}", k, round),
+                                "1",
+                                5_000,
+                            ),
+                        )
+                    })
+                })
+                .collect();
+            for h in hs {
+                match h.join().unwrap() {
+                    Ok(s) => seqs.push(s.device_seq),
+                    Err(e) => errors.push(e.code),
+                }
+            }
+        }
+        let queued = counter
+            .queue_status(Some(GABLE_ORIGIN))
+            .map(|q| q.items.len())
+            .unwrap_or(0);
+        let mut uniq = seqs.clone();
+        uniq.sort();
+        uniq.dedup();
+        let _ = std::fs::remove_file(&db_path);
+        assert_eq!(
+            uniq.len(),
+            seqs.len(),
+            "signed {} sales, {} distinct sequences, {} in the store; errors {:?}",
+            seqs.len(),
+            uniq.len(),
+            queued,
+            &errors[..errors.len().min(5)]
+        );
+        assert_eq!(
+            queued,
+            seqs.len(),
+            "receipts signed {} but store holds {}",
+            seqs.len(),
+            queued
+        );
+        assert!(
+            errors.is_empty(),
+            "one counter's own signs collided: {errors:?}"
+        );
+    }
+
+    // RULE (ADR 0011 section 5.1): two handles on one store file (two shell
+    // processes) never assign one sequence twice: the write lock is taken
+    // before the meta is read again, and a taken sequence fails its insert
+    // rather than overwriting the signed sale that holds it.
+    #[test]
+    fn two_handles_on_one_store_never_share_a_sequence() {
+        let db_path = temp_db_path("handles");
+        let custody = Arc::new(MemoryCustody::new());
+        let fence = OriginFence::from_starts(&[GABLE_ORIGIN]).unwrap();
+        let first = Arc::new(OfflineCounter::new(
+            PROFILE_ID,
+            custody.clone(),
+            &db_path,
+            Some(fence.clone()),
+        ));
+        let second = Arc::new(OfflineCounter::new(
+            PROFILE_ID,
+            custody,
+            &db_path,
+            Some(fence),
+        ));
+        first
+            .enrol_register(Some(GABLE_ORIGIN), "REG-01", 3)
+            .unwrap();
+        let mut snap = sample_snapshot();
+        snap.policy.max_queue_count = 100_000;
+        snap.policy.max_queue_total_cents = i64::MAX / 4;
+        first.install_test_snapshot(snap).unwrap();
+        let mut seqs = Vec::new();
+        for round in 0..40 {
+            let barrier = Arc::new(std::sync::Barrier::new(2));
+            let hs: Vec<_> = [first.clone(), second.clone()]
+                .into_iter()
+                .enumerate()
+                .map(|(k, c)| {
+                    let b = barrier.clone();
+                    std::thread::spawn(move || {
+                        b.wait();
+                        c.sign_and_queue_sale(
+                            Some(GABLE_ORIGIN),
+                            walk_in_sale_request(
+                                &format!("77777777-7777-7777-{k:04}-{round:012}"),
+                                "1",
+                                5_000,
+                            ),
+                        )
+                    })
+                })
+                .collect();
+            for h in hs {
+                if let Ok(s) = h.join().unwrap() {
+                    seqs.push(s.device_seq);
+                }
+            }
+        }
+        let stored: Vec<i64> = first
+            .queue_status(Some(GABLE_ORIGIN))
+            .map(|q| q.items.iter().map(|i| i.sale.device_seq).collect())
+            .unwrap_or_default();
+        let _ = std::fs::remove_file(&db_path);
+        let mut uniq = seqs.clone();
+        uniq.sort();
+        uniq.dedup();
+        assert_eq!(uniq.len(), seqs.len(), "a sequence was signed twice");
+        assert_eq!(uniq, stored, "every signed sale is the one the store holds");
+    }
+
+    // READER RED 4: an account sale that posted is not in the snapshot's open
+    // receivable, so the core must keep counting it against the room of the
+    // snapshot it was sold under.
+    #[test]
+    fn reader_red_posted_account_sale_still_counts_against_snapshot_room() {
+        let db_path = temp_db_path("rr4");
+        let custody = Arc::new(MemoryCustody::new());
+        let fence = OriginFence::from_starts(&[GABLE_ORIGIN]).unwrap();
+        let counter = OfflineCounter::new(PROFILE_ID, custody, &db_path, Some(fence));
+        counter
+            .enrol_register(Some(GABLE_ORIGIN), "REG-01", 3)
+            .unwrap();
+        counter.install_test_snapshot(sample_snapshot()).unwrap();
+        let req = |cid: &str, amount: i64| SignSaleRequest {
+            client_id: cid.to_string(),
+            snapshot_id: "11111111-1111-1111-1111-111111111111".to_string(),
+            till_session_id: "cccccccc-cccc-cccc-cccc-cccccccccccc".to_string(),
+            cashier_id: "dddddddd-dddd-dddd-dddd-dddddddddddd".to_string(),
+            customer_id: Some("22222222-2222-2222-2222-222222222222".to_string()),
+            buyer_contact_id: Some("44444444-4444-4444-4444-444444444444".to_string()),
+            customer_po: Some("PO-900".to_string()),
+            business_date: "2026-04-19".to_string(),
+            sold_at: "2026-04-19T14:30:00Z".to_string(),
+            lines: vec![SignLineRequest {
+                id: "55555555-5555-5555-5555-555555555556".to_string(),
+                product_id: "aaaa0002-0000-0000-0000-000000000002".to_string(),
+                uom: "LF".to_string(),
+                tally: Some(TallyRequestInput {
+                    rows: vec![TallyRowRequestInput {
+                        pieces: 120,
+                        length_ft: "10".to_string(),
+                    }],
+                }),
+                ..Default::default()
+            }],
+            tenders: vec![SignTenderRequest {
+                method: "account".to_string(),
+                amount_cents: amount,
+                reference: None,
+                id_checked: true,
+                id_type: Some("drivers_license".to_string()),
+            }],
+            ..Default::default()
+        };
+        let probe = counter
+            .sign_and_queue_sale(
+                Some(GABLE_ORIGIN),
+                req("77777777-7777-7777-7777-7777777777b0", 1),
+            )
+            .unwrap_err();
+        let total: i64 = probe
+            .message
+            .split_whitespace()
+            .find_map(|w| w.parse().ok())
+            .expect(&probe.message);
+        assert!(total * 2 > 150_000 && total <= 120_000, "total {total}");
+        let first = counter
+            .sign_and_queue_sale(
+                Some(GABLE_ORIGIN),
+                req("77777777-7777-7777-7777-7777777777b1", total),
+            )
+            .unwrap();
+        counter
+            .record_sync_outcomes(
+                Some(GABLE_ORIGIN),
+                SyncBatchOutcome {
+                    confirmed_seq: first.device_seq,
+                    items: vec![SyncOutcomeItem {
+                        client_id: first.client_id.clone(),
+                        device_seq: first.device_seq,
+                        status: QueueItemState::Synced,
+                        invoice_id: None,
+                        invoice_number: None,
+                        reason_code: None,
+                        reason_message: None,
+                    }],
+                },
+            )
+            .unwrap();
+        // The posted sale is not in the snapshot's on hand either: 1200 LF is
+        // 800 BF of the 1000 the snapshot was issued with.
+        let in_stock = counter
+            .load_snapshot(Some(GABLE_ORIGIN))
+            .unwrap()
+            .products
+            .into_iter()
+            .find(|p| p.id == "aaaa0002-0000-0000-0000-000000000002")
+            .unwrap()
+            .in_stock;
+        assert_eq!(
+            parse_quantity(&in_stock),
+            parse_quantity("200"),
+            "on hand {in_stock}"
+        );
+        let second = counter.sign_and_queue_sale(
+            Some(GABLE_ORIGIN),
+            req("77777777-7777-7777-7777-7777777777b2", total),
+        );
+        let _ = std::fs::remove_file(&db_path);
+        assert!(
+            second.is_err(),
+            "two account sales of {total} each signed against a room of 150000 on one snapshot"
+        );
     }
 }

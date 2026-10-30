@@ -6,14 +6,15 @@
 //! 5.1, and 7).
 
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::time::Duration;
 
 use base64::Engine as _;
 use ring::aead::{Aad, LessSafeKey, Nonce, UnboundKey, AES_256_GCM, NONCE_LEN};
 use ring::digest::{digest, SHA256};
 use ring::rand::{SecureRandom, SystemRandom};
 use ring::signature::{Ed25519KeyPair, KeyPair, UnparsedPublicKey, ED25519};
-use rusqlite::{params, Connection, OptionalExtension};
+use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 use url::Url;
 use zeroize::Zeroize;
 
@@ -24,10 +25,10 @@ use crate::offline::arithmetic::{
     resolve_line_pair, settle_tenders, tax_at, OfflineTenderCalc, Pair, TallyRowCalc, ONE_QTY,
 };
 use crate::offline::model::{
-    EnrolmentPublic, EnrolmentRecord, HighWaterMark, OfflineError, OfflineSnapshot, QueueItemState,
-    QueueStatusView, QueuedSaleEntry, SignSaleRequest, SignedOfflineSale, SignedSaleLine,
-    SignedSaleTender, SignedTally, SignedTallyRow, SnapshotPriceRow, SnapshotProduct, StoreMeta,
-    SyncBatchOutcome,
+    EnrolmentPublic, EnrolmentRecord, HighWaterMark, OfflineError, OfflineSnapshot, PriorEpochMark,
+    QueueItemState, QueueStatusView, QueuedSaleEntry, SignSaleRequest, SignedOfflineSale,
+    SignedSaleLine, SignedSaleTender, SignedTally, SignedTallyRow, SnapshotPriceRow,
+    SnapshotProduct, StoreMeta, SyncBatchOutcome,
 };
 
 const VALID_ID_TYPES: [&str; 5] = [
@@ -65,6 +66,11 @@ pub struct OfflineCounter {
     fence: Mutex<Option<OriginFence>>,
     embedded_bundle: Mutex<bool>,
     crash_point: Mutex<Option<CrashPoint>>,
+    /// Held by every operation from its first read of the store to its last
+    /// write, so two commands on blocking threads never interleave: one
+    /// sequence is never assigned twice and the caps are never checked
+    /// against a queue another sale is changing.
+    ops: Mutex<()>,
 }
 
 impl OfflineCounter {
@@ -82,7 +88,14 @@ impl OfflineCounter {
             fence: Mutex::new(fence),
             embedded_bundle: Mutex::new(embedded),
             crash_point: Mutex::new(None),
+            ops: Mutex::new(()),
         }
+    }
+
+    /// A panic inside an operation leaves the store as a crash would, and
+    /// the next open recovers it, so a poisoned lock is taken as it stands.
+    fn lock_ops(&self) -> MutexGuard<'_, ()> {
+        self.ops.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
     pub fn set_fence(&self, fence: Option<OriginFence>, embedded: bool) {
@@ -219,17 +232,24 @@ impl OfflineCounter {
 
     /// Enrols this register for a new `device_epoch` (ADR 0011 section 5.1):
     /// generates an Ed25519 signing seed inside the keychain, records the
-    /// enrolled `gable_url`, initializes the high-water mark, and creates the
-    /// AEAD-sealed SQLite store for that epoch. Returns the public key so the
-    /// desk can register it with `POST /api/v1/pos/registers/{id}/enrol`.
+    /// Gable URL, initializes the high-water mark, and creates the
+    /// AEAD-sealed SQLite store for that epoch. Returns the public key the
+    /// server records for the register.
+    ///
+    /// Enrolment is an owner or admin act online (6.1), so this is not a
+    /// webview command: it runs only on the server's enrolment answer (O2).
+    /// Even then the Gable URL is the fenced origin of the caller, never an
+    /// argument; the epoch must be above the current one; an enrolment over
+    /// sales the server has not confirmed is refused, so nothing unsynced is
+    /// wiped; and the replaced epoch's mark is kept for the unknown tail.
     pub fn enrol_register(
         &self,
         caller_origin: Option<&str>,
         register_id: &str,
         device_epoch: i64,
-        gable_url: &str,
     ) -> Result<EnrolmentPublic, OfflineError> {
         self.check_origin(caller_origin)?;
+        let _ops = self.lock_ops();
         let reg = register_id.trim();
         if reg.is_empty() {
             return Err(OfflineError::new(
@@ -243,14 +263,11 @@ impl OfflineCounter {
                 "device_epoch must be positive",
             ));
         }
-        let parsed = Url::parse(gable_url.trim())
-            .map_err(|_| OfflineError::new("invalid_gable_url", "gable_url must be a valid URL"))?;
-        if parsed.scheme() != "http" && parsed.scheme() != "https" {
-            return Err(OfflineError::new(
-                "invalid_gable_url",
-                "gable_url must use http or https",
-            ));
-        }
+        let gable_url = caller_origin
+            .and_then(|u| Url::parse(u).ok())
+            .map(|u| format!("{}/", u.origin().ascii_serialization()))
+            .ok_or_else(OfflineError::origin_denied)?;
+        let previous_epoch = self.replaced_epoch(device_epoch)?;
         let aead_key = self.get_or_create_aead_key()?;
         let rng = SystemRandom::new();
         let mut seed = [0u8; 32];
@@ -267,7 +284,8 @@ impl OfflineCounter {
             device_epoch,
             signing_seed_hex,
             public_key_hex: public_key_hex.clone(),
-            gable_url: parsed.as_str().to_string(),
+            gable_url,
+            previous_epoch,
         };
         let mark = HighWaterMark {
             register_id: reg.to_string(),
@@ -326,6 +344,60 @@ impl OfflineCounter {
         })
     }
 
+    /// The mark of the enrolment a new one would replace, or a refusal when
+    /// replacing it would lose a sale: an epoch not above the current one,
+    /// or a queue holding a sale the server has not confirmed or settled.
+    fn replaced_epoch(&self, device_epoch: i64) -> Result<Option<PriorEpochMark>, OfflineError> {
+        let addr = Address::offline(&self.profile_identifier, OfflineSlot::Enrolment)
+            .map_err(|_| OfflineError::new("bad_profile", "invalid profile identifier"))?;
+        if self
+            .custody
+            .get(&addr)
+            .map_err(|_| OfflineError::keychain_unavailable())?
+            .is_none()
+        {
+            return Ok(None);
+        }
+        let current = self.read_enrolment()?;
+        if device_epoch <= current.device_epoch {
+            return Err(OfflineError::new(
+                "epoch_not_newer",
+                format!(
+                    "a new enrolment needs an epoch above the current one ({})",
+                    current.device_epoch
+                ),
+            ));
+        }
+        let not_drained = || {
+            OfflineError::new(
+                "queue_not_drained",
+                "This register holds offline sales the server has not settled: sync them before it is enrolled again.",
+            )
+        };
+        // A store that still opens is read for unsettled sales; a missing or
+        // rolled back one leaves the keychain's mark as the only record.
+        let mark = match self.open_verified_store() {
+            Ok((conn, enrolment, mark, aead_key)) => {
+                if read_all_sales(&conn, &aead_key, &enrolment)?
+                    .iter()
+                    .any(|e| e.state.is_unsettled())
+                {
+                    return Err(not_drained());
+                }
+                mark
+            }
+            Err(_) => self.read_mark()?,
+        };
+        if mark.last_seq > mark.confirmed_seq {
+            return Err(not_drained());
+        }
+        Ok(Some(PriorEpochMark {
+            device_epoch: current.device_epoch,
+            last_seq: mark.last_seq,
+            confirmed_seq: mark.confirmed_seq,
+        }))
+    }
+
     /// Reads the current enrolment and verifies the SQLite store against the
     /// keychain high-water mark, recovering any sale interrupted between store
     /// write and receipt print.
@@ -334,6 +406,7 @@ impl OfflineCounter {
         caller_origin: Option<&str>,
     ) -> Result<EnrolmentPublic, OfflineError> {
         self.check_origin(caller_origin)?;
+        let _ops = self.lock_ops();
         let (_, enrolment, mark, _) = self.open_verified_store()?;
         Ok(EnrolmentPublic {
             register_id: enrolment.register_id.clone(),
@@ -361,6 +434,8 @@ impl OfflineCounter {
         }
         let conn =
             Connection::open(&self.store_path).map_err(|_| OfflineError::re_enrol_required())?;
+        conn.busy_timeout(Duration::from_secs(5))
+            .map_err(|_| OfflineError::re_enrol_required())?;
         let meta = read_sealed_meta(
             &conn,
             &aead_key,
@@ -402,7 +477,7 @@ impl OfflineCounter {
                     let sig = sign_canonical_bytes(&enrolment.signing_seed_hex, &canonical)?;
                     entry.sale.device_sig = sig;
                     entry.state = QueueItemState::Waiting;
-                    write_sealed_sale(
+                    update_sealed_sale(
                         &conn,
                         &aead_key,
                         &enrolment.register_id,
@@ -423,15 +498,17 @@ impl OfflineCounter {
         Ok((conn, enrolment, mark, aead_key))
     }
 
-    /// Stores the core's own sealed copy of the register snapshot (ADR 0011
-    /// section 5.1). Refuses a snapshot for another register or epoch, or one
-    /// issued before the till session opened.
-    pub fn store_snapshot(
+    /// Test seam: stores the core's sealed copy of a register snapshot
+    /// (ADR 0011 section 5.4). The page never supplies the snapshot the core
+    /// prices and signs from: the core fetches it itself from the enrolled
+    /// origin with the keychain token (O2 and ADR 0012). Until that lands no
+    /// build but the tests can install one, so the shipped shell cannot sign.
+    #[cfg(test)]
+    pub(crate) fn install_test_snapshot(
         &self,
-        caller_origin: Option<&str>,
         snapshot: OfflineSnapshot,
     ) -> Result<(), OfflineError> {
-        self.check_origin(caller_origin)?;
+        let _ops = self.lock_ops();
         let (conn, enrolment, _, aead_key) = self.open_verified_store()?;
         if snapshot.register_id != enrolment.register_id
             || snapshot.device_epoch != enrolment.device_epoch
@@ -464,20 +541,23 @@ impl OfflineCounter {
     }
 
     /// Loads the core's snapshot copy with each product's `in_stock` figure
-    /// reduced by the `stock_quantity` of every unsettled queued sale line for
-    /// that product (ADR 0011 section 5.1).
+    /// reduced by the `stock_quantity` of every queued sale line for that
+    /// product that the snapshot's figure does not already hold: every sale
+    /// sold under this snapshot whatever its state, and every unsettled one
+    /// (ADR 0011 sections 5.1 and 6.2).
     pub fn load_snapshot(
         &self,
         caller_origin: Option<&str>,
     ) -> Result<OfflineSnapshot, OfflineError> {
         self.check_origin(caller_origin)?;
+        let _ops = self.lock_ops();
         let (conn, enrolment, _, aead_key) = self.open_verified_store()?;
         let mut snapshot = read_raw_snapshot(&conn, &aead_key, &enrolment)?;
         let sales = read_all_sales(&conn, &aead_key, &enrolment)?;
         for product in &mut snapshot.products {
             let mut sold_stock: i64 = 0;
             for entry in &sales {
-                if !entry.state.is_unsettled() {
+                if !counts_against_snapshot(entry, &snapshot.snapshot_id) {
                     continue;
                 }
                 for line in &entry.sale.lines {
@@ -520,6 +600,7 @@ impl OfflineCounter {
                 "the core assigns prev_digest; a request must not name its own chain link",
             ));
         }
+        let _ops = self.lock_ops();
         let (mut conn, enrolment, mut mark, aead_key) = self.open_verified_store()?;
         let snapshot = read_raw_snapshot(&conn, &aead_key, &enrolment)?;
 
@@ -932,8 +1013,12 @@ impl OfflineCounter {
                 amount_cents: t.amount_cents,
             })
             .collect();
-        let settlement = settle_tenders(total_cents, &calc_tenders)
-            .map_err(|r| OfflineError::new(r.code, r.message))?;
+        let settlement = settle_tenders(
+            total_cents,
+            &calc_tenders,
+            snapshot.policy.cash_rounding_mode,
+        )
+        .map_err(|r| OfflineError::new(r.code, r.message))?;
 
         let mut signed_tenders = Vec::with_capacity(req.tenders.len());
         let mut biggest_check: i64 = 0;
@@ -1059,9 +1144,11 @@ impl OfflineCounter {
                 .min(credit_room)
                 .min(snapshot.policy.account_cap_cents)
                 .max(0);
+            // A sale posted since the snapshot is not in its open receivable,
+            // so it keeps counting against that snapshot's room once synced.
             let queued_for_account: i64 = existing_sales
                 .iter()
-                .filter(|e| e.state.is_unsettled())
+                .filter(|e| counts_against_snapshot(e, &snapshot.snapshot_id))
                 .filter(|e| e.sale.customer_id.as_deref() == Some(acc.customer_id.as_str()))
                 .flat_map(|e| e.sale.tenders.iter())
                 .filter(|t| t.method == "account")
@@ -1162,17 +1249,33 @@ impl OfflineCounter {
 
         // Step 1: Write the sealed sale row and updated store_meta to SQLite FIRST.
         {
+            // BEGIN IMMEDIATE takes SQLite's write lock before the meta is
+            // read, so another handle on the file cannot sign between the
+            // read and the write; the plain insert fails on a taken sequence
+            // instead of overwriting the sale that holds it.
             let tx = conn
-                .transaction()
+                .transaction_with_behavior(TransactionBehavior::Immediate)
                 .map_err(|_| OfflineError::new("store_io_error", "failed to open SQLite tx"))?;
-            write_sealed_sale_tx(
+            let current = read_sealed_meta(
+                &tx,
+                &aead_key,
+                &enrolment.register_id,
+                enrolment.device_epoch,
+            )?;
+            if current.last_seq != mark.last_seq || current.chain_head != mark.chain_head {
+                return Err(OfflineError::new(
+                    "store_busy",
+                    "another sale was written to the queue at the same moment: ring this sale again",
+                ));
+            }
+            insert_sealed_sale(
                 &tx,
                 &aead_key,
                 &enrolment.register_id,
                 enrolment.device_epoch,
                 &entry,
             )?;
-            write_sealed_meta_tx(&tx, &aead_key, &next_meta)?;
+            write_sealed_meta(&tx, &aead_key, &next_meta)?;
             tx.commit()
                 .map_err(|_| OfflineError::new("store_io_error", "failed to commit SQLite tx"))?;
         }
@@ -1203,7 +1306,7 @@ impl OfflineCounter {
         sale.device_sig = sig;
         entry.sale = sale.clone();
         entry.state = QueueItemState::Waiting;
-        write_sealed_sale(
+        update_sealed_sale(
             &conn,
             &aead_key,
             &enrolment.register_id,
@@ -1228,6 +1331,11 @@ impl OfflineCounter {
         caller_origin: Option<&str>,
     ) -> Result<QueueStatusView, OfflineError> {
         self.check_origin(caller_origin)?;
+        let _ops = self.lock_ops();
+        self.queue_status_held()
+    }
+
+    fn queue_status_held(&self) -> Result<QueueStatusView, OfflineError> {
         let (conn, enrolment, mark, aead_key) = self.open_verified_store()?;
         let items = read_all_sales(&conn, &aead_key, &enrolment)?;
         let mut waiting_count = 0i64;
@@ -1263,13 +1371,16 @@ impl OfflineCounter {
     }
 
     /// Applies the server's sync batch response to the local queue and advances
-    /// `confirmed_seq` in both the SQLite store and the keychain mark.
+    /// `confirmed_seq` in both the SQLite store and the keychain mark. Not a
+    /// webview command: a page that wrote the outcomes could free the caps and
+    /// the room, so the core takes them only from the server's own answer.
     pub fn record_sync_outcomes(
         &self,
         caller_origin: Option<&str>,
         outcome: SyncBatchOutcome,
     ) -> Result<QueueStatusView, OfflineError> {
         self.check_origin(caller_origin)?;
+        let _ops = self.lock_ops();
         let (mut conn, enrolment, mut mark, aead_key) = self.open_verified_store()?;
         let mut meta = read_sealed_meta(
             &conn,
@@ -1285,7 +1396,7 @@ impl OfflineCounter {
         }
         {
             let tx = conn
-                .transaction()
+                .transaction_with_behavior(TransactionBehavior::Immediate)
                 .map_err(|_| OfflineError::new("store_io_error", "failed to open SQLite tx"))?;
             for item in &outcome.items {
                 if let Some(mut entry) = read_sealed_sale_opt(
@@ -1301,7 +1412,7 @@ impl OfflineCounter {
                         entry.invoice_number = item.invoice_number.clone();
                         entry.reason_code = item.reason_code.clone();
                         entry.reason_message = item.reason_message.clone();
-                        write_sealed_sale_tx(
+                        update_sealed_sale(
                             &tx,
                             &aead_key,
                             &enrolment.register_id,
@@ -1313,7 +1424,7 @@ impl OfflineCounter {
             }
             if outcome.confirmed_seq > meta.confirmed_seq {
                 meta.confirmed_seq = outcome.confirmed_seq;
-                write_sealed_meta_tx(&tx, &aead_key, &meta)?;
+                write_sealed_meta(&tx, &aead_key, &meta)?;
             }
             tx.commit()
                 .map_err(|_| OfflineError::new("store_io_error", "failed to commit SQLite tx"))?;
@@ -1322,8 +1433,16 @@ impl OfflineCounter {
             mark.confirmed_seq = outcome.confirmed_seq;
             self.write_mark(&mark)?;
         }
-        self.queue_status(caller_origin)
+        self.queue_status_held()
     }
+}
+
+/// Whether a queued sale is outside the figures a snapshot was issued with:
+/// every sale sold under that snapshot, whatever its state (one posted since
+/// is in neither its open receivable nor its on hand), and every unsettled
+/// sale, whichever snapshot it names (ADR 0011 section 6.2).
+fn counts_against_snapshot(entry: &QueuedSaleEntry, snapshot_id: &str) -> bool {
+    entry.state.is_unsettled() || entry.sale.snapshot_id == snapshot_id
 }
 
 fn resolve_bound_price_row<'a>(
@@ -1496,14 +1615,6 @@ fn write_sealed_meta(
     Ok(())
 }
 
-fn write_sealed_meta_tx(
-    conn: &Connection,
-    key: &ZeroizingKey,
-    meta: &StoreMeta,
-) -> Result<(), OfflineError> {
-    write_sealed_meta(conn, key, meta)
-}
-
 fn read_sealed_meta(
     conn: &Connection,
     key: &ZeroizingKey,
@@ -1520,34 +1631,59 @@ fn read_sealed_meta(
     serde_json::from_slice(&plain).map_err(|_| OfflineError::re_enrol_required())
 }
 
-fn write_sealed_sale(
+fn seal_sale(
+    key: &ZeroizingKey,
+    register_id: &str,
+    device_epoch: i64,
+    entry: &QueuedSaleEntry,
+) -> Result<Vec<u8>, OfflineError> {
+    let aad = format!("sale:{}:{}:{}", register_id, device_epoch, entry.device_seq);
+    let plain = serde_json::to_vec(entry)
+        .map_err(|_| OfflineError::new("serialize_failed", "failed to serialize sale"))?;
+    seal_bytes(key, &aad, &plain)
+}
+
+/// Writes a newly assigned sequence. A plain insert: a sequence already in
+/// the store fails the write rather than replacing a signed sale.
+fn insert_sealed_sale(
     conn: &Connection,
     key: &ZeroizingKey,
     register_id: &str,
     device_epoch: i64,
     entry: &QueuedSaleEntry,
 ) -> Result<(), OfflineError> {
-    let aad = format!("sale:{}:{}:{}", register_id, device_epoch, entry.device_seq);
-    let plain = serde_json::to_vec(entry)
-        .map_err(|_| OfflineError::new("serialize_failed", "failed to serialize sale"))?;
-    let sealed = seal_bytes(key, &aad, &plain)?;
+    let sealed = seal_sale(key, register_id, device_epoch, entry)?;
     conn.execute(
-        "INSERT INTO offline_sales (device_seq, sealed) VALUES (?1, ?2)
-         ON CONFLICT(device_seq) DO UPDATE SET sealed = excluded.sealed",
+        "INSERT INTO offline_sales (device_seq, sealed) VALUES (?1, ?2)",
         params![entry.device_seq, sealed],
     )
     .map_err(|_| OfflineError::new("store_io_error", "failed to write sale"))?;
     Ok(())
 }
 
-fn write_sealed_sale_tx(
+/// Rewrites the sale already stored at its sequence (its signature, its
+/// state or its sync outcome).
+fn update_sealed_sale(
     conn: &Connection,
     key: &ZeroizingKey,
     register_id: &str,
     device_epoch: i64,
     entry: &QueuedSaleEntry,
 ) -> Result<(), OfflineError> {
-    write_sealed_sale(conn, key, register_id, device_epoch, entry)
+    let sealed = seal_sale(key, register_id, device_epoch, entry)?;
+    let changed = conn
+        .execute(
+            "UPDATE offline_sales SET sealed = ?2 WHERE device_seq = ?1",
+            params![entry.device_seq, sealed],
+        )
+        .map_err(|_| OfflineError::new("store_io_error", "failed to write sale"))?;
+    if changed != 1 {
+        return Err(OfflineError::new(
+            "store_io_error",
+            "the sale to update is not in the store",
+        ));
+    }
+    Ok(())
 }
 
 fn read_sealed_sale_opt(
