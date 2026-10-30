@@ -23,21 +23,6 @@ import (
 	"github.com/google/uuid"
 )
 
-// testVaultKey seals the payer's sensitive values in these tests: an obvious
-// pattern, never a real key shape.
-const testVaultKey = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
-
-// keyedService is the large cash service with the test vault key, as a
-// configured stack runs it.
-func keyedService(t *testing.T, db *database.DB) *largecash.Service {
-	t.Helper()
-	v, err := payment.NewVault(testVaultKey)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return largecash.NewService(db, v, testVaultKey)
-}
-
 // usBranch is a United States branch with a yard, a register and n completed
 // sale rows a counted tender can hang from. The cleanup takes every row the
 // test wrote under the branch.
