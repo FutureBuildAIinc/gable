@@ -40,6 +40,9 @@ func TestCP15_StrandedVoidResolutionTakesTheFeeBack(t *testing.T) {
 	if got := gatewayRefundTotal(gw); got != total+fee {
 		t.Fatalf("the terminal was asked for %d, wanted %d", got, total+fee)
 	}
+	if got := f.orphanedCents(t, saleID); got != total+fee {
+		t.Fatalf("the orphaned refund row says %d moved, wanted goods plus fee %d", got, total+fee)
+	}
 	intentID, _, refundTxID, _ := pendingIntent(t, f, saleID)
 	f.events.setFail("")
 	r := f.resolveOn(t, intentID, map[string]any{
@@ -73,6 +76,9 @@ func TestCP15_StrandedReturnResolutionTakesTheFeeBack(t *testing.T) {
 	if r := f.cardReturn(saleID, line, "2"); r.status == http.StatusCreated {
 		t.Fatalf("the return committed under a failing event write: %s", r.raw)
 	}
+	if got := f.orphanedCents(t, saleID); got != total+fee {
+		t.Fatalf("the orphaned refund row says %d moved, wanted goods plus fee %d", got, total+fee)
+	}
 	intentID, _, refundTxID, _ := pendingIntent(t, f, saleID)
 	f.events.setFail("")
 	r := f.resolveOn(t, intentID, map[string]any{
@@ -90,6 +96,13 @@ func TestCP15_StrandedReturnResolutionTakesTheFeeBack(t *testing.T) {
 	if got := f.accountBalance("1010"); got != 0 {
 		t.Errorf("card clearing %d after the resolved return, wanted 0", got)
 	}
+}
+
+// orphanedCents reads the money the orphaned refund row says moved.
+func (f *fixture) orphanedCents(t *testing.T, saleID string) int64 {
+	t.Helper()
+	return countOf(t, f.db, `SELECT COALESCE(SUM((changes->>'amount_cents')::bigint), 0)::bigint FROM audit_log
+		WHERE action = 'pos.gateway_refund_orphaned' AND entity_id = $1`, saleID)
 }
 
 // lateFee lands the device's late approval of a lost leg with the fee it

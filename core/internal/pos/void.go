@@ -246,7 +246,7 @@ func (s *Service) VoidSale(ctx context.Context, saleID uuid.UUID, ifMatch string
 				"intent_id", intents[i].ID, "sale_id", saleID, "error", err)
 		}
 		refunds = append(refunds, gatewayRefund{gatewayTxID: intents[i].GatewayTxID, refundTxID: res.TransactionID,
-			amountCents: intents[i].AmountCents, tenderID: intents[i].TenderID, act: "void", entity: saleID, actor: actor})
+			amountCents: intents[i].AmountCents + intents[i].FeeCents, tenderID: intents[i].TenderID, act: "void", entity: saleID, actor: actor})
 	}
 	out, err := s.runVoidTx(ctx, saleID, ifMatch, bodyRevision, reason, actor, refunds, nil)
 	if err != nil {

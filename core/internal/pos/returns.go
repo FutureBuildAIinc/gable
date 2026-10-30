@@ -1503,7 +1503,7 @@ func (s *Service) postReturn(ctx context.Context, st *returnState, claim *refund
 		// gateway ids.
 		if claim != nil && !claim.replay && claim.refundTxID != "" {
 			s.recordOrphanRefund(ctx, gatewayRefund{gatewayTxID: claim.intent.GatewayTxID, refundTxID: claim.refundTxID,
-				amountCents: claim.intent.AmountCents, tenderID: claim.intent.TenderID, act: claim.intent.Act,
+				amountCents: claim.intent.AmountCents + claim.intent.FeeCents, tenderID: claim.intent.TenderID, act: claim.intent.Act,
 				entity: claim.intent.SaleID, actor: st.actor}, err)
 		}
 		return nil, err
@@ -1689,7 +1689,9 @@ func reasonOf(code string) string {
 // amount, rounded half up, and the last return takes the remainder so the
 // fees returned sum to the fee charged exactly. The fee already returned or
 // held by earlier claims of the tender is read here, under the sale row lock
-// the claim holds.
+// the claim holds. The share follows the money refunded: a return that keeps
+// a restocking fee refunds less than the card took, so the fee's share of
+// what the dealer kept stays with the dealer and no remainder falls due.
 func (s *Service) returnFeeShare(ctx context.Context, saleID uuid.UUID, tender *Tender, refundCents int64) (int64, error) {
 	fee := int64(tender.SurchargeCents)
 	if fee <= 0 {
