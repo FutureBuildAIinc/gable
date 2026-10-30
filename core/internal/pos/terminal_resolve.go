@@ -444,7 +444,8 @@ func (s *Service) settleSaleLeg(ctx context.Context, sale *Sale, intent *payment
 			Method: "CARD", AmountCents: plan.applyC, Reference: ref, ReceivedOn: date,
 			Actor: entry.UserID, Card: &account.CardFacts{GatewayTxID: ref, GatewayStatus: "SETTLED",
 				Last4: intent.AnswerLast4, Brand: intent.AnswerBrand, AuthCode: intent.AnswerAuthCode},
-			Applications: applications,
+			SurchargeCents: intent.AnswerFeeCents,
+			Applications:   applications,
 		})
 		if err != nil {
 			return err
@@ -453,6 +454,7 @@ func (s *Service) settleSaleLeg(ctx context.Context, sale *Sale, intent *payment
 		tender := &Tender{SaleID: sale.ID, Method: TenderCard, AmountCents: httpx.Cents(plan.applyC), PaymentID: &payID}
 		g, a, l, b := ref, intent.AnswerAuthCode, intent.AnswerLast4, intent.AnswerBrand
 		tender.GatewayTxID, tender.AuthCode, tender.CardLast4, tender.CardBrand = &g, &a, &l, &b
+		tender.SurchargeCents = httpx.Cents(intent.AnswerFeeCents)
 		if err := s.repo.AddTender(ctx, tender); err != nil {
 			return err
 		}

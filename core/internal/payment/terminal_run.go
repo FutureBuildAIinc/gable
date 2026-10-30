@@ -586,10 +586,10 @@ type runVerdict struct {
 // is the workflow's end, not the card's: result A authorized, C declined, B
 // declined too (no money moved; the cashier starts a new leg), unless the
 // result names a charge stage error, which is uncertain; an empty or unknown
-// result code is uncertain too. An approval is
-// booked only when the card was charged exactly the leg's amount with no
-// fee: a surcharge (the card charged the subtotal plus a fee) or a partial
-// approval is held for a person until surcharge booking is built. A failed or
+// result code is uncertain too. An approval is booked when the card was
+// charged exactly the leg's amount plus the fee the answer names (stored on
+// the answer as cents, CP-15); any other figure, a partial approval among
+// them, is held for a person. A failed or
 // cancelled interaction whose error is at the card read ran no charge and
 // declines. Any other failed or cancelled interaction, or a succeeded one
 // that carries no result object, is uncertain: a gateway fault is not a
@@ -624,15 +624,24 @@ func answerOfInteraction(d TerminalDispatch, interaction string, st *runChargeCa
 		}
 		v.end = runEndFinal
 		v.Verdict = "authorized"
+		// The processor decides the surcharge (CP-15): the card is charged the
+		// leg's amount plus the fee its answer names. The fee is kept as cents
+		// from the dollars string; the figure charged must equal the two, or
+		// the answer is held for a person.
+		var fee int64
 		if st.Result.FeeAmount != "" {
-			if fee, ok := st.Result.FeeAmount.cents(); !ok || fee != 0 {
-				v.end, v.held = runEndHeld, fmt.Sprintf("the card was surcharged %q on a leg of %d cents", st.Result.FeeAmount, d.AmountCents)
+			f, ok := st.Result.FeeAmount.cents()
+			if !ok {
+				v.end, v.held = runEndHeld, fmt.Sprintf("the card was surcharged %q, a figure the driver cannot read, on a leg of %d cents", st.Result.FeeAmount, d.AmountCents)
 				return v
 			}
+			fee = f
 		}
-		if charged, ok := st.Result.Amount.cents(); !ok || charged != d.AmountCents {
-			v.end, v.held = runEndHeld, fmt.Sprintf("the card was charged %q on a leg of %d cents", st.Result.Amount, d.AmountCents)
+		if charged, ok := st.Result.Amount.cents(); !ok || charged != d.AmountCents+fee {
+			v.end, v.held = runEndHeld, fmt.Sprintf("the card was charged %q on a leg of %d cents with a fee of %d cents", st.Result.Amount, d.AmountCents, fee)
+			return v
 		}
+		v.FeeCents = fee
 		return v
 	case "failed", "cancelled":
 		if st.Result != nil && st.Result.stageFailed("read") && !st.Result.stageFailed("charge") {

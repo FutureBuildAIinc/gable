@@ -185,7 +185,7 @@ func (l *TerminalLedger) UnspentAuthorizedLegs(ctx context.Context, transactionI
 const intentColumns = `
 SELECT i.id, i.transaction_id, i.leg_key, i.register_id, i.branch_id, i.amount_cents, i.kind, i.state,
        i.device_id, i.provider_ref, i.idempotency_key, i.lease_until, i.claimed_at, i.dispatched_at, i.answered_at,
-       i.answer_brand, i.answer_last4, i.answer_auth_code, i.answer_provider_ref, i.answer_verdict, i.spent_at
+       i.answer_brand, i.answer_last4, i.answer_auth_code, i.answer_provider_ref, i.answer_verdict, i.spent_at, i.answer_fee_cents
 FROM payment_terminal_intents i`
 
 func (l *TerminalLedger) scanIntent(row interface {
@@ -196,7 +196,7 @@ func (l *TerminalLedger) scanIntent(row interface {
 	if err := row.Scan(&in.ID, &in.TransactionID, &in.LegKey, &in.RegisterID, &in.BranchID, &in.AmountCents,
 		&in.Kind, &state, &in.DeviceID, &in.ProviderRef, &in.IdempotencyKey, &in.LeaseUntil, &in.ClaimedAt,
 		&in.DispatchedAt, &in.AnsweredAt, &in.AnswerBrand, &in.AnswerLast4, &in.AnswerAuthCode,
-		&in.AnswerProviderRef, &in.AnswerVerdict, &in.SpentAt); err != nil {
+		&in.AnswerProviderRef, &in.AnswerVerdict, &in.SpentAt, &in.AnswerFeeCents); err != nil {
 		return nil, ErrTerminalIntentNotFound
 	}
 	in.State = TerminalIntentState(state)
@@ -352,11 +352,11 @@ func (l *TerminalLedger) ApplyDeviceAnswer(ctx context.Context, a TerminalAnswer
 	err := l.db.GetExecutor(ctx).QueryRow(ctx, `
 		UPDATE payment_terminal_intents
 		SET state = $2, answered_at = NOW(), answer_verdict = $3, answer_brand = $4,
-		    answer_last4 = $5, answer_auth_code = $6, answer_provider_ref = $7,
+		    answer_last4 = $5, answer_auth_code = $6, answer_provider_ref = $7, answer_fee_cents = $8,
 		    provider_ref = COALESCE(NULLIF(provider_ref, ''), NULLIF($7, '')), updated_at = NOW()
 		WHERE id = $1 AND state = 'pending_at_device'
 		RETURNING id`,
-		a.IntentID, string(verdictState), a.Verdict, a.Brand, a.Last4, a.AuthCode, a.ProviderRef).Scan(&moved)
+		a.IntentID, string(verdictState), a.Verdict, a.Brand, a.Last4, a.AuthCode, a.ProviderRef, a.FeeCents).Scan(&moved)
 	if err == nil {
 		return AnswerApplied, nil
 	}

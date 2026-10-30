@@ -134,7 +134,7 @@ func TestCP15_FeeBooksToItsOwnIncomeAccountNotRevenueOrTax(t *testing.T) {
 	if got := f.accountBalance(surchargeIncomeCode); got != -fee {
 		t.Fatalf("surcharge income balance %d, wanted a credit of %d", got, fee)
 	}
-	tax := countOf(t, f.db, `SELECT ROUND(tax_total * 100)::bigint FROM pos_transactions WHERE id = $1`, saleID)
+	tax := countOf(t, f.db, `SELECT ROUND(tax_amount * 100)::bigint FROM pos_transactions WHERE id = $1`, saleID)
 	if rev := -f.accountBalance("4010"); rev != total-tax {
 		t.Fatalf("sales revenue %d, wanted %d: the fee must not touch it", rev, total-tax)
 	}
@@ -155,12 +155,15 @@ func TestCP15_SwitchOffAfterwardsDoesNotRewriteTheStoredFee(t *testing.T) {
 }
 
 // TestCP15_ReturnRefundsTheFeeWithTheCard: a full return of the surcharged
-// card sale sends the terminal a refund of the goods and the fee together,
+// card sale sends the processor a refund of the goods and the fee together,
 // and the income account nets to zero. Run's own rule: refund by the original
 // transaction so the fee comes back with it.
 func TestCP15_ReturnRefundsTheFeeWithTheCard(t *testing.T) {
 	lockTerminalTests(t)
-	f := newFixture(t, testutil.RequireDB(t), withSurchargingTerminal(300, true))
+	gw := &fakeGateway{}
+	f := newFixture(t, testutil.RequireDB(t), withSurchargingTerminal(300, true), func(f *fixture) {
+		f.service = f.service.WithGateway(gw)
+	})
 	saleID, total := f.cardSale(t)
 	fee := f.cardTenderSurcharge(saleID)
 	sale := f.getSale(t, saleID)
@@ -173,11 +176,11 @@ func TestCP15_ReturnRefundsTheFeeWithTheCard(t *testing.T) {
 	if r.status != http.StatusCreated {
 		t.Fatalf("card return = %d: %s", r.status, r.raw)
 	}
+	// the card refund goes to the processor by the original transaction
+	// reference (the gateway seam), for the goods and the fee together
 	var refund int64
-	for _, d := range f.terminal.Dispatched() {
-		if d.Kind == payment.TerminalKindRefund {
-			refund += d.AmountCents
-		}
+	for _, c := range gw.refundCents {
+		refund += c
 	}
 	if refund != total+fee {
 		t.Fatalf("refunded %d at the terminal, wanted %d (goods %d plus fee %d)", refund, total+fee, total, fee)
