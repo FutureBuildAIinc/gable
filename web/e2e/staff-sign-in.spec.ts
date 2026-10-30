@@ -30,12 +30,12 @@ async function signIn(page: Page, role: string, password = PASSWORD) {
 }
 
 test.describe('Staff sign in', () => {
-  test('a cashier signs in, sees the counter and not purchasing, and the cookie is HttpOnly', async ({ page, context }) => {
+  test('a cashier signs in, sees point of sale and not purchasing, and the cookie is HttpOnly', async ({ page, context }) => {
     const apps = page.waitForResponse((r) => new URL(r.url()).pathname === '/api/v1/apps' && r.ok());
     await signIn(page, 'cashier');
     await apps;
     await expect(page.getByRole('heading', { name: /good to see you/i })).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Open Counter' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Open Point of Sale' })).toBeVisible();
     await expect(page.getByRole('button', { name: 'Open Purchasing' })).toHaveCount(0);
 
     const cookie = (await context.cookies()).find((c) => c.name === SESSION_COOKIE);
