@@ -41,7 +41,7 @@ describe('the configured item picker', () => {
     expect(text(el)).toContain('Q-000101')
     expect(text(el)).toContain('Ridgeview Framing')
     expect(fetchMock.mock.calls[0][0]).toContain('/api/v1/quotes')
-    expect(String(fetchMock.mock.calls[0][0])).toContain('status=DRAFT')
+    expect(String(fetchMock.mock.calls[0][0])).toContain('status=draft')
 
     let picked: { id: string | null } | null = null
     el.addEventListener('configured-target-picked', (e) => {
@@ -80,7 +80,7 @@ describe('the configured item picker', () => {
 
     expect(text(el)).toContain('SO-000201')
     expect(fetchMock.mock.calls[0][0]).toContain('/api/v1/orders')
-    expect(String(fetchMock.mock.calls[0][0])).toContain('status=DRAFT')
+    expect(String(fetchMock.mock.calls[0][0])).toContain('status=draft')
   })
 
   it('says when there is no draft to pick', async () => {

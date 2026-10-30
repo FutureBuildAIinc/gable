@@ -7,7 +7,7 @@
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mount, q, text, flush, jsonResponse } from '../../test/dom'
-import type { GableDoorConfigurator } from './DoorConfigurator'
+import type { DoorConfigurator } from './DoorConfigurator'
 import './DoorConfigurator'
 import '../../components/configured/ConfiguredTargetPicker'
 
@@ -58,7 +58,7 @@ afterEach(() => {
 
 describe('the door configurator', () => {
   it('shows the server\'s price and keeps both add buttons live', async () => {
-    const el = await mount<GableDoorConfigurator>('gable-door-configurator')
+    const el = await mount<DoorConfigurator>('gable-door-configurator')
     await flush()
 
     // The dealer picks a door type: the server prices it.
@@ -68,7 +68,7 @@ describe('the door configurator', () => {
     await flush()
     await flush()
 
-    expect(text(q(el, '[data-testid="estimate-price"]'))).toBe('$250.00')
+    expect(text(q<HTMLElement>(el, '[data-testid="estimate-price"]'))).toBe('$250.00')
 
     const toQuote = q<HTMLButtonElement>(el, '[data-testid="add-to-quote"]')
     const toOrder = q<HTMLButtonElement>(el, '[data-testid="add-to-order"]')
@@ -77,7 +77,7 @@ describe('the door configurator', () => {
   })
 
   it('opens the picker when the dealer adds the item to a quote', async () => {
-    const el = await mount<GableDoorConfigurator>('gable-door-configurator')
+    const el = await mount<DoorConfigurator>('gable-door-configurator')
     await flush()
     const door = Array.from(el.querySelectorAll('button')).find((b) => text(b).includes(DOOR.name)) as HTMLElement
     door.click()
@@ -93,7 +93,7 @@ describe('the door configurator', () => {
   })
 
   it('opens the picker for an order when the dealer adds the item to one', async () => {
-    const el = await mount<GableDoorConfigurator>('gable-door-configurator')
+    const el = await mount<DoorConfigurator>('gable-door-configurator')
     await flush()
     const door = Array.from(el.querySelectorAll('button')).find((b) => text(b).includes(DOOR.name)) as HTMLElement
     door.click()

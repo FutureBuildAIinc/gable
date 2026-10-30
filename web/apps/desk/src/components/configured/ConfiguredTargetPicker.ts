@@ -42,14 +42,14 @@ export class GableConfiguredTargetPicker extends LitElement {
         this.failed = false;
         try {
             if (this.target === 'quote') {
-                const page = await QuoteService.list({ status: 'DRAFT', limit: 50 });
+                const page = await QuoteService.list({ status: 'draft', limit: 50 });
                 this.drafts = page.items.map((q) => ({
                     id: q.id,
                     label: q.number ?? 'Draft quote',
                     detail: q.customer_name ?? '',
                 }));
             } else {
-                const page = await OrderService.listOrders({ status: 'DRAFT', limit: 50 });
+                const page = await OrderService.listOrders({ status: 'draft', limit: 50 });
                 this.drafts = page.items.map((o) => ({
                     id: o.id,
                     label: o.number ?? 'Draft order',

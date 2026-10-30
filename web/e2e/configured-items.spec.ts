@@ -245,13 +245,22 @@ test.describe('The configured item is priced by the server', () => {
     expect(order.lines[0].configuration_json).toBeTruthy();
 
     // The purchase order line names the item the way the vendor reads it.
-    const pos = (await (await request.get('/api/v1/purchase-orders?limit=50')).json()) as {
-      items: { id: string; lines: { description: string; linked_so_line_id: string }[] }[];
-    };
+    // The list answers the headers, so each one is read for its lines.
+    const headers = (await (await request.get('/api/v1/purchase-orders')).json()) as
+      { id: string }[] | null;
     const orderLineId = order.lines[0].id;
-    const po = pos.items.find((p) => p.lines?.some((l) => l.linked_so_line_id === orderLineId));
-    expect(po, 'no purchase order line links to the order line').toBeTruthy();
-    const poLine = po!.lines.find((l) => l.linked_so_line_id === orderLineId)!;
-    expect(poLine.description).toContain(names.door);
+    let poLine: { description: string; linked_so_line_id: string } | undefined;
+    for (const header of headers ?? []) {
+      const detail = (await (await request.get(`/api/v1/purchase-orders/${header.id}`)).json()) as {
+        lines: { description: string; linked_so_line_id: string }[];
+      };
+      const line = detail.lines?.find((l) => l.linked_so_line_id === orderLineId);
+      if (line) {
+        poLine = line;
+        break;
+      }
+    }
+    expect(poLine, 'no purchase order line links to the order line').toBeTruthy();
+    expect(poLine!.description).toContain(names.door);
   });
 });
