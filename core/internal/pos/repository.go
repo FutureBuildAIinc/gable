@@ -435,8 +435,8 @@ type LogBatch struct {
 	// Refused and Gaps are the items the batch sent to the exception queue
 	// and the items it held for a missing predecessor (ADR 0011 6.4).
 	Refused, Gaps int
-	Errors                                  []SyncItemResult
-	Details                                 []SyncItemResult
+	Errors        []SyncItemResult
+	Details       []SyncItemResult
 }
 
 // SyncItemResult is one offline sale's outcome in the sync log.

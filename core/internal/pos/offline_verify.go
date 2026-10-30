@@ -21,17 +21,17 @@ import (
 // OfflineSnapshot in tauri/core/src/offline/model.rs). Slice O2's route
 // issues it; the sync verifies every signed sale against the one it names.
 type OfflineSnapshot struct {
-	SnapshotID     string                  `json:"snapshot_id"`
-	RegisterID     string                  `json:"register_id"`
-	BranchID       string                  `json:"branch_id"`
-	DeviceEpoch    int64                   `json:"device_epoch"`
-	IssuedAt       string                  `json:"issued_at"`
-	TillSession    OfflineSnapshotSession  `json:"till_session"`
-	Policy         OfflineSnapshotPolicy   `json:"policy"`
-	Tax            OfflineSnapshotTax      `json:"tax"`
-	WalkInCustomer OfflineSnapshotWalkIn   `json:"walk_in_customer"`
+	SnapshotID     string                   `json:"snapshot_id"`
+	RegisterID     string                   `json:"register_id"`
+	BranchID       string                   `json:"branch_id"`
+	DeviceEpoch    int64                    `json:"device_epoch"`
+	IssuedAt       string                   `json:"issued_at"`
+	TillSession    OfflineSnapshotSession   `json:"till_session"`
+	Policy         OfflineSnapshotPolicy    `json:"policy"`
+	Tax            OfflineSnapshotTax       `json:"tax"`
+	WalkInCustomer OfflineSnapshotWalkIn    `json:"walk_in_customer"`
 	Products       []OfflineSnapshotProduct `json:"products"`
-	PriceSheet     []OfflineSnapshotPrice  `json:"price_sheet"`
+	PriceSheet     []OfflineSnapshotPrice   `json:"price_sheet"`
 	Accounts       []OfflineSnapshotAccount `json:"accounts"`
 }
 

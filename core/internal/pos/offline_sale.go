@@ -22,34 +22,34 @@ import (
 // figures from here and verifies them against the snapshot it names; it never
 // prices the sale again.
 type SignedOfflineSale struct {
-	ClientID        string                `json:"client_id"`
-	RegisterID      string                `json:"register_id"`
-	DeviceEpoch     int64                 `json:"device_epoch"`
-	DeviceSeq       int64                 `json:"device_seq"`
-	PrevDigest      string                `json:"prev_digest"`
-	OfflineRef      string                `json:"offline_ref"`
-	SnapshotID      string                `json:"snapshot_id"`
-	TillSessionID   string                `json:"till_session_id"`
-	CashierID       string                `json:"cashier_id"`
-	CustomerID      *string               `json:"customer_id"`
-	BuyerContactID  *string               `json:"buyer_contact_id"`
-	CustomerPO      *string               `json:"customer_po"`
-	JobID           *string               `json:"job_id"`
-	PickedUpBy      *string               `json:"picked_up_by"`
-	BusinessDate    string                `json:"business_date"`
-	SoldAt          string                `json:"sold_at"`
-	Currency        string                `json:"currency"`
-	SubtotalCents   int64                 `json:"subtotal_cents"`
-	TaxCents        int64                 `json:"tax_cents"`
-	TotalCents      int64                 `json:"total_cents"`
-	ChangeCents     int64                 `json:"change_cents"`
-	TaxRate         string                `json:"tax_rate"`
-	TaxExempt       bool                  `json:"tax_exempt"`
-	QueueCount      int64                 `json:"queue_count"`
-	QueueTotalCents int64                 `json:"queue_total_cents"`
-	ConfirmedMark   int64                 `json:"confirmed_mark"`
-	Lines           []SignedSaleLine      `json:"lines"`
-	Tenders         []SignedSaleTender    `json:"tenders"`
+	ClientID        string             `json:"client_id"`
+	RegisterID      string             `json:"register_id"`
+	DeviceEpoch     int64              `json:"device_epoch"`
+	DeviceSeq       int64              `json:"device_seq"`
+	PrevDigest      string             `json:"prev_digest"`
+	OfflineRef      string             `json:"offline_ref"`
+	SnapshotID      string             `json:"snapshot_id"`
+	TillSessionID   string             `json:"till_session_id"`
+	CashierID       string             `json:"cashier_id"`
+	CustomerID      *string            `json:"customer_id"`
+	BuyerContactID  *string            `json:"buyer_contact_id"`
+	CustomerPO      *string            `json:"customer_po"`
+	JobID           *string            `json:"job_id"`
+	PickedUpBy      *string            `json:"picked_up_by"`
+	BusinessDate    string             `json:"business_date"`
+	SoldAt          string             `json:"sold_at"`
+	Currency        string             `json:"currency"`
+	SubtotalCents   int64              `json:"subtotal_cents"`
+	TaxCents        int64              `json:"tax_cents"`
+	TotalCents      int64              `json:"total_cents"`
+	ChangeCents     int64              `json:"change_cents"`
+	TaxRate         string             `json:"tax_rate"`
+	TaxExempt       bool               `json:"tax_exempt"`
+	QueueCount      int64              `json:"queue_count"`
+	QueueTotalCents int64              `json:"queue_total_cents"`
+	ConfirmedMark   int64              `json:"confirmed_mark"`
+	Lines           []SignedSaleLine   `json:"lines"`
+	Tenders         []SignedSaleTender `json:"tenders"`
 	// The replaced cart and the declaration (ADR 0011 section 5.3). They are
 	// signed fields when the device sends them: the canonical form is built
 	// from the item as received, so a field present is a field signed.

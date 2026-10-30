@@ -10,8 +10,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/jackc/pgx/v5"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 )
 
 // registerDevice is a register's enrolment of one epoch (ADR 0011 6.1): its
