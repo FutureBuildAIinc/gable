@@ -7,13 +7,17 @@ import fs from 'fs';
 
 /**
  * CP-15 card surcharges: a manager switches the branch's card fee on at 3
- * percent on the Counter rules screen (off by default), the Pay screen tells
- * the clerk the expected fee and the cash price before the card is presented,
- * the card sale stores the fee the processor's answer carried (the demo
- * stack's simulated processor is enrolled when the switch is on), the sale
- * shows it apart from the total, and the 80mm receipt prints "Card fee" on its
- * own line. The return that gives the fee back with the card is proved in the
- * Go tests (the stack wires no refund gateway for the counter).
+ * percent on the Counter rules screen (off by default), a rate above the
+ * brands' cap is refused, and the Pay screen tells the clerk the expected fee
+ * and the cash price before the card is presented. The notice is only a
+ * notice: the processor's answer decides the fee. The CI stack wires no
+ * terminal, so its card tender carries no answer and the sale stores no fee,
+ * the total unchanged. What the answer's fee does is proved in the Go tests:
+ * stored on the card tender (TestCP15_AnswerFeeIsStoredOnTheCardTender), booked
+ * to its own income account (TestCP15_FeeBooksToItsOwnIncomeAccountNotRevenueOrTax),
+ * "Card fee" on the 80mm receipt (TestThermalReceiptCardFeeLine), and given
+ * back with a card return or void (TestCP15_ReturnRefundsTheFeeWithTheCard,
+ * TestCP15_AVoidTakesTheFeeBack).
  */
 
 const SHOTS_DIR = process.env.SHOTS_DIR ?? path.join('test-results', 'shots');
@@ -67,7 +71,7 @@ async function saleIdByNumber(request: APIRequestContext, number: string): Promi
   return sale!.id;
 }
 
-test('CP-15: the branch switches the card fee on, the counter states it, the sale and the receipt show it', async ({ page, request }) => {
+test('CP-15: the branch switches the card fee on, the counter states it before the card, and only an answer charges it', async ({ page, request }) => {
   await signIn(page, 'Playwright Admin');
   const saved = (await (await request.get('/api/v1/pos/settings')).json()) as {
     revision: number;
@@ -129,8 +133,9 @@ test('CP-15: the branch switches the card fee on, the counter states it, the sal
     const complete = page.getByTestId('pos-complete');
     await expect(complete).toContainText('Sale complete', { timeout: 15000 });
 
-    // The fee the answer carried is on the sale, apart from the total.
-    await expect(page.getByTestId('summary-card-fee')).toContainText(`$${(expectedFee / 100).toFixed(2)}`);
+    // No answer carried a fee, so none is on the sale: the notice never
+    // charges, and the total is the one the clerk rang.
+    await expect(page.getByTestId('summary-card-fee')).toHaveCount(0);
     await expect(page.getByTestId('summary-total')).toContainText(totalText.trim());
     await page.screenshot({ path: path.join(SHOTS_DIR, 'cp15-complete.png'), fullPage: true });
     const number = ((await complete.textContent()) ?? '').match(/POS-\d+/)?.[0] ?? '';
@@ -143,14 +148,12 @@ test('CP-15: the branch switches the card fee on, the counter states it, the sal
     expect(sale.total_cents).toBe(totalCents);
     const cardTender = sale.tenders.find((t) => t.method === 'card');
     expect(cardTender?.amount_cents).toBe(totalCents);
-    expect(cardTender?.surcharge_cents).toBe(expectedFee);
+    expect(cardTender?.surcharge_cents).toBe(0);
 
-    // The 80mm receipt carries "Card fee" on its own line.
+    // The 80mm receipt prints no fee line for a sale that carries none.
     const receipt = await request.get(`/api/v1/pos/transactions/${saleId}/receipt?layout=thermal80`);
     expect(receipt.status(), await receipt.text()).toBe(200);
-    const text = (await receipt.body()).toString('latin1');
-    expect(text).toContain('Card fee');
-    expect(text).toContain(`$${(expectedFee / 100).toFixed(2)}`);
+    expect((await receipt.body()).toString('latin1')).not.toContain('Card fee');
   } finally {
     // The rules the walk found go back: the card fee off, as it was.
     const now = (await (await request.get('/api/v1/pos/settings')).json()) as { revision: number };
