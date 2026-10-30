@@ -233,7 +233,7 @@ func (s *Service) Exchange(ctx context.Context, cashierID uuid.UUID, in *Exchang
 		// the way a completion is (CP-17a).
 		done, err := s.completeSaleTx(ctx, sale.ID, "", &revision, in.Tenders, in.PickedUpBy, actor, pre, *st.customerID,
 			make([]*chargeResult, len(in.Tenders)), pricedTax, leg, in.Acknowledged, in.Payer, in.SuspectedAvoidance,
-			in.PayerDeclined)
+			in.PayerDeclined, nil)
 		if err != nil {
 			return err
 		}

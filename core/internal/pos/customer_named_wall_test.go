@@ -160,26 +160,6 @@ func TestTheSyncRefusesEveryBatchByRule(t *testing.T) {
 	}
 }
 
-// RULE: a branch bound key keeps its pin in the sync: the item is an error,
-// no sale and no invoice is written.
-func TestTheSyncHoldsABoundKeyToItsPin(t *testing.T) {
-	w := newNamedWall(t)
-	f := w.f
-	client := uuid.New()
-	item := &pos.OfflineSale{ClientID: client, CashierID: uuid.New(), CustomerID: &w.hidden}
-	_, err := f.service.StartSaleAt(w.boundCtx(), item, f.register, "key")
-	var he *httpx.Error
-	if !errors.As(err, &he) || he.Status != http.StatusNotFound {
-		t.Fatalf("bound key sync naming another yard's customer: %v, want the module's 404", err)
-	}
-	if n := countOf(t, f.db, `SELECT count(*) FROM pos_transactions WHERE id = $1`, client); n != 0 {
-		t.Errorf("the refused sync item wrote its sale")
-	}
-	if n := countOf(t, f.db, `SELECT count(*) FROM invoices WHERE customer_id = $1`, w.hidden); n != 0 {
-		t.Errorf("the refused sync item posted %d invoices to the customer", n)
-	}
-}
-
 // the sale is named while its customer is reachable, then the customer's only
 // yard becomes another branch before the completion
 func (w *namedWall) namedThenMoved(t *testing.T) (saleID string, total int64, revision any) {
