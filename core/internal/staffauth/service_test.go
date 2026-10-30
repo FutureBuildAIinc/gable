@@ -345,3 +345,86 @@ func TestFloorDowngradeUnderTheCoreClosesSignIn(t *testing.T) {
 		t.Fatalf("back at the floor: %v", err)
 	}
 }
+
+// blockingDir answers GetUser only when released (or its context ends).
+type blockingDir struct {
+	*fakeDir
+	release chan struct{}
+	entered chan struct{}
+}
+
+func (b *blockingDir) GetUser(ctx context.Context, id string) (appwrite.User, error) {
+	select {
+	case b.entered <- struct{}{}:
+	default:
+	}
+	select {
+	case <-b.release:
+		return b.fakeDir.GetUser(ctx, id)
+	case <-ctx.Done():
+		return appwrite.User{}, ctx.Err()
+	}
+}
+
+// A hung Appwrite is an outage, not a wall: a session past RefreshAfter and
+// inside its snapshot age keeps working, each call bounded by CallTimeout.
+func TestRefreshHangUsesSnapshot(t *testing.T) {
+	dir := okDir()
+	svc, _, clk := newSvc(t, dir)
+	svc.set.IdleLimit, svc.set.AbsoluteLimit = 48*time.Hour, 72*time.Hour
+	svc.set.CallTimeout = 50 * time.Millisecond
+	ctx := context.Background()
+	id, _, err := svc.SignIn(ctx, "a@x.example", "pw", "web")
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc.dir = &blockingDir{fakeDir: dir, release: make(chan struct{}), entered: make(chan struct{}, 1)}
+	clk.t = clk.t.Add(svc.set.RefreshAfter + time.Second)
+	done := make(chan error, 1)
+	go func() { _, err := svc.Resolve(ctx, id); done <- err }()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("hang closed the session: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("Resolve hung with Appwrite")
+	}
+}
+
+// blockingVersion blocks Version until released, ignoring its context, as a
+// stuck connection can.
+type blockingVersion struct {
+	release chan struct{}
+	entered chan struct{}
+}
+
+func (b *blockingVersion) Version(ctx context.Context) (string, error) {
+	select {
+	case b.entered <- struct{}{}:
+	default:
+	}
+	<-b.release
+	return "2.1.0", nil
+}
+
+// While one request waits on the version read, others do not queue behind it.
+func TestFloorReadDoesNotHoldTheLock(t *testing.T) {
+	dir := okDir()
+	svc, _, _ := newSvc(t, dir)
+	ver := &blockingVersion{release: make(chan struct{}), entered: make(chan struct{}, 1)}
+	svc.WithFloorWatch(ver, time.Minute)
+	defer close(ver.release)
+	go svc.floorClosed(context.Background())
+	<-ver.entered
+	done := make(chan bool, 1)
+	go func() { done <- svc.floorClosed(context.Background()) }()
+	select {
+	case closed := <-done:
+		if closed {
+			t.Fatal("floor reported closed")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("a second caller queued behind the version read")
+	}
+}

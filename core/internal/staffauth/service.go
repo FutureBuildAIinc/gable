@@ -41,6 +41,7 @@ type Settings struct {
 	RefreshAfter   time.Duration // the membership is re-read when the last read is older
 	SnapshotMaxAge time.Duration // an unconfirmed snapshot older than this is refused
 	TouchGap       time.Duration // last use is written at most this often
+	CallTimeout    time.Duration // one Appwrite call may take at most this long
 }
 
 // DefaultSettings fills any zero limit.
@@ -56,6 +57,9 @@ func (s Settings) withDefaults() Settings {
 	}
 	if s.SnapshotMaxAge <= 0 {
 		s.SnapshotMaxAge = time.Hour
+	}
+	if s.CallTimeout <= 0 {
+		s.CallTimeout = 5 * time.Second
 	}
 	if s.TouchGap <= 0 {
 		s.TouchGap = time.Minute
@@ -96,11 +100,12 @@ type VersionReader interface {
 // below the floor closes every Appwrite method; a read that fails changes
 // nothing, so the last state stands.
 type floorWatch struct {
-	mu     sync.Mutex
-	reader VersionReader
-	every  time.Duration
-	last   time.Time
-	closed bool
+	mu       sync.Mutex
+	reader   VersionReader
+	every    time.Duration
+	last     time.Time
+	closed   bool
+	inFlight bool
 }
 
 // WithFloorWatch makes the service re-check the Appwrite version while it
@@ -111,22 +116,50 @@ func (s *Service) WithFloorWatch(r VersionReader, every time.Duration) *Service 
 	return s
 }
 
-// floorClosed reports whether the last version read was below the floor.
+// floorClosed reports whether the last version read was below the floor. The
+// read runs outside the lock and under the call timeout: one caller reads
+// while the others use the last state, so a hung Appwrite queues nobody.
 func (s *Service) floorClosed(ctx context.Context) bool {
 	f := s.floor
 	if f == nil {
 		return false
 	}
 	f.mu.Lock()
+	now := s.now()
+	if f.inFlight || !(f.last.IsZero() || now.Sub(f.last) >= f.every) {
+		closed := f.closed
+		f.mu.Unlock()
+		return closed
+	}
+	f.last, f.inFlight = now, true
+	f.mu.Unlock()
+
+	rctx, cancel := context.WithTimeout(ctx, s.set.CallTimeout)
+	defer cancel()
+	type result struct {
+		v   string
+		err error
+	}
+	ch := make(chan result, 1)
+	go func() {
+		v, err := f.reader.Version(rctx)
+		ch <- result{v, err}
+	}()
+	var res result
+	select {
+	case res = <-ch:
+	case <-rctx.Done():
+		res.err = rctx.Err()
+	}
+
+	f.mu.Lock()
 	defer f.mu.Unlock()
-	if now := s.now(); f.last.IsZero() || now.Sub(f.last) >= f.every {
-		f.last = now
-		if v, err := f.reader.Version(ctx); err == nil && v != "" {
-			wasClosed := f.closed
-			f.closed = appwrite.CheckFloor(v) != nil
-			if f.closed && !wasClosed {
-				s.log.Error("Appwrite is below the 2.0.0 floor; every Appwrite method is closed", "version", v)
-			}
+	f.inFlight = false
+	if res.err == nil && res.v != "" {
+		wasClosed := f.closed
+		f.closed = appwrite.CheckFloor(res.v) != nil
+		if f.closed && !wasClosed {
+			s.log.Error("Appwrite is below the 2.0.0 floor; every Appwrite method is closed", "version", res.v)
 		}
 	}
 	return f.closed
@@ -196,7 +229,9 @@ func (s *Service) SignIn(ctx context.Context, email, password, clientKind string
 	if s.floorClosed(ctx) {
 		return "", Identity{}, ErrUnavailable
 	}
-	aws, err := s.dir.CreateEmailPasswordSession(ctx, email, password)
+	cctx, cancel := context.WithTimeout(ctx, s.set.CallTimeout)
+	aws, err := s.dir.CreateEmailPasswordSession(cctx, email, password)
+	cancel()
 	if err != nil {
 		var ae *appwrite.Error
 		if errors.As(err, &ae) && ae.StatusCode >= 400 && ae.StatusCode < 500 && ae.StatusCode != http.StatusTooManyRequests {
@@ -211,11 +246,13 @@ func (s *Service) SignIn(ctx context.Context, email, password, clientKind string
 			s.log.Warn("ending the appwrite session failed", "error", err)
 		}
 	}()
-	user, err := s.dir.GetUser(ctx, aws.UserID)
+	cctx, cancel = context.WithTimeout(ctx, s.set.CallTimeout)
+	defer cancel()
+	user, err := s.dir.GetUser(cctx, aws.UserID)
 	if err != nil {
 		return s.readFailure(ctx, err, refuse)
 	}
-	m, found, err := s.dir.ListMemberships(ctx, s.set.TeamID, aws.UserID)
+	m, found, err := s.dir.ListMemberships(cctx, s.set.TeamID, aws.UserID)
 	if err != nil {
 		return s.readFailure(ctx, err, refuse)
 	}
@@ -325,10 +362,12 @@ func (s *Service) refresh(ctx context.Context, row Session, now time.Time) (Sess
 	var m appwrite.Membership
 	found := false
 	definite := true
+	callCtx, cancel := context.WithTimeout(ctx, s.set.CallTimeout)
+	defer cancel()
 	if s.floorClosed(ctx) {
 		err = ErrUnavailable
 	} else {
-		user, err = s.dir.GetUser(ctx, row.AppwriteUserID)
+		user, err = s.dir.GetUser(callCtx, row.AppwriteUserID)
 	}
 	if err != nil {
 		var ae *appwrite.Error
@@ -336,7 +375,7 @@ func (s *Service) refresh(ctx context.Context, row Session, now time.Time) (Sess
 			return s.revokeAtRefresh(ctx, row, now, "user_deleted")
 		}
 		definite = false
-	} else if m, found, err = s.dir.ListMemberships(ctx, s.set.TeamID, row.AppwriteUserID); err != nil {
+	} else if m, found, err = s.dir.ListMemberships(callCtx, s.set.TeamID, row.AppwriteUserID); err != nil {
 		definite = false
 	}
 	if !definite {

@@ -242,7 +242,7 @@ func Run() {
 		// clear the 2.0.0 floor. A server below the floor stops the boot; an
 		// unreadable one closes the provider redirect methods (none is built
 		// yet) and the floor watch below keeps checking.
-		awClient = &appwrite.Client{Endpoint: cfg.AppwriteEndpoint, ProjectID: cfg.AppwriteProjectID, APIKey: cfg.AppwriteAPIKey}
+		awClient = &appwrite.Client{Endpoint: cfg.AppwriteEndpoint, ProjectID: cfg.AppwriteProjectID, APIKey: cfg.AppwriteAPIKey, HTTP: &http.Client{Timeout: 10 * time.Second}}
 		state, err := appwrite.CheckStart(context.Background(), awClient)
 		switch {
 		case errors.Is(err, appwrite.ErrUnsupportedVersion):
