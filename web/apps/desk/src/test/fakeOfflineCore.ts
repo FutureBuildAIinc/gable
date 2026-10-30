@@ -57,7 +57,10 @@ export interface FakeCore {
     invoke: (command: string, args?: Record<string, unknown>) => Promise<unknown>;
 }
 
-/** The odd total the stand in answers: 123.45 for any cart. */
+/**
+ * The odd total the stand in answers: 123.45 for any cart, deliberately not
+ * its subtotal plus its tax, so a page that added figures itself would show.
+ */
 export const CORE_TOTAL = 12345;
 
 export function fakeOfflineCore(): FakeCore {
@@ -78,7 +81,7 @@ export function fakeOfflineCore(): FakeCore {
                     quantity: l.quantity ?? '1', uom: l.uom, price_uom: l.uom, stock_uom: 'EA', stock_quantity: l.quantity ?? '1',
                     price_key: req.customer_id ? 'level:pro' : 'walkin', price_source: 'level', level_fallback: req.customer_id !== null,
                     unit_price_ten_thousandths: 0, line_total_cents: 11111, taxable: true })),
-                subtotal_cents: 11111, tax_cents: 1234, total_cents: CORE_TOTAL,
+                subtotal_cents: 11111, tax_cents: 1000, total_cents: CORE_TOTAL,
                 change_cents: tender && !card ? Math.max(tender.amount_cents - CORE_TOTAL, 0) : null,
                 tender_refusal: card ? { code: 'tender_not_offline', message: 'tender method card is not allowed offline' } : null,
                 account_room_cents: req.customer_id ? 150000 : null, queue_room_count: 5, queue_room_cents: 500000,
