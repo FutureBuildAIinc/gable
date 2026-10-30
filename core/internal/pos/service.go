@@ -1238,6 +1238,9 @@ func parsedFromLine(l *salesdoc.Line, qty httpx.Quantity) salesdoc.ParsedLine {
 	// the dealer's tint charge once.
 	if l.Tint != nil {
 		if pl.UnitPrice != nil && l.Tint.TintChargeCents != nil && *l.Tint.TintChargeCents > 0 {
+			// ok cannot be false for a line this code wrote: the add put in
+			// this same charge under this same unit pair and refused any pair
+			// that could not carry it exactly.
 			add, _ := tintPricePerUnit(int64(*l.Tint.TintChargeCents), l.UOMQty, l.PriceUOMQty)
 			base := *pl.UnitPrice - add
 			if base < 0 {

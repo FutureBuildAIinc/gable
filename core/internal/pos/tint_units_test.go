@@ -135,3 +135,47 @@ func TestTintRefusedWhereTheChargeCannotBeCarriedExactly(t *testing.T) {
 		t.Errorf("a refused tint left %d lines on the sale", len(raw))
 	}
 }
+
+// RULE: an override priced tinted line holds one tint charge through every
+// reprice. The reprice takes the frozen charge back out of the stored price
+// with the line's own unit pair before the add puts the dealer's charge in
+// again; stripping charge x 100 whatever the pair would overcharge a quart
+// priced per gallon on each quantity change, customer attach and unit change.
+func TestOverridePricedTintedLineKeepsOneChargeThroughRepricesInEveryUnitPair(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	f := newFixture(t, testutil.RequireDB(t))
+	tintSettingsRows(t, f)
+	_, _, _, formulaID := seedTintCatalogue(t, f)
+	setPosSetting(t, f.db, "pos.tint_charge_cents", "500")
+	prod := gallonProduct(t, f)
+	total := func(step string, r resp, want int64) {
+		t.Helper()
+		if r.status != http.StatusOK {
+			t.Fatalf("%s = %d: %s", step, r.status, r.raw)
+		}
+		l := r.body["lines"].([]any)[0].(map[string]any)
+		if got := num(t, l, "line_total_cents"); got != want {
+			t.Errorf("%s: line total %d, want %d", step, got, want)
+		}
+	}
+
+	sale := f.startSale(nil)
+	line := unitLine(prod, "3", "QT", "4", "1")
+	line["tint"] = tintLine("1", formulaID, "")["tint"]
+	line["unit_price_ten_thousandths"] = 360000 // 36.00 per GAL
+	line["override_reason"] = "contractor match"
+	added := f.addLine(sale, line)
+	total("add 3 QT", added, 2700+1500)
+	id := lineIDs(t, added)[0]
+
+	total("quantity to 5", f.patchQty(sale, id, "5", rev(t, added)), 4500+2500)
+	total("customer attached", f.attach(sale, map[string]any{"customer_id": f.customerID.String()}), 4500+2500)
+
+	replace := func(uom, uomQty, priceUOMQty, qty string) resp {
+		return f.addLine(sale, map[string]any{"id": id, "product_id": prod.String(), "description": "Deep base paint",
+			"uom": uom, "price_uom": "GAL", "uom_qty": uomQty, "price_uom_qty": priceUOMQty, "quantity": qty})
+	}
+	total("unit to 2 GAL", replace("GAL", "1", "1", "2"), 7200+1000)
+	total("unit to 1 pail", replace("BUNDLE", "1", "5", "1"), 18000+500)
+	total("unit back to 3 QT", replace("QT", "4", "1", "3"), 2700+1500)
+}
