@@ -808,7 +808,7 @@ func Run() {
 	// sensitive values sealed with the same payment vault key.
 	lcVault, lcVaultErr := payment.NewVault(cfg.PaymentVaultKey)
 	if lcVaultErr != nil {
-		logger.Error("PAYMENT_VAULT_KEY is not a valid vault key; the large cash payer's sensitive values cannot be sealed")
+		logger.Error("PAYMENT_VAULT_KEY is not a valid vault key; the large cash payer's sensitive values cannot be sealed, so every capture of a payer is refused")
 	}
 	largeCashSvc := largecash.NewService(db, lcVault, cfg.PaymentVaultKey)
 	posSvc.WithLargeCash(largeCashSvc)
