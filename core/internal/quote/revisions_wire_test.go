@@ -270,7 +270,7 @@ func TestQE01_SnapshotImmutable(t *testing.T) {
 // share link route would, and answers its row id.
 func seedLiveShareLink(t *testing.T, f *fixture, quoteID string, live bool) string {
 	t.Helper()
-	sum := sha256.Sum256([]byte("teststub" + quoteID))
+	sum := sha256.Sum256([]byte("teststub" + quoteID + fmt.Sprint(live)))
 	revokedAt, revokedReason := any(nil), any(nil)
 	if !live {
 		revokedAt, revokedReason = time.Now().UTC().Add(-time.Minute), "revoked"
@@ -392,7 +392,6 @@ func TestQE01_RevisedQuoteConvertsFromSameID(t *testing.T) {
 		t.Fatalf("revise = %d: %s", r.status, r.raw)
 	}
 	edit := f.createBody(f.line("30"))
-	edit["branch_id"] = branchID.String()
 	if r := f.do("PUT", "/api/v1/quotes/"+id, edit, "If-Match", fmt.Sprintf(`"%d"`, currentRevision(t, f, uuid.MustParse(id)))); r.status != 200 {
 		t.Fatalf("edit = %d: %s", r.status, r.raw)
 	}
@@ -580,7 +579,7 @@ func TestQE01_ReviseAndRevisionsBranchWall(t *testing.T) {
 			t.Fatalf("Revise with no branch context: %v, want the 403 forbidden error", err)
 		}
 	}
-	if _, err := svc.ListRevisions(ctx, q.ID, 50, nil); err == nil {
+	if _, _, err := svc.ListRevisions(ctx, q.ID, 50, nil); err == nil {
 		t.Fatal("ListRevisions with no branch context and no system mark: nil error, want refused")
 	}
 
@@ -594,7 +593,7 @@ func TestQE01_ReviseAndRevisionsBranchWall(t *testing.T) {
 	if _, err := svc.Revise(bound, q.ID, "", quote.Precondition{Revision: &rev}); err == nil {
 		t.Fatal("Revise from a caller held to another branch: nil error, want refused")
 	}
-	if _, err := svc.ListRevisions(bound, q.ID, 50, nil); err == nil {
+	if _, _, err := svc.ListRevisions(bound, q.ID, 50, nil); err == nil {
 		t.Fatal("ListRevisions from a caller held to another branch: nil error, want refused")
 	}
 
@@ -602,7 +601,7 @@ func TestQE01_ReviseAndRevisionsBranchWall(t *testing.T) {
 	if _, err := svc.Revise(sys, q.ID, "", quote.Precondition{Revision: &rev}); err != nil {
 		t.Fatalf("Revise as a marked system caller: %v", err)
 	}
-	revs, err := svc.ListRevisions(sys, q.ID, 50, nil)
+	revs, _, err := svc.ListRevisions(sys, q.ID, 50, nil)
 	if err != nil {
 		t.Fatalf("ListRevisions as a marked system caller: %v", err)
 	}

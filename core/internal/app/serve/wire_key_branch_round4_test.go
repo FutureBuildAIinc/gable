@@ -247,6 +247,31 @@ func TestKeyBranchPin_BodyCustomerWall(t *testing.T) {
 	f.refusedPin(t, "quote move", "PUT", "/api/v1/quotes/"+f.quoteA.String(), quotePut(B), f.custB)
 	f.allow(t, "bound", "PUT", "/api/v1/quotes/"+f.quoteA.String(), quotePut(A), nil, http.StatusOK)
 
+	// The quote revise and the revisions read ride the same wall (QE-01-b):
+	// the bound key reaches the pin's own quote, where the route's own rules
+	// answer (a draft's revise is the route's 409, the read is its 200), and
+	// the foreign branch's twin quote stays missing to it.
+	if status, buf := f.send(t, "bound", "POST", "/api/v1/quotes/"+f.quoteA.String()+"/revise", `{"revision":1}`, nil); status == http.StatusForbidden {
+		t.Errorf("bound key quote revise on the pin's own quote: %d %s, want past the wall", status, buf)
+	} else if status != http.StatusConflict {
+		t.Errorf("bound key quote revise on a draft: %d %s, want the route's own 409", status, buf)
+	}
+	f.twinLeg("POST", "/api/v1/quotes/"+f.quoteA.String()+"/revise")
+	if status, buf := f.send(t, "bound", "GET", "/api/v1/quotes/"+f.quoteA.String()+"/revisions", "", nil); status == http.StatusForbidden {
+		t.Errorf("bound key quote revisions on the pin's own quote: %d %s, want past the wall", status, buf)
+	} else if status != http.StatusOK {
+		t.Errorf("bound key quote revisions on the pin's own quote: %d %s, want 200", status, buf)
+	}
+	f.twinLeg("GET", "/api/v1/quotes/"+f.quoteA.String()+"/revisions")
+	for _, leg := range []struct{ method, path string }{
+		{"POST", "/api/v1/quotes/" + f.quoteB.String() + "/revise"},
+		{"GET", "/api/v1/quotes/" + f.quoteB.String() + "/revisions"},
+	} {
+		if status, _ := f.send(t, "bound", leg.method, leg.path, `{"revision":1}`, nil); status != http.StatusNotFound {
+			t.Errorf("bound key %s the foreign branch's quote: %d, want the wall's 404", leg.method, status)
+		}
+	}
+
 	draftOrder := f.made(t, "bound", "orders", "POST", "/api/v1/orders",
 		fmt.Sprintf(`{"customer_id":%q,"delivery_type":"pickup","lines":[%s]}`, A, line), http.StatusCreated)
 	orderPut := func(c string) string {

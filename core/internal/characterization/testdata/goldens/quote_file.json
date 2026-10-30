@@ -74,7 +74,8 @@
         "total_cents": 1100,
         "updated_at": "<ts+0d>",
         "vehicle_id": null,
-        "vehicle_name": null
+        "vehicle_name": null,
+        "version_number": 1
       }
     }
   },

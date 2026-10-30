@@ -1194,7 +1194,8 @@
         "total_cents": 0,
         "updated_at": "<ts+0d>",
         "vehicle_id": null,
-        "vehicle_name": null
+        "vehicle_name": null,
+        "version_number": 1
       }
     }
   },
@@ -1262,7 +1263,8 @@
         "total_cents": 0,
         "updated_at": "<ts+0d>",
         "vehicle_id": null,
-        "vehicle_name": null
+        "vehicle_name": null,
+        "version_number": 1
       }
     }
   },

@@ -807,6 +807,15 @@ func (s *Service) transition(ctx context.Context, id uuid.UUID, to QuoteState, p
 		if out, err = s.repo.GetQuote(ctx, id); err != nil {
 			return err
 		}
+		// A send keeps the version as the customer saw it (QE-01-b): the
+		// snapshot row rides the send's transaction, and a re-send of the
+		// same version adds nothing. The event write below stays the
+		// transaction's last statement (ADR 0003 section 2).
+		if to == QuoteStateSent {
+			if err := s.repo.InsertRevision(ctx, out, actorOf(ctx), ""); err != nil {
+				return err
+			}
+		}
 		return s.record(ctx, out, transitionEvents[to], from.Status())
 	})
 	if err != nil {
@@ -1004,11 +1013,12 @@ func quoteSourceFor(q *Quote) *order.QuoteSource {
 // through its own recorder.
 func (s *Service) buildEvent(q *Quote, eventType, fromStatus string) *outbox.Event {
 	data := map[string]any{
-		"number":      q.Number,
-		"customer_id": q.CustomerID,
-		"status":      q.Status.Status(),
-		"revision":    q.Revision,
-		"total_cents": int64(q.TotalCents),
+		"number":         q.Number,
+		"customer_id":    q.CustomerID,
+		"status":         q.Status.Status(),
+		"revision":       q.Revision,
+		"version_number": q.VersionNumber,
+		"total_cents":    int64(q.TotalCents),
 	}
 	if fromStatus != "" {
 		data["from_status"] = fromStatus

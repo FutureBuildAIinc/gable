@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/gablelbm/gable/internal/platform/httpx"
@@ -58,6 +59,8 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux, roleGuard ...func(http.Hand
 	mux.HandleFunc("PUT /api/v1/quotes/{id}", guard(h.HandleUpdateQuote))
 	mux.HandleFunc("POST /api/v1/quotes/{id}/transitions", guard(h.HandleTransition))
 	mux.HandleFunc("POST /api/v1/quotes/{id}/convert", guard(h.HandleConvertToOrder))
+	mux.HandleFunc("POST /api/v1/quotes/{id}/revise", guard(h.HandleRevise))
+	mux.HandleFunc("GET /api/v1/quotes/{id}/revisions", guard(h.HandleListRevisions))
 }
 
 // writeJSON writes a 2xx JSON body. A document write also carries the
@@ -354,6 +357,105 @@ func (h *Handler) HandleGetAnalytics(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, analytics)
+}
+
+// ReviseRequest is the body of POST /quotes/{id}/revise. The body is
+// optional: the revision rides the If-Match header when it carries none.
+type ReviseRequest struct {
+	Reason   string          `json:"reason"`
+	Revision json.RawMessage `json:"revision"`
+}
+
+// HandleRevise takes a sent, rejected or expired quote back to draft as its
+// next version (QE-01-b): same number, same id, any live share link revoked.
+func (h *Handler) HandleRevise(w http.ResponseWriter, r *http.Request) {
+	if err := noQuery(r); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	id, err := pathID(r)
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	var req ReviseRequest
+	if r.ContentLength != 0 {
+		if err := httpx.DecodeJSON(r, &req); err != nil {
+			httpx.WriteError(w, r, err)
+			return
+		}
+	}
+	v := &httpx.Validator{}
+	var revision *int64
+	if n, ok := v.Int("revision", req.Revision, false); ok {
+		v.Check(n >= 1, "revision", "must be a revision number, 1 or more")
+		revision = &n
+	}
+	if err := v.Err(); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	q, err := h.service.Revise(r.Context(), id, req.Reason, precondition(r, revision))
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	writeQuote(w, http.StatusOK, q)
+}
+
+// revisionsCursorScope names the revisions list's ordering: the version
+// number, newest first.
+const revisionsCursorScope = "quote_revisions.version_number_desc"
+
+// revisionsCursorError is the list's refusal of a cursor it cannot resume.
+func revisionsCursorError() error {
+	return httpx.BadRequest("cursor keyset is malformed",
+		httpx.FieldError{Field: "cursor", Message: "cursor keyset is malformed"})
+}
+
+// HandleListRevisions lists the quote's sent versions with their snapshots,
+// newest first, in the list envelope of ADR 0001 section 1.
+func (h *Handler) HandleListRevisions(w http.ResponseWriter, r *http.Request) {
+	if _, err := httpx.StrictQuery(r, "cursor", "limit"); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	id, err := pathID(r)
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	page, err := httpx.ParseListQuery(r, revisionsCursorScope)
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	var after *int
+	if page.Key != nil {
+		if len(page.Key) != 1 {
+			httpx.WriteError(w, r, revisionsCursorError())
+			return
+		}
+		n, perr := strconv.Atoi(page.Key[0])
+		if perr != nil || n < 1 || strconv.Itoa(n) != page.Key[0] {
+			httpx.WriteError(w, r, revisionsCursorError())
+			return
+		}
+		after = &n
+	}
+	items, hasMore, err := h.service.ListRevisions(r.Context(), id, page.Limit, after)
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	next := ""
+	if hasMore && len(items) > 0 {
+		if next, err = httpx.MintCursor(revisionsCursorScope, strconv.Itoa(items[len(items)-1].VersionNumber)); err != nil {
+			httpx.WriteError(w, r, err)
+			return
+		}
+	}
+	httpx.WriteList(w, items, next, page.Limit)
 }
 
 func (h *Handler) HandleDownloadOriginalFile(w http.ResponseWriter, r *http.Request) {

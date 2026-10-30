@@ -72,7 +72,8 @@
         "total_cents": 5500,
         "updated_at": "<ts+0d>",
         "vehicle_id": null,
-        "vehicle_name": null
+        "vehicle_name": null,
+        "version_number": 1
       }
     }
   },
@@ -134,7 +135,8 @@
         "total_cents": 5500,
         "updated_at": "<ts+0d>",
         "vehicle_id": null,
-        "vehicle_name": null
+        "vehicle_name": null,
+        "version_number": 1
       }
     }
   },
@@ -170,7 +172,8 @@
             "total_cents": 5500,
             "updated_at": "<ts+0d>",
             "vehicle_id": null,
-            "vehicle_name": null
+            "vehicle_name": null,
+            "version_number": 1
           }
         ],
         "limit": 1,
@@ -249,7 +252,8 @@
             "total_cents": 50000,
             "updated_at": "<ts+0d>",
             "vehicle_id": null,
-            "vehicle_name": null
+            "vehicle_name": null,
+            "version_number": 1
           },
           {
             "accepted_at": null,
@@ -272,7 +276,8 @@
             "total_cents": 47000,
             "updated_at": "<ts+0d>",
             "vehicle_id": null,
-            "vehicle_name": null
+            "vehicle_name": null,
+            "version_number": 1
           }
         ],
         "limit": 2,
@@ -467,7 +472,8 @@
         "total_cents": 11000,
         "updated_at": "<ts+0d>",
         "vehicle_id": null,
-        "vehicle_name": null
+        "vehicle_name": null,
+        "version_number": 1
       }
     }
   },
@@ -614,7 +620,8 @@
         "total_cents": 11000,
         "updated_at": "<ts+0d>",
         "vehicle_id": null,
-        "vehicle_name": null
+        "vehicle_name": null,
+        "version_number": 1
       }
     }
   },
@@ -856,7 +863,8 @@
         "total_cents": 2750,
         "updated_at": "<ts+0d>",
         "vehicle_id": null,
-        "vehicle_name": null
+        "vehicle_name": null,
+        "version_number": 1
       }
     }
   },
@@ -924,7 +932,8 @@
         "total_cents": 2750,
         "updated_at": "<ts+0d>",
         "vehicle_id": null,
-        "vehicle_name": null
+        "vehicle_name": null,
+        "version_number": 1
       }
     }
   },
@@ -1001,7 +1010,8 @@
         "total_cents": 2750,
         "updated_at": "<ts+0d>",
         "vehicle_id": null,
-        "vehicle_name": null
+        "vehicle_name": null,
+        "version_number": 1
       }
     }
   },
@@ -1069,7 +1079,8 @@
         "total_cents": 2750,
         "updated_at": "<ts+0d>",
         "vehicle_id": null,
-        "vehicle_name": null
+        "vehicle_name": null,
+        "version_number": 1
       }
     }
   },
@@ -1137,7 +1148,8 @@
         "total_cents": 2750,
         "updated_at": "<ts+0d>",
         "vehicle_id": null,
-        "vehicle_name": null
+        "vehicle_name": null,
+        "version_number": 1
       }
     }
   },
@@ -1214,7 +1226,8 @@
         "total_cents": 2750,
         "updated_at": "<ts+0d>",
         "vehicle_id": null,
-        "vehicle_name": null
+        "vehicle_name": null,
+        "version_number": 1
       }
     }
   },
@@ -1282,7 +1295,8 @@
         "total_cents": 2750,
         "updated_at": "<ts+0d>",
         "vehicle_id": null,
-        "vehicle_name": null
+        "vehicle_name": null,
+        "version_number": 1
       }
     }
   },
@@ -1350,7 +1364,8 @@
         "total_cents": 2750,
         "updated_at": "<ts+0d>",
         "vehicle_id": null,
-        "vehicle_name": null
+        "vehicle_name": null,
+        "version_number": 1
       }
     }
   },
@@ -1427,7 +1442,8 @@
         "total_cents": 2750,
         "updated_at": "<ts+0d>",
         "vehicle_id": null,
-        "vehicle_name": null
+        "vehicle_name": null,
+        "version_number": 1
       }
     }
   },
@@ -1495,7 +1511,8 @@
         "total_cents": 2750,
         "updated_at": "<ts+0d>",
         "vehicle_id": null,
-        "vehicle_name": null
+        "vehicle_name": null,
+        "version_number": 1
       }
     }
   },
@@ -1563,7 +1580,8 @@
         "total_cents": 2750,
         "updated_at": "<ts+0d>",
         "vehicle_id": null,
-        "vehicle_name": null
+        "vehicle_name": null,
+        "version_number": 1
       }
     }
   },
@@ -1640,7 +1658,8 @@
         "total_cents": 2750,
         "updated_at": "<ts+0d>",
         "vehicle_id": null,
-        "vehicle_name": null
+        "vehicle_name": null,
+        "version_number": 1
       }
     }
   },
@@ -1708,7 +1727,8 @@
         "total_cents": 2750,
         "updated_at": "<ts+0d>",
         "vehicle_id": null,
-        "vehicle_name": null
+        "vehicle_name": null,
+        "version_number": 1
       }
     }
   },
@@ -1776,7 +1796,8 @@
         "total_cents": 2750,
         "updated_at": "<ts+0d>",
         "vehicle_id": null,
-        "vehicle_name": null
+        "vehicle_name": null,
+        "version_number": 1
       }
     }
   },
@@ -1853,7 +1874,8 @@
         "total_cents": 2750,
         "updated_at": "<ts+0d>",
         "vehicle_id": null,
-        "vehicle_name": null
+        "vehicle_name": null,
+        "version_number": 1
       }
     }
   },
@@ -1921,7 +1943,8 @@
         "total_cents": 2750,
         "updated_at": "<ts+0d>",
         "vehicle_id": null,
-        "vehicle_name": null
+        "vehicle_name": null,
+        "version_number": 1
       }
     }
   },
@@ -1989,7 +2012,8 @@
         "total_cents": 2750,
         "updated_at": "<ts+0d>",
         "vehicle_id": null,
-        "vehicle_name": null
+        "vehicle_name": null,
+        "version_number": 1
       }
     }
   },
@@ -2012,7 +2036,8 @@
               "number": "Q-000024",
               "revision": 1,
               "status": "draft",
-              "total_cents": 5500
+              "total_cents": 5500,
+              "version_number": 1
             },
             "entity": {
               "id": "<id-4>",
@@ -2030,7 +2055,8 @@
               "number": "Q-000025",
               "revision": 1,
               "status": "draft",
-              "total_cents": 2750
+              "total_cents": 2750,
+              "version_number": 1
             },
             "entity": {
               "id": "<id-24>",
@@ -2048,7 +2074,8 @@
               "number": "Q-000026",
               "revision": 1,
               "status": "draft",
-              "total_cents": 2750
+              "total_cents": 2750,
+              "version_number": 1
             },
             "entity": {
               "id": "<id-26>",
@@ -2084,7 +2111,8 @@
               "number": "Q-000024",
               "revision": 3,
               "status": "sent",
-              "total_cents": 11000
+              "total_cents": 11000,
+              "version_number": 1
             },
             "entity": {
               "id": "<id-4>",
@@ -2103,7 +2131,8 @@
               "number": "Q-000024",
               "revision": 4,
               "status": "accepted",
-              "total_cents": 11000
+              "total_cents": 11000,
+              "version_number": 1
             },
             "entity": {
               "id": "<id-4>",
@@ -2122,7 +2151,8 @@
               "number": "Q-000025",
               "revision": 2,
               "status": "accepted",
-              "total_cents": 2750
+              "total_cents": 2750,
+              "version_number": 1
             },
             "entity": {
               "id": "<id-24>",
@@ -2141,7 +2171,8 @@
               "number": "Q-000026",
               "revision": 2,
               "status": "rejected",
-              "total_cents": 2750
+              "total_cents": 2750,
+              "version_number": 1
             },
             "entity": {
               "id": "<id-26>",

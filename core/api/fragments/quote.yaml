@@ -341,6 +341,110 @@ paths:
           $ref: "#/components/responses/WirePreconditionRequired"
         "500":
           $ref: "#/components/responses/InternalErrorEither"
+  /api/v1/quotes/{id}/revise:
+    post:
+      operationId: quoteRevise
+      tags: [quote]
+      summary: Revise a quote as its next version
+      description: >-
+        Takes a sent, rejected or expired quote back to draft as its next
+        version (same number, same id): version_number goes up by one, any
+        live share link of the quote is revoked so the contractor cannot
+        accept a version the dealer took back, the lifecycle stamps of the
+        old version clear, and the builder gets the quote as a draft. An
+        accepted or converted quote cannot be revised (409
+        invalid_state_transition, plain words); a draft is refused the same
+        way because it is already editable. An expired quote revises, and
+        still needs a new Valid until before it sends. The act, the link
+        revocation, the audit row and the quote.revised event are one
+        transaction. The optional body carries a plain words reason and the
+        revision beside If-Match.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/IfMatch"
+        - $ref: "#/components/parameters/XBranchId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/QuoteReviseRequest"
+      responses:
+        "200":
+          description: The quote at its new version, back in draft.
+          headers:
+            ETag:
+              description: The quote's revision in quotes, for example "3". Send it back as If-Match.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Quote"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "409":
+          $ref: "#/components/responses/WireConflict"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "428":
+          $ref: "#/components/responses/WirePreconditionRequired"
+        "500":
+          $ref: "#/components/responses/InternalErrorEither"
+  /api/v1/quotes/{id}/revisions:
+    get:
+      operationId: quoteRevisions
+      tags: [quote]
+      summary: List the quote's sent versions with their snapshots
+      description: >-
+        The sent versions of one quote, newest first, in the list envelope of
+        ADR 0001 section 1. Each item carries its immutable snapshot: the
+        quote's own body exactly as sent (the header and the lines, money in
+        the integer units of the wire), written by the send inside its own
+        transaction; a re-send of the same version adds no row. Behind the
+        quote's own branch wall; a cursor minted for another ordering, or a
+        parameter the route does not declare, is a 400.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/PageLimit"
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: The page of sent versions.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/QuoteRevisionPage"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "500":
+          $ref: "#/components/responses/InternalErrorEither"
   /api/v1/quotes/exposure:
     get:
       operationId: exposureList
@@ -707,7 +811,7 @@ components:
     QuoteSummary:
       type: object
       description: A quote header, used as a list item and as the head of the full document.
-      required: [id, number, branch_id, customer_id, customer_name, job_id, status, revision, total_cents, freight_cents, margin_total_cents, delivery_type, vehicle_id, vehicle_name, source, expires_at, sent_at, accepted_at, rejected_at, created_at, updated_at]
+      required: [id, number, branch_id, customer_id, customer_name, job_id, status, revision, version_number, total_cents, freight_cents, margin_total_cents, delivery_type, vehicle_id, vehicle_name, source, expires_at, sent_at, accepted_at, rejected_at, created_at, updated_at]
       properties:
         id:
           type: string
@@ -734,6 +838,10 @@ components:
           format: int64
           minimum: 1
           description: Starts at 1 and moves on every write; the client sends it back as If-Match or in the body.
+        version_number:
+          type: integer
+          minimum: 1
+          description: The quote's version; 1 until the first revise moves it (same number, same id, next version).
         total_cents:
           type: integer
           format: int64
@@ -774,7 +882,7 @@ components:
           format: date-time
     Quote:
       type: object
-      required: [id, number, branch_id, customer_id, customer_name, job_id, status, revision, total_cents, freight_cents, margin_total_cents, delivery_type, vehicle_id, vehicle_name, source, expires_at, sent_at, accepted_at, rejected_at, created_at, updated_at, original_filename, original_content_type, parse_map, exposure_state, exposure_cents, exposure_last_checked_at, lines]
+      required: [id, number, branch_id, customer_id, customer_name, job_id, status, revision, version_number, total_cents, freight_cents, margin_total_cents, delivery_type, vehicle_id, vehicle_name, source, expires_at, sent_at, accepted_at, rejected_at, created_at, updated_at, original_filename, original_content_type, parse_map, exposure_state, exposure_cents, exposure_last_checked_at, lines]
       properties:
         id:
           type: string
@@ -801,6 +909,10 @@ components:
           format: int64
           minimum: 1
           description: Starts at 1 and moves on every write; the client sends it back as If-Match or in the body.
+        version_number:
+          type: integer
+          minimum: 1
+          description: The quote's version; 1 until the first revise moves it (same number, same id, next version).
         total_cents:
           type: integer
           format: int64
@@ -1097,6 +1209,57 @@ components:
           minimum: 0
         tally:
           $ref: "#/components/schemas/TallyRequest"
+    QuoteReviseRequest:
+      type: object
+      description: The optional body of POST /quotes/{id}/revise.
+      properties:
+        reason:
+          type: string
+          description: Why the dealer revised, in plain words; kept with the act's audit row.
+        revision:
+          type: integer
+          format: int64
+          minimum: 1
+          description: The revision precondition, beside If-Match.
+    QuoteRevision:
+      type: object
+      description: One sent version of a quote, kept and readable; the immutable snapshot row the send wrote.
+      required: [id, quote_id, version_number, snapshot, created_by, created_at, reason]
+      properties:
+        id:
+          type: string
+          format: uuid
+        quote_id:
+          type: string
+          format: uuid
+        version_number:
+          type: integer
+          minimum: 1
+        snapshot:
+          $ref: "#/components/schemas/Quote"
+        created_by:
+          type: string
+          description: The caller whose send wrote the row; empty when the sender is not a signed in user.
+        created_at:
+          type: string
+          format: date-time
+        reason:
+          type: string
+          description: Reserved; empty on every row today (a send writes the row, and a send carries no reason).
+    QuoteRevisionPage:
+      type: object
+      required: [items, next_cursor, limit]
+      description: The list envelope of ADR 0001 section 1 over the quote's sent versions, newest first.
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/QuoteRevision"
+        next_cursor:
+          type: [string, "null"]
+          description: Opaque; pass it back verbatim as cursor. Null on the last page.
+        limit:
+          type: integer
     QuoteTransitionRequest:
       type: object
       required: [to]

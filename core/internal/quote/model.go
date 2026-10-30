@@ -83,6 +83,11 @@ type QuoteSummary struct {
 	Status       QuoteState `json:"status"`
 	Revision     int64      `json:"revision"`
 
+	// VersionNumber is the quote's version: 1 until the first revise moves
+	// it (QE-01-b). The quote keeps its number and its id across versions;
+	// every sent version is kept as an immutable snapshot.
+	VersionNumber int `json:"version_number"`
+
 	TotalCents       httpx.Cents `json:"total_cents"`
 	FreightCents     httpx.Cents `json:"freight_cents"`
 	MarginTotalCents httpx.Cents `json:"margin_total_cents"`

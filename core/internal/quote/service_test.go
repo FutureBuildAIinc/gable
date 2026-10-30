@@ -153,6 +153,31 @@ func (f *fakeRepo) SentQuotesPastExpiry(context.Context, time.Time, int) ([]uuid
 	return nil, nil
 }
 
+func (f *fakeRepo) InsertRevision(_ context.Context, q *Quote, actor, reason string) error {
+	f.note("revision " + fmt.Sprint(q.VersionNumber))
+	return nil
+}
+
+func (f *fakeRepo) ListRevisions(context.Context, uuid.UUID, *int, int) ([]QuoteRevision, error) {
+	return []QuoteRevision{}, nil
+}
+
+func (f *fakeRepo) ReviseToDraft(_ context.Context, id uuid.UUID) error {
+	f.note("revise")
+	cur := f.quotes[id]
+	cp := *cur
+	cp.Status = QuoteStateDraft
+	cp.SentAt, cp.AcceptedAt, cp.RejectedAt = nil, nil, nil
+	cp.VersionNumber = cur.VersionNumber + 1
+	cp.Revision = cur.Revision + 1
+	f.quotes[id] = &cp
+	return nil
+}
+
+func (f *fakeRepo) RevokeDealerShareLinks(context.Context, uuid.UUID, time.Time) (int64, error) {
+	return 0, nil
+}
+
 func (f *fakeRepo) StoreOriginalFile(context.Context, uuid.UUID, []byte, string, string) error {
 	return nil
 }

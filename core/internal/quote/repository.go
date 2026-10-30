@@ -5,6 +5,7 @@ package quote
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -109,6 +110,18 @@ type Repository interface {
 	// SentQuotesPastExpiry lists the SENT quotes whose expires_at is at or
 	// before at, oldest first, at most limit: the expiry sweep's batch.
 	SentQuotesPastExpiry(ctx context.Context, at time.Time, limit int) ([]uuid.UUID, error)
+	// InsertRevision writes one sent version's immutable snapshot row (the
+	// quote exactly as sent); a re-send of the same version adds nothing.
+	InsertRevision(ctx context.Context, q *Quote, actor, reason string) error
+	// ListRevisions reads the quote's sent versions, newest first, past
+	// after (nil reads from the top), at most limit.
+	ListRevisions(ctx context.Context, quoteID uuid.UUID, after *int, limit int) ([]QuoteRevision, error)
+	// ReviseToDraft moves the quote to its next version as a draft, on the
+	// row the caller's transaction already locked.
+	ReviseToDraft(ctx context.Context, id uuid.UUID) error
+	// RevokeDealerShareLinks kills the quote's live dealer share links and
+	// answers how many; it rides the caller's transaction.
+	RevokeDealerShareLinks(ctx context.Context, id uuid.UUID, at time.Time) (int64, error)
 }
 
 type PostgresRepository struct {
@@ -437,7 +450,7 @@ func qtyPtrArg(q *httpx.Quantity) any {
 // summaryColumns and summaryFrom are the one header projection: a list item,
 // a partner list row, and the head of the full document all read it.
 const summaryColumns = `
-	q.id, q.number, q.branch_id, q.customer_id, COALESCE(c.name, ''), q.project_id, q.state::text, q.revision,
+	q.id, q.number, q.branch_id, q.customer_id, COALESCE(c.name, ''), q.project_id, q.state::text, q.revision, q.version_number,
 	ROUND(q.total_amount * 100)::bigint, ROUND(COALESCE(q.freight_amount, 0) * 100)::bigint,
 	ROUND(COALESCE(q.margin_total, 0) * 100)::bigint,
 	COALESCE(q.delivery_type, 'PICKUP'), q.vehicle_id, v.name, COALESCE(q.source, 'manual'),
@@ -457,7 +470,7 @@ func scanSummary(row pgx.Row, s *QuoteSummary, extra ...any) error {
 		created, updated                  time.Time
 	)
 	dest := append([]any{
-		&s.ID, &s.Number, &s.BranchID, &s.CustomerID, &s.CustomerName, &s.JobID, &status, &s.Revision,
+		&s.ID, &s.Number, &s.BranchID, &s.CustomerID, &s.CustomerName, &s.JobID, &status, &s.Revision, &s.VersionNumber,
 		&total, &freight, &margin,
 		&delivery, &s.VehicleID, &s.VehicleName, &s.Source,
 		&expires, &sent, &accepted, &rejected, &created, &updated,
@@ -1072,4 +1085,81 @@ func (r *PostgresRepository) SentQuotesPastExpiry(ctx context.Context, at time.T
 		ids = append(ids, id)
 	}
 	return ids, rows.Err()
+}
+
+// InsertRevision writes the version's snapshot row: the header and the lines
+// exactly as sent, encoded in the wire's integer units (the Quote's own JSON
+// is that encoding). A re-send of the same version adds nothing: the row
+// keeps the first send of that version, and the table's trigger refuses any
+// rewrite, so what the customer saw stands.
+func (r *PostgresRepository) InsertRevision(ctx context.Context, q *Quote, actor, reason string) error {
+	snapshot, err := json.Marshal(q)
+	if err != nil {
+		return fmt.Errorf("failed to encode the sent version's snapshot: %w", err)
+	}
+	if _, err := r.db.GetExecutor(ctx).Exec(ctx,
+		`INSERT INTO quote_revisions (quote_id, version_number, snapshot, created_by, reason)
+		VALUES ($1, $2, $3, $4, $5)
+		ON CONFLICT (quote_id, version_number) DO NOTHING`,
+		q.ID, q.VersionNumber, snapshot, actor, reason); err != nil {
+		return fmt.Errorf("failed to write the sent version's snapshot: %w", err)
+	}
+	return nil
+}
+
+// ListRevisions reads the quote's sent versions, newest first.
+func (r *PostgresRepository) ListRevisions(ctx context.Context, quoteID uuid.UUID, after *int, limit int) ([]QuoteRevision, error) {
+	rows, err := r.db.GetExecutor(ctx).Query(ctx,
+		`SELECT id, quote_id, version_number, snapshot, COALESCE(created_by, ''), created_at, COALESCE(reason, '')
+		FROM quote_revisions
+		WHERE quote_id = $1 AND ($2::int IS NULL OR version_number < $2)
+		ORDER BY version_number DESC LIMIT $3`, quoteID, after, limit)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list the quote's revisions: %w", err)
+	}
+	defer rows.Close()
+	out := []QuoteRevision{}
+	for rows.Next() {
+		var rev QuoteRevision
+		var created time.Time
+		if err := rows.Scan(&rev.ID, &rev.QuoteID, &rev.VersionNumber, &rev.Snapshot,
+			&rev.CreatedBy, &created, &rev.Reason); err != nil {
+			return nil, fmt.Errorf("failed to scan a quote revision: %w", err)
+		}
+		rev.CreatedAt = httpx.TimestampOf(created)
+		out = append(out, rev)
+	}
+	return out, rows.Err()
+}
+
+// ReviseToDraft takes the quote to its next version as a draft, clearing the
+// lifecycle stamps of the version it takes back so the next send stamps its
+// own. expires_at stays: an expired quote revised still needs a new Valid
+// before it sends (QE-01-a's rule). The caller's transaction holds the row
+// lock; the revision moves with the version, as on every write.
+func (r *PostgresRepository) ReviseToDraft(ctx context.Context, id uuid.UUID) error {
+	if _, err := r.db.GetExecutor(ctx).Exec(ctx,
+		`UPDATE quotes
+		SET state = 'DRAFT', sent_at = NULL, accepted_at = NULL, rejected_at = NULL,
+			version_number = version_number + 1,
+			revision = revision + 1, updated_at = NOW()
+		WHERE id = $1`, id); err != nil {
+		return fmt.Errorf("failed to revise the quote: %w", err)
+	}
+	return nil
+}
+
+// RevokeDealerShareLinks kills the quote's live dealer share links (the /dq/
+// token a contractor may hold). It writes pro_portal_share_tokens, the link
+// store the issue route owns, through the caller's executor so the revoke
+// rides the revise's transaction: a version taken back cannot be accepted
+// from a link, and a revise that rolls back leaves the link live.
+func (r *PostgresRepository) RevokeDealerShareLinks(ctx context.Context, id uuid.UUID, at time.Time) (int64, error) {
+	tag, err := r.db.GetExecutor(ctx).Exec(ctx,
+		`UPDATE pro_portal_share_tokens SET revoked_at = $2, revoked_reason = 'revised'
+		WHERE dealer_quote_id = $1 AND revoked_at IS NULL`, id, at)
+	if err != nil {
+		return 0, fmt.Errorf("failed to revoke the quote's share links: %w", err)
+	}
+	return tag.RowsAffected(), nil
 }
