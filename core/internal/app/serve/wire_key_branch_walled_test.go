@@ -584,6 +584,15 @@ func TestKeyBranchPin_WalledRowsHoldThePin(t *testing.T) {
 			}},
 		{method: "POST", path: "/api/v1/purchase-orders/%s/submit", twin: w.poB, own: w.poA},
 		{method: "POST", path: "/api/v1/quotes/%s/convert", body: fixed(`{}`), hdr: ifMatch, twin: f.quoteB, own: f.quoteA},
+		// The follow up write and the quote activity routes (QE-04-a): both
+		// act on the quote the path names, held to the pin through the quote's
+		// own customer like the convert; the activity list walls the same read
+		// the quote read carries.
+		{method: "PUT", path: "/api/v1/quotes/%s/follow-up", twin: f.quoteB, own: f.quoteA,
+			body: fixed(fmt.Sprintf(`{"follow_up_at":%q,"revision":1}`, time.Now().UTC().Add(24*time.Hour).Format(time.RFC3339)))},
+		{method: "GET", path: "/api/v1/quotes/%s/activities", twin: f.quoteB, own: f.quoteA},
+		{method: "POST", path: "/api/v1/quotes/%s/activities", twin: f.quoteB, own: f.quoteA,
+			body: fixed(`{"activity_type":"call","description":"pin call on the quote"}`)},
 		// The customer record, its children and its policy.
 		{method: "GET", path: "/api/v1/customers/%s", twin: f.custB, own: f.custID},
 		{method: "PUT", path: "/api/v1/customers/%s", body: customerPut, twin: f.custB, own: f.custID},

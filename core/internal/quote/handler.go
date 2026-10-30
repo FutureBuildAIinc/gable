@@ -11,7 +11,9 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/gablelbm/gable/internal/crm"
 	"github.com/gablelbm/gable/internal/platform/httpx"
+	"github.com/gablelbm/gable/pkg/middleware"
 	"github.com/google/uuid"
 )
 
@@ -32,11 +34,12 @@ func sanitizeFilename(name string) string {
 }
 
 type Handler struct {
-	service *Service
+	service    *Service
+	activities ActivityService
 }
 
 func NewHandler(service *Service) *Handler {
-	return &Handler{service: service}
+	return &Handler{service: service, activities: service.activities}
 }
 
 func (h *Handler) RegisterRoutes(mux *http.ServeMux, roleGuard ...func(http.Handler) http.Handler) {
@@ -53,8 +56,11 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux, roleGuard ...func(http.Hand
 	mux.HandleFunc("GET /api/v1/quotes/analytics", guard(h.HandleGetAnalytics))
 	mux.HandleFunc("GET /api/v1/quotes", guard(h.HandleListQuotes))
 	mux.HandleFunc("GET /api/v1/quotes/{id}", guard(h.HandleGetQuotePath))
+	mux.HandleFunc("GET /api/v1/quotes/{id}/activities", guard(h.HandleListQuoteActivities))
+	mux.HandleFunc("POST /api/v1/quotes/{id}/activities", guard(h.HandleCreateQuoteActivity))
 	mux.HandleFunc("GET /api/v1/quotes/{id}/file", guard(h.HandleDownloadOriginalFile))
 	mux.HandleFunc("PUT /api/v1/quotes/{id}/file", guard(h.HandleAttachFile))
+	mux.HandleFunc("PUT /api/v1/quotes/{id}/follow-up", guard(h.HandleSetFollowUp))
 	mux.HandleFunc("PUT /api/v1/quotes/{id}", guard(h.HandleUpdateQuote))
 	mux.HandleFunc("POST /api/v1/quotes/{id}/transitions", guard(h.HandleTransition))
 	mux.HandleFunc("POST /api/v1/quotes/{id}/convert", guard(h.HandleConvertToOrder))
@@ -135,10 +141,12 @@ func (h *Handler) HandleGetQuotePath(w http.ResponseWriter, r *http.Request) {
 }
 
 // parseListFilter reads the list's filters from the query. The allowed set is
-// the three platform names (cursor, limit, include) plus status and
-// customer_id (ADR 0001 section 5).
-func parseListFilter(r *http.Request) (f ListFilter, wantTotal bool, err error) {
-	q, err := httpx.StrictQuery(r, "cursor", "limit", "include", "status", "customer_id")
+// the three platform names (cursor, limit, include) plus status, customer_id
+// and follow_up (ADR 0001 section 5). follow_up=mine resolves the caller's
+// salesperson from the sign in's email; a caller with no sign in, or one no
+// salesperson row carries, owns no follow ups, so the page is empty.
+func (h *Handler) parseListFilter(r *http.Request) (f ListFilter, wantTotal bool, err error) {
+	q, err := httpx.StrictQuery(r, "cursor", "limit", "include", "status", "customer_id", "follow_up")
 	if err != nil {
 		return f, false, err
 	}
@@ -173,6 +181,15 @@ func parseListFilter(r *http.Request) (f ListFilter, wantTotal bool, err error) 
 			f.CustomerID = &id
 		}
 	}
+	if vals := q["follow_up"]; len(vals) > 0 {
+		if len(vals) > 1 {
+			v.Check(false, "follow_up", "parameter is repeated")
+		} else if kind, ok := ParseFollowUpKind(vals[0]); ok {
+			f.FollowUp = &kind
+		} else {
+			v.Check(false, "follow_up", "must be one of: "+strings.Join(followUpNames, ", "))
+		}
+	}
 	if vals := q["include"]; len(vals) > 0 {
 		if len(vals) > 1 {
 			v.Check(false, "include", "parameter is repeated")
@@ -186,6 +203,18 @@ func parseListFilter(r *http.Request) (f ListFilter, wantTotal bool, err error) 
 	}
 	if err := v.Err(); err != nil {
 		return f, false, err
+	}
+
+	if f.FollowUp != nil && *f.FollowUp == FollowUpMine {
+		email := ""
+		if claims := middleware.ClaimsFromContext(r.Context()); claims != nil {
+			email = claims.Email
+		}
+		owner, rerr := h.service.SalespersonByEmail(r.Context(), email)
+		if rerr != nil {
+			return f, false, rerr
+		}
+		f.MineOwner = owner
 	}
 
 	if page.Key != nil {
@@ -208,7 +237,7 @@ func cursorError() error {
 }
 
 func (h *Handler) HandleListQuotes(w http.ResponseWriter, r *http.Request) {
-	f, wantTotal, err := parseListFilter(r)
+	f, wantTotal, err := h.parseListFilter(r)
 	if err != nil {
 		httpx.WriteError(w, r, err)
 		return
@@ -427,4 +456,149 @@ func (h *Handler) HandleAttachFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeQuote(w, http.StatusOK, q)
+}
+
+// FollowUpRequest is the body of PUT /quotes/{id}/follow-up: the date to
+// chase the quote and the salesperson who owns the chase, both null (or the
+// date null) to clear. revision is the precondition beside If-Match.
+type FollowUpRequest struct {
+	FollowUpAt      json.RawMessage `json:"follow_up_at"`
+	FollowUpOwnerID *string         `json:"follow_up_owner_id"`
+	Revision        json.RawMessage `json:"revision"`
+}
+
+// HandleSetFollowUp sets or clears the quote's follow up on the client's
+// revision (QE-04-a). Clearing is the completed state: what happened is
+// logged as an activity, and the queue holds only quotes with a date.
+func (h *Handler) HandleSetFollowUp(w http.ResponseWriter, r *http.Request) {
+	if err := noQuery(r); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	id, err := pathID(r)
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	var req FollowUpRequest
+	if err := httpx.DecodeJSON(r, &req); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+
+	v := &httpx.Validator{}
+	at, _ := v.Timestamp("follow_up_at", req.FollowUpAt, false)
+	var owner *uuid.UUID
+	if id, ok := v.UUID("follow_up_owner_id", req.FollowUpOwnerID, false); ok {
+		owner = &id
+		v.Check(at != nil, "follow_up_owner_id",
+			"needs a follow up date: send follow_up_at too, or null both to clear")
+	}
+	var revision *int64
+	if n, ok := v.Int("revision", req.Revision, false); ok {
+		v.Check(n >= 1, "revision", "must be a revision number, 1 or more")
+		revision = &n
+	}
+	if err := v.Err(); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+
+	q, err := h.service.SetFollowUp(r.Context(), id, &FollowUpDraft{At: at, Owner: owner},
+		precondition(r, revision))
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	writeQuote(w, http.StatusOK, q)
+}
+
+// HandleListQuoteActivities lists the quote's activity feed: the quote is
+// resolved behind the branch wall first (a quote the caller cannot see is
+// the read's own 404), then the customer's activities are narrowed to it
+// with the same query validation the customer feed applies.
+func (h *Handler) HandleListQuoteActivities(w http.ResponseWriter, r *http.Request) {
+	if h.activities == nil {
+		httpx.WriteError(w, r, httpx.Unavailable("the activity service is not wired"))
+		return
+	}
+	id, err := pathID(r)
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	f, wantTotal, err := crm.ParseActivitiesQuery(r)
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	q, err := h.service.GetQuote(r.Context(), id)
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	f.QuoteID = &q.ID
+	items, hasMore, total, err := h.activities.List(r.Context(), q.CustomerID, f, wantTotal)
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	next := ""
+	if len(items) > 0 {
+		last := items[len(items)-1]
+		if next, err = crm.NextActivitiesCursor(hasMore, last.CreatedAt, last.ID); err != nil {
+			httpx.WriteError(w, r, err)
+			return
+		}
+	}
+	var opts []httpx.ListOption
+	if total != nil {
+		opts = append(opts, httpx.WithTotal(*total))
+	}
+	httpx.WriteList(w, items, next, f.Limit, opts...)
+}
+
+// HandleCreateQuoteActivity logs an activity on the quote: the quote is
+// resolved behind the branch wall first, then the activity is written
+// carrying the quote and the quote's customer, so it shows on the customer's
+// feed too. The quote is named by the path; a body quote_id is a 400 unknown
+// field, the same posture as the customer route's body customer_id.
+func (h *Handler) HandleCreateQuoteActivity(w http.ResponseWriter, r *http.Request) {
+	if h.activities == nil {
+		httpx.WriteError(w, r, httpx.Unavailable("the activity service is not wired"))
+		return
+	}
+	if err := noQuery(r); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	id, err := pathID(r)
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	var req crm.Request
+	if err := httpx.DecodeJSON(r, &req); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	draft, err := req.Parse(false)
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	q, err := h.service.GetQuote(r.Context(), id)
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	draft.QuoteID = &q.ID
+	a, err := h.activities.Create(r.Context(), q.CustomerID, draft)
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	w.Header().Set("Location", "/api/v1/activities/"+a.ID.String())
+	httpx.WriteRevisionETag(w, a.Revision)
+	writeJSON(w, http.StatusCreated, a)
 }

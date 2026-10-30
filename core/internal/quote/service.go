@@ -16,6 +16,7 @@ import (
 	"regexp"
 	"time"
 
+	"github.com/gablelbm/gable/internal/crm"
 	"github.com/gablelbm/gable/internal/order"
 	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/gablelbm/gable/internal/units"
@@ -89,10 +90,27 @@ type Service struct {
 	events      EventRecorder // optional; nil records nothing (unit tests)
 	tx          TxRunner      // optional; nil runs each method unwrapped (unit tests)
 	logger      *slog.Logger
-	branches    BranchGuard  // optional; nil leaves a payload branch unchecked (unit tests)
-	orders      OrderCreator // optional; nil refuses the convert (unit tests)
-	auditor     AuditSink    // optional; nil writes no audit row (unit tests)
+	branches    BranchGuard   // optional; nil leaves a payload branch unchecked (unit tests)
+	orders      OrderCreator  // optional; nil refuses the convert (unit tests)
+	auditor     AuditSink     // optional; nil writes no audit row (unit tests)
+	activities  ActivityService // optional; nil leaves the activity routes unwired (unit tests)
 	now         func() time.Time
+}
+
+// ActivityService is the crm module's seam for the quote activity routes
+// (QE-04-a): an activity logged on a quote carries the quote's customer, so
+// it shows on the customer's feed too, and the quote's own feed lists it.
+// *crm.Service satisfies it.
+type ActivityService interface {
+	Create(ctx context.Context, customerID uuid.UUID, d *crm.Draft) (*crm.Activity, error)
+	List(ctx context.Context, customerID uuid.UUID, f crm.ListFilter, wantTotal bool) ([]crm.Activity, bool, *int64, error)
+}
+
+// WithActivities wires the crm seam the quote activity routes serve through;
+// without it they answer 503 (serve always wires it).
+func (s *Service) WithActivities(a ActivityService) *Service {
+	s.activities = a
+	return s
 }
 
 // AuditSink writes the module's audit rows through the caller's executor.
@@ -604,6 +622,73 @@ func (s *Service) GetQuote(ctx context.Context, id uuid.UUID) (*Quote, error) {
 		return nil, err
 	}
 	return q, nil
+}
+
+// FollowUpDraft is a validated follow up write: when to chase the quote and
+// the salesperson who owns the chase. A nil At clears both fields.
+type FollowUpDraft struct {
+	At    *httpx.Timestamp
+	Owner *uuid.UUID
+}
+
+// SetFollowUp sets or clears the quote's follow up on the client's revision:
+// one transaction that locks the quote row, checks the revision after the
+// lock, writes the date and owner, and writes its audit row (ADR 0003
+// section 3: the audit rides the act's transaction). A nil date clears both
+// fields, which is what completing a follow up is: what happened is logged
+// as an activity on the quote, not kept as a state on it. Like the quote's
+// own update, the write carries no outbox event.
+func (s *Service) SetFollowUp(ctx context.Context, id uuid.UUID, d *FollowUpDraft, pre Precondition) (*Quote, error) {
+	if pre.missing() {
+		return nil, httpx.PreconditionRequired("this write needs If-Match or a body revision")
+	}
+	var out *Quote
+	err := s.inTx(ctx, func(ctx context.Context) error {
+		if err := s.repo.LockQuote(ctx, id); err != nil {
+			return notFound(err)
+		}
+		cur, err := s.repo.GetQuote(ctx, id)
+		if err != nil {
+			return notFound(err)
+		}
+		if err := s.checkQuoteBranch(ctx, cur); err != nil {
+			return err
+		}
+		if err := pre.check(cur.Revision); err != nil {
+			return err
+		}
+		if err := s.repo.SetFollowUp(ctx, id, d.At, d.Owner); err != nil {
+			return err
+		}
+		if out, err = s.repo.GetQuote(ctx, id); err != nil {
+			return err
+		}
+		if s.auditor != nil {
+			action := "quote.follow_up_cleared"
+			if d.At != nil {
+				action = "quote.follow_up_set"
+			}
+			return s.auditor.Log(ctx, audit.Entry{
+				Action:     action,
+				EntityType: "quote",
+				EntityID:   id,
+				Changes: map[string]any{
+					"follow_up_at": d.At, "follow_up_owner_id": d.Owner, "revision": out.Revision,
+				},
+			})
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// SalespersonByEmail resolves a signed in email to its salesperson row for
+// the list's follow_up=mine page.
+func (s *Service) SalespersonByEmail(ctx context.Context, email string) (*uuid.UUID, error) {
+	return s.repo.SalespersonByEmail(ctx, email)
 }
 
 // NumberPattern is the quote's document number pattern, from the entity's

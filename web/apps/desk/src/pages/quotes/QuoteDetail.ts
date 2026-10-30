@@ -14,6 +14,8 @@ import { formatCents, formatPrice4 } from '../../lib/utils.ts';
 import { extensionCents, dollarsToCents, floatDollarsToTenThousandths } from '../../lib/money.ts';
 import { formatDate, formatDateTime } from '../../lib/dates.ts';
 import '../../components/quotes/exposure-banner.ts';
+import '../../components/quotes/FollowUpCard.ts';
+import '../accounts/ActivityFeed.ts';
 
 /** How much of a text list the Original Upload tab shows. */
 const ORIGINAL_TEXT_LINES = 200;
@@ -332,6 +334,16 @@ export class GableQuoteDetail extends LitElement {
                     ${this.renderSummaryCard('Source', quote.source === 'ai' ? 'Material list' : 'Manual')}
                 </div>
 
+                <!-- Follow up: when to chase this quote and who owns the chase -->
+                <gable-follow-up-card
+                    .quote=${quote}
+                    @follow-up-changed=${(e: Event) => {
+                        const changed = (e as CustomEvent).detail?.quote as Quote | null | undefined;
+                        if (changed) this.quote = changed;
+                        else if (this.quote) void this.loadQuote(this.quote.id);
+                    }}
+                ></gable-follow-up-card>
+
                 <!-- Delivery Info -->
                 ${quote.delivery_type === 'delivery' ? html`
                     <div class="bg-blue-500/5 border border-blue-500/20 rounded-lg p-4 flex items-center gap-4">
@@ -437,6 +449,12 @@ export class GableQuoteDetail extends LitElement {
                         ` : nothing}
                     </table>
                 </div>
+
+                <!-- The quote's own activity feed: the calls and notes against this quote -->
+                <gable-activity-feed
+                    customer-id=${quote.customer_id}
+                    quote-id=${quote.id}
+                ></gable-activity-feed>
             </div>
         `;
     }

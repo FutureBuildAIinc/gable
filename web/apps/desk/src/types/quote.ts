@@ -21,6 +21,7 @@ export type QuoteRequest = Schemas['QuoteRequest'];
 export type QuoteLineRequest = Schemas['QuoteLineRequest'];
 export type QuoteUom = Schemas['QuoteUom'];
 export type QuoteTransitionRequest = Schemas['QuoteTransitionRequest'];
+export type QuoteFollowUpRequest = Schemas['QuoteFollowUpRequest'];
 export type QuotePage = Schemas['QuotePage'];
 export type QuoteAnalytics = Schemas['QuoteAnalytics'];
 export type QuoteAnalyticsTrend = Schemas['QuoteAnalyticsTrend'];

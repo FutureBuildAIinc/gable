@@ -73,6 +73,7 @@ function serve() {
           id: 'a-1',
           customer_id: CUSTOMER,
           contact_id: sent.contact_id ?? null,
+          quote_id: sent.quote_id ?? null,
           activity_type: sent.activity_type,
           description: sent.description,
           logged_by: null,

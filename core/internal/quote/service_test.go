@@ -153,6 +153,19 @@ func (f *fakeRepo) GetOriginalFile(context.Context, uuid.UUID) ([]byte, string, 
 	return nil, "", "", ErrNotFound
 }
 
+func (f *fakeRepo) SetFollowUp(_ context.Context, id uuid.UUID, at *httpx.Timestamp, owner *uuid.UUID) error {
+	q, ok := f.quotes[id]
+	if !ok {
+		return ErrNotFound
+	}
+	q.FollowUpAt, q.FollowUpOwnerID = at, owner
+	return nil
+}
+
+func (f *fakeRepo) SalespersonByEmail(context.Context, string) (*uuid.UUID, error) {
+	return nil, nil
+}
+
 // seed stores a quote directly, bypassing Create.
 func (f *fakeRepo) seed(status QuoteState, lines ...QuoteLine) *Quote {
 	q := &Quote{Lines: lines}

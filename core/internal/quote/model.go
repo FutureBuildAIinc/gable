@@ -92,6 +92,12 @@ type QuoteSummary struct {
 	VehicleName  *string      `json:"vehicle_name"`
 	Source       string       `json:"source"` // "manual" or "ai" (the portal writes "portal")
 
+	// The follow up a salesperson parked on the quote (QE-04-a): when to
+	// chase it and who owns the chase. Null when no follow up stands.
+	FollowUpAt        *httpx.Timestamp `json:"follow_up_at"`
+	FollowUpOwnerID   *uuid.UUID       `json:"follow_up_owner_id"`
+	FollowUpOwnerName *string          `json:"follow_up_owner_name"`
+
 	ExpiresAt  *httpx.Timestamp `json:"expires_at"`
 	SentAt     *httpx.Timestamp `json:"sent_at"`
 	AcceptedAt *httpx.Timestamp `json:"accepted_at"`

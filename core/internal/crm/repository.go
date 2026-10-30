@@ -20,12 +20,15 @@ import (
 
 // ListFilter is the list's filters beside the platform's cursor and limit.
 // Every filter filters; anything else is refused by the strict query guard.
+// QuoteID narrows a customer's feed to one quote's activities (the quote
+// module's activity route sets it).
 type ListFilter struct {
 	Limit     int
 	AfterTime *time.Time
 	AfterID   uuid.UUID
 	Type      *ActivityType
 	ContactID *uuid.UUID
+	QuoteID   *uuid.UUID
 }
 
 // Repository is the activity store. Every statement goes through the
@@ -60,7 +63,7 @@ func NewRepository(db *database.DB) *PostgresRepository {
 	return &PostgresRepository{db: db}
 }
 
-const columns = `a.id, a.customer_id, a.contact_id, a.activity_type, a.description,
+const columns = `a.id, a.customer_id, a.contact_id, a.quote_id, a.activity_type, a.description,
 	a.logged_by, a.activity_date, a.revision, a.created_at, a.updated_at`
 
 // wall is the branch wall through the activity's customer: a caller held to
@@ -83,7 +86,7 @@ func scanOne(row pgx.Row) (*Activity, error) {
 		a                      Activity
 		created, updated, when time.Time
 	)
-	err := row.Scan(&a.ID, &a.CustomerID, &a.ContactID, &a.ActivityType, &a.Description,
+	err := row.Scan(&a.ID, &a.CustomerID, &a.ContactID, &a.QuoteID, &a.ActivityType, &a.Description,
 		&a.LoggedBy, &when, &a.Revision, &created, &updated)
 	if err != nil {
 		return nil, err
@@ -106,6 +109,10 @@ func filterConds(ctx context.Context, customerID uuid.UUID, f ListFilter, args *
 	if f.ContactID != nil {
 		*args = append(*args, *f.ContactID)
 		conds = append(conds, fmt.Sprintf(`a.contact_id = $%d`, len(*args)))
+	}
+	if f.QuoteID != nil {
+		*args = append(*args, *f.QuoteID)
+		conds = append(conds, fmt.Sprintf(`a.quote_id = $%d`, len(*args)))
 	}
 	return conds
 }
@@ -173,6 +180,7 @@ func (r *PostgresRepository) Get(ctx context.Context, id uuid.UUID) (*Activity, 
 var referenceFields = map[string]string{
 	"crm_activities_customer_id_fkey": "customer_id",
 	"crm_activities_contact_id_fkey":  "contact_id",
+	"crm_activities_quote_id_fkey":    "quote_id",
 }
 
 func mapWriteError(err error, what string) error {
@@ -189,9 +197,9 @@ func mapWriteError(err error, what string) error {
 
 func (r *PostgresRepository) Create(ctx context.Context, a *Activity) error {
 	_, err := r.db.GetExecutor(ctx).Exec(ctx, `
-		INSERT INTO crm_activities (id, customer_id, contact_id, activity_type, description, logged_by, activity_date, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), NOW())`,
-		a.ID, a.CustomerID, a.ContactID, a.ActivityType, a.Description, a.LoggedBy, a.ActivityDate.Time)
+		INSERT INTO crm_activities (id, customer_id, contact_id, quote_id, activity_type, description, logged_by, activity_date, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW(), NOW())`,
+		a.ID, a.CustomerID, a.ContactID, a.QuoteID, a.ActivityType, a.Description, a.LoggedBy, a.ActivityDate.Time)
 	if err != nil {
 		return mapWriteError(err, "failed to create activity")
 	}

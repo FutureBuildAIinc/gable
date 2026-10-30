@@ -27,13 +27,15 @@ function parseTime(text: string): string | null {
 import '../ui/gable-date-field.ts';
 import type { GableDateField } from '../ui/gable-date-field.ts';
 
-const ACTIVITY_TYPES: ActivityType[] = ['call', 'meeting', 'email', 'note'];
+const ACTIVITY_TYPES: ActivityType[] = ['call', 'meeting', 'email', 'note', 'follow_up'];
 
 @customElement('gable-log-activity-modal')
 export class GableLogActivityModal extends LitElement {
   createRenderRoot() { return this; }
 
   @property({ type: String, attribute: 'customer-id' }) customerId = '';
+  /** When set, the activity is logged on the quote instead of the customer. */
+  @property({ type: String, attribute: 'quote-id' }) quoteId = '';
   @property({ type: Array }) contacts: Contact[] = [];
 
   @state() private _loading = false;
@@ -63,7 +65,13 @@ export class GableLogActivityModal extends LitElement {
         activity_date: new Date(`${this._activityDay}T${time}:00`).toISOString(),
         contact_id: this._contactId === '' ? undefined : this._contactId,
       };
-      await crmApi.createActivity(this.customerId, payload);
+      // A quote's activity carries the quote's customer too, so it shows on
+      // the customer's feed as well.
+      if (this.quoteId) {
+        await crmApi.createQuoteActivity(this.quoteId, payload);
+      } else {
+        await crmApi.createActivity(this.customerId, payload);
+      }
       this.dispatchEvent(new CustomEvent('success', { bubbles: true, composed: true }));
     } catch (err: unknown) {
       ToastService.show(err instanceof Error ? err.message : 'Failed to log activity', 'error');
@@ -90,7 +98,7 @@ export class GableLogActivityModal extends LitElement {
           <form @submit=${this._handleSubmit} class="px-6 py-4">
             <div class="mb-4">
               <label class="block text-sm font-medium text-zinc-300 mb-1">Activity Type</label>
-              <div class="grid grid-cols-4 gap-2">
+              <div class="grid grid-cols-2 md:grid-cols-5 gap-2">
                 ${ACTIVITY_TYPES.map(type => html`
                   <button
                     type="button"

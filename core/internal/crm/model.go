@@ -9,24 +9,26 @@ import (
 )
 
 // ActivityType is the closed vocabulary of a logged activity. The storage
-// vocabulary is uppercase (CALL, MEETING, EMAIL, NOTE); the wire vocabulary
-// is lowercase snake_case and the mapping happens here, at the boundary
-// (ADR 0001 section 6).
+// vocabulary is uppercase (CALL, MEETING, EMAIL, NOTE, FOLLOW_UP); the wire
+// vocabulary is lowercase snake_case and the mapping happens here, at the
+// boundary (ADR 0001 section 6).
 type ActivityType string
 
 const (
-	ActivityCall    ActivityType = "CALL"
-	ActivityMeeting ActivityType = "MEETING"
-	ActivityEmail   ActivityType = "EMAIL"
-	ActivityNote    ActivityType = "NOTE"
+	ActivityCall     ActivityType = "CALL"
+	ActivityMeeting  ActivityType = "MEETING"
+	ActivityEmail    ActivityType = "EMAIL"
+	ActivityNote     ActivityType = "NOTE"
+	ActivityFollowUp ActivityType = "FOLLOW_UP"
 )
 
 // wireNames maps the storage vocabulary onto the wire's lowercase spelling.
 var wireNames = map[ActivityType]string{
-	ActivityCall:    "call",
-	ActivityMeeting: "meeting",
-	ActivityEmail:   "email",
-	ActivityNote:    "note",
+	ActivityCall:     "call",
+	ActivityMeeting:  "meeting",
+	ActivityEmail:    "email",
+	ActivityNote:     "note",
+	ActivityFollowUp: "follow_up",
 }
 
 // MarshalText writes the lowercase wire spelling. A value outside the four
@@ -54,17 +56,18 @@ func ParseActivityType(s string) (ActivityType, bool) {
 
 // ActivityTypeNames lists the wire vocabulary, for error messages.
 func ActivityTypeNames() []string {
-	return []string{"call", "meeting", "email", "note"}
+	return []string{"call", "meeting", "email", "note", "follow_up"}
 }
 
 // Activity is one logged customer activity, the wire shape of
-// /api/v1/activities and /api/v1/customers/{id}/activities. Optional fields
-// are pointers without omitempty, so they serialize as null (ADR 0001
-// section 12).
+// /api/v1/activities, /api/v1/customers/{id}/activities and
+// /api/v1/quotes/{id}/activities. Optional fields are pointers without
+// omitempty, so they serialize as null (ADR 0001 section 12).
 type Activity struct {
 	ID           uuid.UUID       `json:"id"`
 	CustomerID   uuid.UUID       `json:"customer_id"`
 	ContactID    *uuid.UUID      `json:"contact_id"`
+	QuoteID      *uuid.UUID      `json:"quote_id"`
 	ActivityType ActivityType    `json:"activity_type"`
 	Description  string          `json:"description"`
 	LoggedBy     *uuid.UUID      `json:"logged_by"`

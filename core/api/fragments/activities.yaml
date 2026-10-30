@@ -33,7 +33,7 @@ paths:
           description: One lowercase activity type.
           schema:
             type: string
-            enum: [call, meeting, email, note]
+            enum: [call, meeting, email, note, follow_up]
         - name: contact_id
           in: query
           required: false
@@ -252,17 +252,20 @@ components:
     ActivityType:
       type: string
       description: Lowercase on the wire (ADR 0001 section 6); the storage vocabulary stays uppercase.
-      enum: [call, meeting, email, note]
+      enum: [call, meeting, email, note, follow_up]
     Activity:
       type: object
       description: >-
         One logged activity. Optional fields are present as null, never
         omitted. The response is the stored row: every field reads back its
-        own value.
+        own value. quote_id names the quote the activity belongs to (the
+        quote module's activity route sets it); it is null on an activity
+        logged straight onto the customer.
       required:
         - id
         - customer_id
         - contact_id
+        - quote_id
         - activity_type
         - description
         - logged_by
@@ -280,6 +283,10 @@ components:
         contact_id:
           type: [string, "null"]
           format: uuid
+        quote_id:
+          type: [string, "null"]
+          format: uuid
+          description: The quote this activity belongs to, null when it was logged on the customer alone.
         activity_type:
           $ref: "#/components/schemas/ActivityType"
         description:
@@ -305,7 +312,9 @@ components:
       description: >-
         The body of the create and the update. Every field problem is
         collected into one 400 with a details entry per field; an unknown
-        field is refused.
+        field is refused. quote_id is not a body field: the quote's own
+        activity route names the quote in its path, so a body quote_id is a
+        400 unknown field on both routes.
       required: [activity_type, description]
       properties:
         contact_id:

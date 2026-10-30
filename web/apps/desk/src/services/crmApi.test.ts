@@ -24,6 +24,7 @@ const ACTIVITY: Activity = {
   id: 'a-1',
   customer_id: 'c-1',
   contact_id: null,
+  quote_id: null,
   activity_type: 'call',
   description: 'rang',
   logged_by: null,

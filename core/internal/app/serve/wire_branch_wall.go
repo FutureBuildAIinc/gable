@@ -186,13 +186,16 @@ func (w *branchWall) scheduling(mux *http.ServeMux, h *scheduling.Handler) {
 // the job's customer (round 11 P1-1). The conversion rechecks the quote's own
 // customer under the same wall (round 11 P2-1): a quote moved onto another
 // branch's customer by a caller who may must not become an order at the pin's
-// branch.
+// branch. The follow up write and the quote activity create (QE-04-a) are
+// held the same way, through the quote's own customer.
 func (w *branchWall) quotes(mux *http.ServeMux, svc *quote.Service) {
 	quote.NewHandler(svc.WithBranchGuard(w.guard)).RegisterRoutes(mux,
 		w.patternWall(
 			w.bodyDocumentCustomer(w.scoped("admin", "owner", "sales"), "POST /api/v1/quotes", "PUT /api/v1/quotes/{id}"),
 			w.keyWall.CustomerBranch(quoteRowCustomerOf(w.db)),
-			"POST /api/v1/quotes/{id}/convert"))
+			"POST /api/v1/quotes/{id}/convert",
+			"PUT /api/v1/quotes/{id}/follow-up",
+			"POST /api/v1/quotes/{id}/activities"))
 }
 
 // orders mounts the order routes: the create takes branch_id from its body,

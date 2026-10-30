@@ -583,6 +583,8 @@ GET	/api/v1/quotes/analytics	internal/quote	h.HandleGetAnalytics
 GET	/api/v1/quotes/exposure	internal/pricing	h.HandleListExposure
 GET	/api/v1/quotes/{id}	internal/quote	h.HandleGetQuotePath
 PUT	/api/v1/quotes/{id}	internal/quote	h.HandleUpdateQuote
+GET	/api/v1/quotes/{id}/activities	internal/quote	h.HandleListQuoteActivities
+POST	/api/v1/quotes/{id}/activities	internal/quote	h.HandleCreateQuoteActivity
 POST	/api/v1/quotes/{id}/convert	internal/quote	h.HandleConvertToOrder
 POST	/api/v1/quotes/{id}/email	internal/document	h.HandleEmailQuote
 GET	/api/v1/quotes/{id}/exposure	internal/pricing	h.HandleGetQuoteExposure
@@ -592,6 +594,7 @@ POST	/api/v1/quotes/{id}/exposure/override	internal/pricing	h.HandleOverride
 POST	/api/v1/quotes/{id}/exposure/request-ack	internal/pricing	h.HandleRequestAck
 GET	/api/v1/quotes/{id}/file	internal/quote	h.HandleDownloadOriginalFile
 PUT	/api/v1/quotes/{id}/file	internal/quote	h.HandleAttachFile
+PUT	/api/v1/quotes/{id}/follow-up	internal/quote	h.HandleSetFollowUp
 POST	/api/v1/quotes/{id}/share-link	internal/customerquote	h.ShareLink
 POST	/api/v1/quotes/{id}/transitions	internal/quote	h.HandleTransition
 POST	/api/v1/reporting/builder/export	internal/reporting	h.HandleBuilderExport

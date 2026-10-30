@@ -30,9 +30,12 @@ type Request struct {
 	Revision     json.RawMessage `json:"revision"`
 }
 
-// Draft is a validated request.
+// Draft is a validated request. QuoteID is set by an in process caller (the
+// quote module's activity route names the quote in its path); no JSON body
+// carries it, so a body quote_id stays a 400 unknown field on both routes.
 type Draft struct {
 	ContactID    *uuid.UUID
+	QuoteID      *uuid.UUID
 	ActivityType ActivityType
 	Description  string
 	LoggedBy     *uuid.UUID
