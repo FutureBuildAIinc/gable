@@ -83,6 +83,14 @@ services:
       # hardware. Unset it to run without a scale (the manual weight entry
       # with its reason remains). Never set it on a reachable host.
       POS_SCALE_SIMULATOR: ${POS_SCALE_SIMULATOR:-1}
+      # The counter's card terminal (CP-05): on this local stack the simulated
+      # terminal approves, so a card sale runs with no machine and the counter
+      # says no card is charged. Set POS_TERMINAL_SIMULATOR to an empty value
+      # to run with no card terminal (the counter then refuses a card), or
+      # POS_TERMINAL=run with it empty for the Run terminal. Never set it on a
+      # reachable host.
+      POS_TERMINAL: ${POS_TERMINAL:-}
+      POS_TERMINAL_SIMULATOR: ${POS_TERMINAL_SIMULATOR-approve}
     depends_on:
       migrate:
         condition: service_completed_successfully
