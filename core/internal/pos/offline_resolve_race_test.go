@@ -65,6 +65,7 @@ func TestOfflineResolve_TwoManagersAndAReplay(t *testing.T) {
 	offlinePolicyOn(t, f)
 	for round := 0; round < 4; round++ {
 		b := newOfflineBench(t, f, "REG-OXR-"+uuid.NewString()[:8])
+		mustExec(t, f.db, `UPDATE inventory SET quantity = 100 WHERE product_id = $1`, f.productID)
 		raw, sale := b.build(t, saleSpec{lines: []offlineLine{line(f.productID, "101")}})
 		id := *wantOutcome(t, b.sync(t, raw), sale, pos.OfflineRefused, "insufficient_stock").ExceptionID
 		mustExec(t, f.db, `UPDATE inventory SET quantity = quantity + 101 WHERE product_id = $1`, f.productID)
@@ -191,6 +192,7 @@ func TestOfflineResolve_TheCloseBesideAResolutionAndAnExceptionWrite(t *testing.
 	f.allowAnyVariance()
 	for round := 0; round < 4; round++ {
 		b := newOfflineBench(t, f, "REG-OXC-"+uuid.NewString()[:8])
+		mustExec(t, f.db, `UPDATE inventory SET quantity = 100 WHERE product_id = $1`, f.productID)
 		rawA, saleA := b.build(t, saleSpec{lines: []offlineLine{line(f.productID, "500")}})
 		idA := *wantOutcome(t, b.sync(t, rawA), saleA, pos.OfflineRefused, "insufficient_stock").ExceptionID
 		mustExec(t, f.db, `UPDATE inventory SET quantity = quantity + 500 WHERE product_id = $1`, f.productID)

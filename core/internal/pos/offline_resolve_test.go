@@ -489,3 +489,50 @@ func TestOfflineResolve_TheAccountRoomCountsOnlyOpenRows(t *testing.T) {
 	mustExec(t, f.db, `UPDATE inventory SET quantity = 100 WHERE product_id = $1`, f.productID)
 	wantPosted(t, f, mustResolve(t, f, idB, pos.ResolveRetry), sB)
 }
+
+// RULE (ADR 0011 3.4, the chain): a held item above another held one is
+// refused offline_gap_order and changes nothing; accepting the lower one
+// re-offers both in order.
+func TestOfflineResolve_HeldItemsResolveFromTheLowest(t *testing.T) {
+	f := newFixture(t, testutil.RequireDB(t))
+	offlinePolicyOn(t, f)
+	b := newOfflineBench(t, f)
+	_, _ = b.build(t, saleSpec{lines: []offlineLine{line(f.productID, "1")}})
+	r2, s2 := b.build(t, saleSpec{lines: []offlineLine{line(f.productID, "1")}})
+	r3, s3 := b.build(t, saleSpec{lines: []offlineLine{line(f.productID, "1")}})
+	res := b.sync(t, r2, r3)
+	low := *wantOutcome(t, res, s2, pos.OfflineHeld, "broken_chain").ExceptionID
+	high := *wantOutcome(t, res, s3, pos.OfflineHeld, "broken_chain").ExceptionID
+	_, err := resolveAs(t, f, high, pos.ResolveAccept, offlineManager)
+	wantRefused(t, err, "offline_gap_order")
+	if seq, _ := b.deviceMark(t); seq != 0 {
+		t.Fatalf("the refused accept moved the mark to %d", seq)
+	}
+	mustResolve(t, f, low, pos.ResolveAccept)
+	if got := b.exceptions(t); len(got) != 3 || got[1] != "2:broken_chain/relinked" || got[2] != "3:broken_chain/relinked" {
+		t.Errorf("rows = %v, want the gap and both held rows relinked", got)
+	}
+}
+
+// RULE (ADR 0011 3.4 "Late post"): with no open business date from the
+// sale's day to today the late post is refused no_open_date and writes
+// nothing.
+func TestOfflineResolve_ALatePostNeedsAnOpenDate(t *testing.T) {
+	f := newFixture(t, testutil.RequireDB(t))
+	offlinePolicyOn(t, f)
+	b := newOfflineBench(t, f)
+	t.Cleanup(func() {
+		_, _ = f.db.Pool.Exec(context.Background(), `DELETE FROM till_day_closes WHERE branch_id = $1`, f.branchID)
+	})
+	raw, sale := b.build(t, saleSpec{lines: []offlineLine{line(f.productID, "1")}})
+	mustExec(t, f.db, `INSERT INTO till_day_closes (branch_id, business_date, deposit_slip_ref, closed_by,
+		cash_to_deposit_cents, checks_to_deposit_cents, card_total_cents, totals)
+		VALUES ($1, $2::date, 'slip', 'test', 0, 0, 0, '{}'::jsonb)`, f.branchID, b.snap.TillSession.BusinessDate)
+	id := *wantOutcome(t, b.sync(t, raw), sale, pos.OfflineRefused, "day_closed").ExceptionID
+	_, err := resolveAs(t, f, id, pos.ResolveLatePost, offlineManager)
+	wantRefused(t, err, "no_open_date")
+	if st, _, _ := exceptionState(t, f, id); st != "open" {
+		t.Errorf("the refused late post left the row %s", st)
+	}
+	wantNothingPosted(t, f, sale)
+}
