@@ -28,6 +28,16 @@ type Request struct {
 	// On is the branch's business date the cost side reads at; zero takes
 	// the engine's now.
 	On time.Time
+	// SkipRules skips rung 2 (promotions, quantity breaks and job prices)
+	// and leaves every other rung as it stands: the offline price sheet's
+	// answer (ADR 0011 section 5.4). The live path never sets it.
+	SkipRules bool
+	// Level, with no customer named, answers the level's own resolution:
+	// its category rules, then its price, then the branch base, then the
+	// base, never an account's contract or rules. It is the offline sheet's
+	// fallback row for an account the sheet carries no row of its own for
+	// (ADR 0011 section 5.4). The live path never sets it.
+	Level *PricingProgram
 }
 
 // Resolved is the engine's answer: the price and its unit, the line's
@@ -79,6 +89,9 @@ type resolveAnswer struct {
 func (s *Service) Resolve(ctx context.Context, req Request) (Resolved, error) {
 	if s == nil || s.resolveRepo == nil {
 		return Resolved{}, fmt.Errorf("pricing resolve repository is not wired")
+	}
+	if req.Level != nil && req.CustomerID != uuid.Nil {
+		return Resolved{}, fmt.Errorf("a request names a customer or a level, never both")
 	}
 	facts, err := s.resolveRepo.ProductPricingFacts(ctx, req.ProductID)
 	if err != nil {
@@ -156,9 +169,12 @@ func (s *Service) Resolve(ctx context.Context, req Request) (Resolved, error) {
 	// Rung 2: the pricing rules (job override, promotional, quantity break),
 	// by today's selectRule. A fixed price is in its own unit; a percent off
 	// or a markup acts on the reference price, in the reference's unit.
-	rules, err := s.repo.GetMatchingRules(ctx, req.ProductID, custID, req.JobID, stockQty)
-	if err != nil {
-		rules = nil
+	var rules []PricingRule
+	if !req.SkipRules {
+		rules, err = s.repo.GetMatchingRules(ctx, req.ProductID, custID, req.JobID, stockQty)
+		if err != nil {
+			rules = nil
+		}
 	}
 	// The tie among same band quantity break rules compares exact rationals
 	// per stocking unit (ADR 0006 section 5.3): two fixed prices may sit in
@@ -189,9 +205,10 @@ func (s *Service) Resolve(ctx context.Context, req Request) (Resolved, error) {
 	}
 
 	// Rung 3: the category rules, account, then the profile's, then the
-	// level's, each exact category then ancestor.
-	if custID != nil {
-		program, err := s.resolveRepo.CustomerProgram(ctx, *custID)
+	// level's, each exact category then ancestor. A level's own resolution
+	// names no account and no profile, so only the level's rules match.
+	if custID != nil || req.Level != nil {
+		program, err := s.programOf(ctx, req, custID)
 		if err != nil {
 			return Resolved{}, err
 		}
@@ -209,8 +226,8 @@ func (s *Service) Resolve(ctx context.Context, req Request) (Resolved, error) {
 	// Rung 4: the customer's level, explicit then derived. Rungs 5 and 6
 	// fall through when the customer is anonymous, when its profile or level
 	// is inactive, and when a cost basis has no cost to read.
-	if custID != nil {
-		program, err := s.resolveRepo.CustomerProgram(ctx, *custID)
+	if custID != nil || req.Level != nil {
+		program, err := s.programOf(ctx, req, custID)
 		if err != nil {
 			return Resolved{}, err
 		}
@@ -243,6 +260,28 @@ func (s *Service) Resolve(ctx context.Context, req Request) (Resolved, error) {
 		basis:   SourceBase,
 		details: "Base Retail Price",
 	})
+}
+
+// programOf is the pricing program rungs 3 and 4 read: the customer's own,
+// or, for a level's own resolution, the level with no account and no
+// profile, so no account or profile rule can match.
+func (s *Service) programOf(ctx context.Context, req Request, custID *uuid.UUID) (*PricingProgram, error) {
+	if req.Level != nil {
+		p := *req.Level
+		p.ProfileID = uuid.Nil
+		return &p, nil
+	}
+	return s.resolveRepo.CustomerProgram(ctx, *custID)
+}
+
+// CustomerProgram is the customer's pricing program (its profile and
+// level), nil when it holds none: the offline sheet keys an account's
+// fallback rows by its level.
+func (s *Service) CustomerProgram(ctx context.Context, customerID uuid.UUID) (*PricingProgram, error) {
+	if s == nil || s.resolveRepo == nil {
+		return nil, fmt.Errorf("pricing resolve repository is not wired")
+	}
+	return s.resolveRepo.CustomerProgram(ctx, customerID)
 }
 
 // categoryAnswer runs the category rung: account, then profile, then level,
