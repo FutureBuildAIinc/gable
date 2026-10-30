@@ -18,7 +18,7 @@ import { CustomerService } from '../../services/CustomerService';
 import type { ShipTo } from '../../types/customer';
 import {
   chargeRefusal, standingOf, money, PO_REFUSAL, JOB_REFUSAL, verdictLine, waysForward, wayLabel, buyerRefusal, checkRefusal,
-  storeCreditOffer, tenderMethods, idRefusal, idRequired, idRequiredWords, holdStanding, cardRefusal, cardSimulatorNote, type CheckIDRule,
+  storeCreditOffer, tenderMethods, idRefusal, idRequired, idRequiredWords, holdStanding, cardRefusal, cardRefundRefusal, cardSimulatorNote, type CheckIDRule,
 } from './standing';
 import { differenceOf, exchangeTotals, reasonLabel, returnRefusal } from './exchange';
 import { signatureRefusal, sealedWords } from './signatureLogic';
@@ -1136,6 +1136,11 @@ export class POSTerminal extends LitElement {
   /** Why Card is not offered, or null when it is: the register has no card terminal (CP-05 A1). */
   private get _cardRefusal(): string | null {
     return cardRefusal(this._register);
+  }
+
+  /** The same, in a refund's words, for the return dialog (CP-05 round 3 P3-C). */
+  private get _cardRefundRefusal(): string | null {
+    return cardRefundRefusal(this._register);
   }
 
   /** Why the charge to the account is not offered, or null when it is. */
@@ -3050,8 +3055,8 @@ export class POSTerminal extends LitElement {
             <gable-select .value=${this._returnMethod}
               .options=${[
                 { value: 'cash', label: 'Cash (out of the drawer)' },
-                this._cardRefusal !== null
-                  ? { value: 'card', label: `Card (${this._cardRefusal})`, disabled: true }
+                this._cardRefundRefusal !== null
+                  ? { value: 'card', label: `Card (${this._cardRefundRefusal})`, disabled: true }
                   : { value: 'card', label: 'Card (back on the card)' },
                 { value: 'account', label: 'Account credit' },
               ]}

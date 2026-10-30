@@ -510,7 +510,8 @@ describe('returns: the reason on each line, the note, the fee', () => {
     await el.updateComplete;
     const card = refund().options.find((o) => o.value === 'card')!;
     expect(card.disabled).toBe(true);
-    expect(card.label).toContain('This register has no card terminal: take cash, check or the account');
+    // a refund's words, not the sale's (CP-05 round 3 P3-C)
+    expect(card.label).toBe('Card (This register has no card terminal: give it back in cash or as account credit)');
     expect(refund().options.find((o) => o.value === 'cash')?.disabled).toBeFalsy();
     el.remove();
   });

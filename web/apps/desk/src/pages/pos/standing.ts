@@ -170,6 +170,14 @@ export function cardRefusal(register: CounterRegister | null): string | null {
     return register?.card_terminal === 'none' ? NO_CARD_TERMINAL : null;
 }
 
+/** The same refusal in a refund's words, beside the return dialog's Card (CP-05 round 3 P3-C). */
+export const NO_CARD_TERMINAL_REFUND = 'This register has no card terminal: give it back in cash or as account credit';
+
+/** Why a refund back on the card is not offered at the register, or null when it is. */
+export function cardRefundRefusal(register: CounterRegister | null): string | null {
+    return register?.card_terminal === 'none' ? NO_CARD_TERMINAL_REFUND : null;
+}
+
 /** The counter's plain words beside Card at a register whose card terminal is the simulator (CP-05 round 2). */
 export const SIMULATED_CARD_TERMINAL = 'Simulated card terminal: no card is charged';
 
