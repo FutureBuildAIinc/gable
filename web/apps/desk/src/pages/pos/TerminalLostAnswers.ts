@@ -12,8 +12,9 @@ import { customElement, state } from 'lit/decorators.js';
 import { posService } from '../../services/POSService';
 import type { TerminalLostItem, TerminalSweepResult } from '../../types/pos';
 import { lostKindWords, lateWords, needsReference } from './terminal';
+import { formatCents } from '../../lib/utils.ts';
 
-const fmt = (cents: number) => `$${(cents / 100).toFixed(2)}`;
+const fmt = formatCents;
 
 @customElement('gable-terminal-lost-answers')
 export class TerminalLostAnswers extends LitElement {

@@ -89,6 +89,29 @@ pub mod commands {
         .map_err(|_| shell::ERR_CUSTODY.to_string())?
     }
 
+    /// Signs the register in by email and password: one POST to the core's
+    /// shell door, and the pair goes to the keychain. Answers nothing (no
+    /// token crosses back) or a fixed code. The password is wrapped in a
+    /// wiping holder the moment it arrives and is dropped when the call
+    /// ends; it is never stored, logged or put in an error. On a blocking
+    /// thread, and only for the app's own origins.
+    #[tauri::command]
+    pub async fn sign_in_with_password(
+        window: tauri::WebviewWindow,
+        state: tauri::State<'_, TokenState>,
+        email: String,
+        password: String,
+    ) -> Result<(), String> {
+        let password = gable_shell_core::signin::Zeroizing::new(password);
+        let url = window.url().map_err(|_| shell::ERR_ORIGIN.to_string())?;
+        let state = state.inner().clone();
+        tauri::async_runtime::spawn_blocking(move || {
+            shell::sign_in_with_password_answer(&state, url.as_str(), &email, password)
+        })
+        .await
+        .map_err(|_| shell::ERR_CUSTODY.to_string())?
+    }
+
     #[tauri::command]
     pub async fn offline_enrolment_status(
         window: tauri::WebviewWindow,
@@ -253,25 +276,28 @@ pub mod commands {
 }
 
 /// The work shell's token state over the shared `custody` (the offline
-/// counter reads the same keychain entry). Names the Gable server when a URL
-/// is set, so the shell can sign in and rotate the token it holds.
+/// counter reads the same keychain entry), with the Gable URL it resolved:
+/// the enrolled device's URL, else `url_var`'s. Names the Gable server when a
+/// URL is set, so the shell can sign in and rotate the token it holds. The
+/// URL is resolved here, so no caller can build the state without it.
 fn token_state(
     custody: Arc<dyn custody::Custody>,
     profile: &'static profiles::Profile,
-    override_url: Option<&Url>,
-) -> Result<TokenState, BadOrigin> {
-    let state = TokenState::build(TokenStore::new(custody), profile, override_url)?;
-    Ok(match override_url {
+    url_var: &str,
+) -> Result<(TokenState, Option<Url>), BadOrigin> {
+    let url = shell::enrolled_or_configured_url(&*custody, profile, url_var);
+    let state = TokenState::build(TokenStore::new(custody), profile, url.as_ref())?;
+    let state = match &url {
         Some(url) => state.with_server(url, Arc::new(UreqTransport::new())),
         None => state,
-    })
+    };
+    Ok((state, url))
 }
 
 pub fn run() {
     let profile = profiles::work();
     let custody: Arc<dyn custody::Custody> = Arc::from(custody::platform_custody());
-    let override_url = shell::enrolled_or_configured_url(&*custody, profile, URL_VAR);
-    let state = token_state(custody.clone(), profile, override_url.as_ref())
+    let (state, override_url) = token_state(custody.clone(), profile, URL_VAR)
         .expect("the app's own origins build a fence");
 
     tauri::Builder::default()
@@ -281,6 +307,7 @@ pub fn run() {
             commands::clear_tokens,
             commands::begin_sign_in,
             commands::refresh_tokens,
+            commands::sign_in_with_password,
             commands::offline_enrolment_status,
             commands::load_offline_snapshot,
             commands::sign_and_queue_offline_sale,
@@ -358,15 +385,37 @@ mod tests {
     // RULE (PR 246 read, finding P1): the work shell's state holds a sign in
     // client whenever a Gable URL is set, so the token it holds can be
     // rotated and the page can start the shell's sign in; with no URL there is
-    // no server to name and no client.
+    // no server to name and no client. token_state() resolves the URL itself
+    // (PR 246's final read, P3-2), so run() cannot hand it none.
     #[test]
     fn the_work_shell_state_has_a_client_exactly_when_a_url_is_set() {
-        let url = super::Url::parse("https://gable.yard.internal:8443/").unwrap();
-        let with = super::token_state(Arc::new(MemoryCustody::new()), profiles::work(), Some(&url))
+        use gable_shell_core::fence::OriginFence;
+        use gable_shell_core::offline::OfflineCounter;
+
+        let enrolled = Arc::new(MemoryCustody::new());
+        let db_path = std::env::temp_dir().join("gable-work-token-state-test.sqlite");
+        let fence = OriginFence::from_starts(&["https://gable.yard.internal:8443"]).unwrap();
+        OfflineCounter::new(profile_id(), enrolled.clone(), &db_path, Some(fence))
+            .enrol_register(Some("https://gable.yard.internal:8443/pos"), "REG-01", 1)
+            .expect("enrol succeeds from /pos on the Gable origin");
+        let _ = std::fs::remove_file(&db_path);
+
+        let (with, url) = super::token_state(enrolled, profiles::work(), "UNSET_GABLE_VAR")
             .expect("a fence over the bundled origins and the url");
+        assert_eq!(
+            url.as_ref().map(|u| u.as_str()),
+            Some("https://gable.yard.internal:8443/"),
+            "the enrolled url"
+        );
         assert!(with.client().is_some(), "a url names the server");
-        let without = super::token_state(Arc::new(MemoryCustody::new()), profiles::work(), None)
-            .expect("a fence over the bundled origins");
+
+        let (without, url) = super::token_state(
+            Arc::new(MemoryCustody::new()),
+            profiles::work(),
+            "UNSET_GABLE_VAR",
+        )
+        .expect("a fence over the bundled origins");
+        assert!(url.is_none(), "no enrolment and no variable, no url");
         assert!(without.client().is_none(), "no url, no server");
     }
 
@@ -582,6 +631,60 @@ mod tests {
         }
     }
 
+    // RULE (CP-13 plan (b)): the page the window loads from the enrolled
+    // Gable can sign the register in by email and password, so the runtime
+    // capability grants that command by name.
+    #[test]
+    fn the_runtime_capability_grants_sign_in_with_password() {
+        let url = super::Url::parse("https://gable.yard.internal:8443/").unwrap();
+        let cap: serde_json::Value =
+            serde_json::from_str(&shell::work_remote_capability_json(&url)).unwrap();
+        let perms: Vec<&str> = cap["permissions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_str().unwrap())
+            .collect();
+        assert!(perms.contains(&"allow-sign-in-with-password"));
+    }
+
+    // RULE: every command the handler registers is declared to tauri-build
+    // (so the ACL applies to it) and granted to the enrolled Gable, in the
+    // same order in all three lists: none can be added to one and missed in
+    // another.
+    #[test]
+    fn the_commands_the_handler_registers_and_build_declares_and_the_grant_names_are_one_list() {
+        let lib = include_str!("lib.rs");
+        let handler = lib
+            .split("generate_handler![")
+            .nth(1)
+            .and_then(|r| r.split(']').next())
+            .expect("the handler list");
+        let registered: Vec<String> = handler
+            .split(',')
+            .map(|c| c.trim().trim_start_matches("commands::").to_string())
+            .filter(|c| !c.is_empty())
+            .collect();
+        let build = include_str!("../build.rs");
+        let declared: Vec<String> = build
+            .split("const COMMANDS: &[&str] = &[")
+            .nth(1)
+            .and_then(|r| r.split("];").next())
+            .expect("the COMMANDS list")
+            .split(',')
+            .map(|c| c.trim().trim_matches('"').replace('-', "_"))
+            .filter(|c| !c.is_empty())
+            .collect();
+        let granted: Vec<String> = shell::WORK_REMOTE_PERMISSIONS
+            .iter()
+            .map(|p| p.trim_start_matches("allow-").replace('-', "_"))
+            .collect();
+        assert_eq!(registered, declared);
+        assert_eq!(registered, granted);
+        assert_eq!(registered.len(), 12);
+        assert!(registered.contains(&"sign_in_with_password".to_string()));
+    }
+
     // RULE (ADR 0011 section 5.2 and section 7): the Gable URL comes from the
     // enrolled device's keychain setting, and the queue commands answer that
     // Gable's origin and refuse every other origin and the embedded bundle.
@@ -692,9 +795,22 @@ mod tests {
             .find("pub fn run()")
             .expect("lib.rs defines run()");
         let run_end = run_start + production[run_start..].find("\n}\n").expect("run() closes");
+        // The code only: a comment in run() that names the call proves nothing
+        // (PR 246's final read, mutation M4).
+        let run_code: String = production[run_start..run_end]
+            .lines()
+            .filter(|l| !l.trim_start().starts_with("//"))
+            .collect::<Vec<_>>()
+            .join("\n");
         assert!(
-            production[run_start..run_end].contains("token_state("),
-            "run() builds its state through token_state()"
+            !run_code.contains("TokenState::"),
+            "run() builds no TokenState of its own"
+        );
+        // The exact call: run() handing token_state() no URL brings back a
+        // state with no sign in client (PR 246's final read, mutation M2).
+        assert!(
+            run_code.contains("token_state(custody.clone(), profile, URL_VAR)"),
+            "run() builds its state through token_state() with the Gable URL it resolved"
         );
     }
 }

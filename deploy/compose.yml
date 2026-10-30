@@ -29,7 +29,7 @@
 #
 # THE VALUES THE OPERATOR SETS
 #
-# Six values have no default and the file refuses to start without them:
+# Ten values have no default and the file refuses to start without them:
 #
 #   POSTGRES_PASSWORD   the database password
 #   PAYMENT_VAULT_KEY   64 hex characters, `openssl rand -hex 32`
@@ -37,34 +37,29 @@
 #   GABLE_PUBLIC_URL    the deployment's public address
 #   CORS_ORIGINS        the same address
 #   TRUSTED_PROXIES     the platform's proxy network (CIDRs or addresses)
+#   APPWRITE_ENDPOINT   the Appwrite API address staff sign in through
+#   APPWRITE_PROJECT_ID the Appwrite project id
+#   APPWRITE_TEAM_ID    the Appwrite staff team id
+#   APPWRITE_API_KEY    the Appwrite server key (a secret; from the vault)
 #
 # deploy/README.md says how to make each one and which are secrets.
 #
 # THE DEMO VARIANT AND THE CUSTOMER VARIANT
 #
-# The demo sets four more values:
+# Both sign staff in through Appwrite (ADR 0012, item 345); the core is
+# fail-closed and refuses to start without its Appwrite settings. The recipe has
+# no dev sign in: AUTH_MODE=dev, and the persona sign in built with
+# VITE_AUTH_DEV_MODE, belong to the local root compose stack alone, and an
+# image published for this recipe is built without them.
 #
-#   AUTH_MODE=dev        the core stops checking who the caller is
+# The demo adds two values, and both are data, not authentication:
+#
 #   DEMO_SEED=1          the migrate service loads the demo data
 #   DEMO_SEED_IMPORT=1   the same, with the larger invented catalogue
-#   VITE_AUTH_DEV_MODE=true   the web build offers the persona sign in
 #
-# AUTH_MODE=dev gives every caller full reach: no JWT is verified and every
-# role check passes, so anyone who reaches the port has the whole ERP, the
-# general ledger, the AR and the payments. The demo is safe only because the
-# platform's access gate (one shared password in front of the domain) keeps
-# the public out, and because the demo holds sample data and nothing else.
-# Never run a customer this way.
-#
-# The customer variant leaves AUTH_MODE, DEMO_SEED, DEMO_SEED_IMPORT and
-# VITE_AUTH_DEV_MODE unset, and sets JWKS_URL as a required variable of the
-# customer variant (with AUTH_ISSUER optional):
-#
-#   JWKS_URL             the identity provider's JWKS endpoint (required in
-#                        the customer variant; with AUTH_MODE unset the core
-#                        refuses to start without JWKS_URL. Note: staff sign
-#                        in moves to Appwrite in ADR 0012)
-#   AUTH_ISSUER          optional: the expected token issuer (`iss` claim)
+# The demo people (scripts/appwrite/seed-demo-people.sh) are seeded once into
+# the Appwrite project the demo points at. The customer variant leaves
+# DEMO_SEED and DEMO_SEED_IMPORT unset.
 #
 # The seed runs once. The seed truncates the transactional tables on every run
 # it makes, so on a demo tenant that would wipe the demo on every redeploy.
@@ -137,11 +132,18 @@ services:
     <<: *core-build
     command: ["./core", "serve"]
     environment:
-      # AUTH_MODE=dev for the demo, unset for a customer. With AUTH_MODE unset
-      # the core is fail-closed and requires JWKS_URL (AUTH_ISSUER is optional
-      # and checks the token's iss claim when set). Note: staff sign in moves
-      # to Appwrite in ADR 0012. See the note at the top of this file.
-      AUTH_MODE: ${AUTH_MODE-}
+      # Staff sign in is Appwrite (ADR 0012). The core is fail-closed: with
+      # AUTH_MODE unset, which is the only mode this recipe offers, it
+      # requires its Appwrite settings below (JWKS_URL and AUTH_ISSUER are
+      # optional extras; AUTH_ISSUER checks the token's iss claim when set). See the note at the top of
+      # this file.
+      # Staff sign in: the Appwrite project the core signs staff in through
+      # (ADR 0012). From the environment only; the key is a secret and comes
+      # from the vault, never from a file.
+      APPWRITE_ENDPOINT: ${APPWRITE_ENDPOINT:?set APPWRITE_ENDPOINT to the Appwrite API address}
+      APPWRITE_PROJECT_ID: ${APPWRITE_PROJECT_ID:?set APPWRITE_PROJECT_ID to the Appwrite project id}
+      APPWRITE_TEAM_ID: ${APPWRITE_TEAM_ID:?set APPWRITE_TEAM_ID to the Appwrite staff team id}
+      APPWRITE_API_KEY: ${APPWRITE_API_KEY:?set APPWRITE_API_KEY to the Appwrite server key}
       JWKS_URL: ${JWKS_URL-}
       AUTH_ISSUER: ${AUTH_ISSUER-}
       PORT: "8080"
@@ -188,7 +190,6 @@ services:
     <<: *core-build
     command: ["./core", "worker"]
     environment:
-      AUTH_MODE: ${AUTH_MODE-}
       DATABASE_URL: postgres://${POSTGRES_USER:-gable_user}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD to the database password}@postgres:5432/${POSTGRES_DB:-gable_db}?sslmode=disable
       PAYMENT_VAULT_KEY: ${PAYMENT_VAULT_KEY:?set PAYMENT_VAULT_KEY to 64 hex characters (openssl rand -hex 32)}
       PORTAL_JWT_SECRET: ${PORTAL_JWT_SECRET:?set PORTAL_JWT_SECRET to a long random string}
@@ -216,11 +217,6 @@ services:
     build:
       context: ${GABLE_REPO_ROOT:-..}
       dockerfile: web/Dockerfile
-      args:
-        # The persona sign in is offered only by a build made with this. It
-        # matches AUTH_MODE=dev on core. The demo sets it; a customer does
-        # not.
-        VITE_AUTH_DEV_MODE: "${VITE_AUTH_DEV_MODE-false}"
     volumes:
       - ${GABLE_REPO_ROOT:-..}/web/nginx-local-api.conf:/etc/nginx/gable-api.conf:ro
     expose:

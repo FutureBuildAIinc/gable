@@ -88,6 +88,18 @@ describe('gable-app-shell — chrome', () => {
     expect(q<HTMLInputElement>(el, 'input[aria-label="Search everything"]')).toBeTruthy()
   })
 
+  it('gives the narrow header a search icon that opens the omnibar', async () => {
+    const el = await shellAt('/orders')
+    const btn = q<HTMLButtonElement>(el, '[data-testid="header-search-open"]')
+    expect(btn.className).toContain('sm:hidden')
+    let seen = false
+    document.addEventListener('keydown', (e) => { if (e.key === 'k' && e.ctrlKey) seen = true }, { once: true })
+    btn.click()
+    expect(seen).toBe(true)
+    // the right group shrinks its gap under sm so the avatar ends inside 390
+    expect(q(el, 'header > div:last-of-type').className).toContain('gap-2')
+  })
+
   it('mounts the omnibar and the shortcuts modal', async () => {
     const el = await shellAt('/orders')
     expect(el.querySelector('gable-omnibar')).not.toBeNull()

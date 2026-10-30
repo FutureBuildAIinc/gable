@@ -6,6 +6,8 @@
  * Components listen for 'route-changed' events to react to navigation.
  */
 
+import { authCustody } from '@gable/auth';
+
 export interface RouteConfig {
   path: string;
   /** Dynamic import returning the module that defines the custom element */
@@ -14,6 +16,53 @@ export interface RouteConfig {
   layout: 'erp' | 'portal' | 'driver' | 'yard' | 'none';
   /** If set, redirect to this path instead of rendering */
   redirect?: string;
+  /**
+   * The roles the page is for. A signed in person holding none of them gets
+   * a plain refusal in place of the page. Unset: every role. UX only, the
+   * server's role walls decide what a request may do.
+   */
+  roles?: string[];
+}
+
+/** The roles the server's own wall admits to the admin pages (core/internal/app/serve). */
+export const ADMIN_OWNER = ['admin', 'owner'];
+/** Admin and owner, plus finance, who read the tax zones and the offline selling policy (`policyRead`). */
+export const ADMIN_OWNER_FINANCE = ['admin', 'owner', 'finance'];
+
+/**
+ * The roles the desk knows the person by: a staff session or token's roles,
+ * else a dev persona's role (a dev stack puts no roles on the wire, so the
+ * persona card is all the desk has). Empty when nothing names a role.
+ */
+export function heldRoles(): string[] {
+  const held = [...(authCustody.roles ?? [])];
+  const persona = authCustody.personaRole;
+  if (persona !== null && !held.includes(persona)) held.push(persona);
+  return held;
+}
+
+/**
+ * Whether a person holding `held` may see a page for `required`. No required
+ * roles is open to all. A person who names no role at all (local development
+ * with no persona) is left to the server, which refuses what it must.
+ */
+export function rolesAllow(required: string[] | undefined, held: string[]): boolean {
+  if (!required || required.length === 0) return true;
+  if (held.length === 0) return true;
+  return required.some((r) => held.includes(r));
+}
+
+/** True when the signed in person's roles do not reach the route. */
+export function routeRefused(route: RouteConfig): boolean {
+  return !rolesAllow(route.roles, heldRoles());
+}
+
+/** The words of the plain refusal: "This page is for admin and owner". */
+export function refusalWords(roles: string[]): string {
+  const list = roles.length <= 1
+    ? roles.join('')
+    : `${roles.slice(0, -1).join(', ')} and ${roles[roles.length - 1]}`;
+  return `This page is for ${list}`;
 }
 
 export interface RouteMatch {

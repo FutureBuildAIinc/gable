@@ -26,14 +26,15 @@ make migrate
 DEMO_SEED=1 make seed
 
 # 4. Run the backend and frontend in two terminals
-cd core && AUTH_MODE=dev go run ./cmd/server   # API on :8080
+cd core && AUTH_MODE=dev go run -tags devauth ./cmd/server   # API on :8080
 cd web/apps/desk && npm install && npm run dev              # SPA on :5173
 ```
 
 `AUTH_MODE=dev` is required to start the backend locally and is **not** a
 default — without it (and without a `JWKS_URL`) the server fail-closes and
 exits. It disables authentication and authorization completely, so never set
-it anywhere reachable. See [SECURITY.md](./SECURITY.md).
+it anywhere reachable. Only a binary built with `-tags devauth` starts with it,
+which is why the command above carries the tag. See [SECURITY.md](./SECURITY.md).
 
 Open <http://localhost:5173>. To wipe and rebuild the dev database:
 

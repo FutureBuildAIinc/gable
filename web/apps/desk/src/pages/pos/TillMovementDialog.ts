@@ -7,6 +7,7 @@ import '../../components/ui/gable-select';
 import { posService, dollarsToCents } from '../../services/POSService';
 import './StepUpDialog';
 import type { MovementKind, TillMovement } from '../../types/pos';
+import { formatCents } from '../../lib/utils.ts';
 import {
     MOVEMENT_KINDS,
     MOVEMENT_REASONS,
@@ -16,7 +17,7 @@ import {
     type MovementForm,
 } from './movements.ts';
 
-const fmt = (cents: number) => `$${(cents / 100).toFixed(2)}`;
+const fmt = formatCents;
 
 const FIELD = 'width:100%;box-sizing:border-box;padding:10px;background:rgb(var(--gb-till-field));border:1px solid rgb(var(--gb-till-edge));border-radius:8px;color:rgb(var(--gb-till-text));font-size:15px;outline:none';
 const LABEL = 'display:block;font-size:12px;color:rgb(var(--gb-till-muted));margin:12px 0 6px';
@@ -167,7 +168,7 @@ export class TillMovementDialog extends LitElement {
                 <button type="button" data-testid="movement-cancel" @click=${() => this.cancel()}
                     style="flex:1;padding:12px;background:transparent;border:1px solid rgb(var(--gb-till-edge));border-radius:8px;color:rgb(var(--gb-till-muted));font-size:14px;cursor:pointer">Cancel</button>
                 <button type="button" data-testid="movement-record" @click=${() => this.record()} ?disabled=${this.busy}
-                    style="flex:2;padding:12px;background:rgb(var(--gb-till-accent));border:none;border-radius:8px;color:rgb(var(--gb-plate));font-size:15px;font-weight:700;cursor:pointer">${this.busy ? 'Recording\u2026' : this.recordLabel()}</button>
+                    style="flex:2;padding:12px;background:rgb(var(--gb-till-accent));border:none;border-radius:8px;color:rgb(var(--gb-deep-space));font-size:15px;font-weight:700;cursor:pointer">${this.busy ? 'Recording\u2026' : this.recordLabel()}</button>
             </div>
         `;
     }

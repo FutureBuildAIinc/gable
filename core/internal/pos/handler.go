@@ -865,10 +865,14 @@ func (h *Handler) CurrentTill(w http.ResponseWriter, r *http.Request) {
 
 // canViewOpenTillExpectation reports whether the caller may read the money
 // figures an open drawer still keeps blind (CP-08): the roles that can sign
-// a held count off. No claims at all (an unauthenticated dev mode harness,
-// or a test request that named a subject but no role) carries nothing to
-// hide from and reads them.
+// a held count off. A machine key carries no claims and is refused, as a
+// cashier is. No claims and no key (an unauthenticated dev mode harness, or
+// a test request that named a subject but no role) carries nothing to hide
+// from and reads them.
 func canViewOpenTillExpectation(ctx context.Context) bool {
+	if _, isKey := middleware.KeyIDFromContext(ctx); isKey {
+		return false
+	}
 	claims := middleware.ClaimsFromContext(ctx)
 	if claims == nil {
 		return true

@@ -12,8 +12,8 @@
 import { LitElement, html, nothing } from 'lit';
 import { customElement, state, property } from 'lit/decorators.js';
 import { cn } from '../../lib/utils.ts';
-import { router } from '../../lib/router.ts';
-import { workspace, menuForKey, activeMenuPath, type WorkspaceTab } from '../../lib/workspace.ts';
+import { router, heldRoles } from '../../lib/router.ts';
+import { workspace, menuForKey, visibleMenu, activeMenuPath, type WorkspaceTab } from '../../lib/workspace.ts';
 import '@gable/design-system';
 import { framedByShell } from '@gable/design-system';
 import { authCustody, signOutStaff } from '@gable/auth';
@@ -292,7 +292,7 @@ export class GableAppShell extends LitElement {
   private _appMenu() {
     const key = workspace.activeKey;
     if (key === 'home') return nothing;
-    const menu = menuForKey(key);
+    const menu = visibleMenu(menuForKey(key), heldRoles());
     if (menu.length === 0) return nothing;
     const tab = workspace.tabs.find((t) => t.key === key);
     const active = activeMenuPath(menu, router.currentPath);
@@ -332,13 +332,13 @@ export class GableAppShell extends LitElement {
         <!-- Header: hidden when the work shell frames the desk (one header
              band, the shell's); standalone the desk's own band stands. -->
         ${framedByShell() ? nothing : html`
-        <header class="h-16 border-b border-white/5 bg-deep-space/80 backdrop-blur-xl px-4 md:px-6 flex items-center gap-4 sticky top-0 z-40 shadow-sm">
+        <header class="h-16 border-b border-white/5 bg-deep-space/80 backdrop-blur-xl px-3 sm:px-4 md:px-6 flex items-center gap-2 sm:gap-4 sticky top-0 z-40 shadow-sm">
           <a href="/home" aria-label="Go to Home" class="flex items-center gap-3 shrink-0">
             <gable-brand-logo variant="mark" size="md" class-name="text-white drop-shadow-glow"></gable-brand-logo>
             <span class="hidden md:block"><gable-brand-logo variant="text" size="md"></gable-brand-logo></span>
           </a>
 
-          <div class="flex-1 max-w-xl mx-auto">
+          <div class="hidden sm:block flex-1 min-w-0 max-w-xl mx-auto">
             <div class="relative group">
               ${icon(Search, 16, 'absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500 group-focus-within:text-gable-green transition-colors')}
               <input
@@ -350,7 +350,14 @@ export class GableAppShell extends LitElement {
             </div>
           </div>
 
-          <div class="flex items-center gap-4 shrink-0">
+          <div class="flex items-center gap-2 sm:gap-4 shrink-0 ml-auto sm:ml-0 min-w-0">
+            <button
+              type="button"
+              data-testid="header-search-open"
+              aria-label="Search everything"
+              @click=${() => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', ctrlKey: true, bubbles: true }))}
+              class="sm:hidden shrink-0 rounded-lg p-2 text-zinc-400 hover:text-gable-green hover:bg-white/5 transition-colors"
+            >${icon(Search, 18)}</button>
             <gable-branch-switcher></gable-branch-switcher>
             <div class="text-xs text-zinc-500 font-medium hidden lg:block bg-white/5 px-2 py-1 rounded border border-white/5">
               ⌘K

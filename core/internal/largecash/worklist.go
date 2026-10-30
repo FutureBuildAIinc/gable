@@ -20,6 +20,10 @@ const (
 	// AdviserNote is the plain sentence every large cash surface carries: the
 	// dealer confirms each filing with its own adviser (item 236).
 	AdviserNote = "The dealer confirms each filing with its own adviser."
+	// CAAdviserNote is the adviser sentence a Canadian row carries instead:
+	// there is no filing to confirm, so what the dealer confirms is its own
+	// threshold policy, a dealer's rule and not a legal duty.
+	CAAdviserNote = "The dealer confirms its own threshold policy with its adviser."
 	// IdentityDeclinedNote is what an identity declined row says: the walk-in
 	// did not identify, a manager looks at it, and there is no filing to make.
 	IdentityDeclinedNote = "Identity declined, manager review."
@@ -307,6 +311,7 @@ func (s *Service) worklistRow(rec worklistRecord, caThresholdCents int64, now ti
 	}
 	if rec.RuleFamily == RuleCA {
 		row.ThresholdCents = caThresholdCents
+		row.AdviserNote = CAAdviserNote
 	}
 	if rec.EventState == StateIdentityDeclined {
 		row.Note = IdentityDeclinedNote

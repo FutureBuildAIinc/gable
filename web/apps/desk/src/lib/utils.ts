@@ -47,6 +47,18 @@ export function formatPrice4(tenThousandths: number | null | undefined): string 
     return `${negative && abs !== 0 ? '-' : ''}$${wholeText}.${frac}`;
 }
 
+// The same ten thousandths price shown as money for the eye: rounded half up to
+// the cent, thousands grouped, minus outside the symbol. 165750 -> "$16.58".
+// Display only; the stored price keeps its wire precision. Integer arithmetic.
+export function formatPrice2(tenThousandths: number | null | undefined): string {
+    const n = typeof tenThousandths === 'number' && Number.isFinite(tenThousandths) ? Math.trunc(tenThousandths) : 0;
+    const abs = Math.abs(n);
+    const cents = Math.floor((abs + 50) / 100);
+    const whole = new Intl.NumberFormat('en-US').format(Math.floor(cents / 100));
+    const frac = String(cents % 100).padStart(2, '0');
+    return `${n < 0 && cents !== 0 ? '-' : ''}$${whole}.${frac}`;
+}
+
 // formatDay MOVED to ./dates.ts (the one date module, G1 walk note N15); it
 // is re-exported here so the existing `import { formatDay } from './utils'`
 // callers keep working.

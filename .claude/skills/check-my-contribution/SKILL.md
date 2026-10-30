@@ -40,6 +40,7 @@ make help
 | **Playwright (E2E)** | ✅ merge gate | full stack built (dev auth), Postgres migrated + seeded, `core serve` with `AUTH_MODE=dev`, nginx, then `npx playwright test` |
 | **Local stack** | ✅ merge gate | `make up` (the same compose file a developer uses), then `make smoke` |
 | **Docker Build** | ✅ merge gate | builds `core/Dockerfile` and `web/Dockerfile` (both bundles, one nginx) |
+| **CI push (short)** | push check only | on a push to `refactor/**` (`ci-push-short.yml`): `go build ./...` and `make contract-go`; a newer push cancels the older run |
 | **Vulnerabilities** | ⚠️ **advisory only** | pinned `govulncheck` — `continue-on-error`, also runs nightly |
 
 `govulncheck` is deliberately **not** a merge gate: an upstream CVE landing overnight must not

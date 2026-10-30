@@ -264,6 +264,17 @@ impl MemoryCustody {
             .collect()
     }
 
+    /// The value of every entry held (tests assert nothing but the pair was
+    /// filed: no password, no request body).
+    pub fn snapshot_values(&self) -> Vec<String> {
+        self.entries
+            .lock()
+            .expect("custody fake lock")
+            .values()
+            .cloned()
+            .collect()
+    }
+
     fn check(&self) -> Result<(), CustodyError> {
         if self.available {
             Ok(())
