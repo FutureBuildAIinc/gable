@@ -9,6 +9,9 @@ import type { LargeCashStatement, LargeCashWorklistRow } from '../../types/large
 
 /** What a row says about its deadline. */
 export function deadlineWords(row: LargeCashWorklistRow): string {
+    if (row.rule_family === 'CA_DEALER') {
+        return 'No filing deadline: the dealer files nothing for this one.';
+    }
     if (!row.filing_deadline) {
         // Nothing is owed to the IRS for this row, so there is no deadline.
         return 'No filing deadline: nothing is owed to the IRS for this one.';
@@ -105,4 +108,13 @@ export function statementLines(s: LargeCashStatement): { label: string; value: s
         { label: 'Receipts', value: `${s.crossing_count} large cash receipt${s.crossing_count === 1 ? '' : 's'}` },
         { label: 'Issued', value: s.state === 'issued' ? dayWords(s.issued_date) : 'Not issued yet' },
     ].filter((line) => line.value !== '');
+}
+
+/** The regime a row's branch speaks: currency only and the 24 hour rule for a Canadian branch. */
+export function regimeWords(row: LargeCashWorklistRow): string {
+    const threshold = moneyWords(row.threshold_cents, row.currency);
+    if (row.rule_family === 'CA_DEALER') {
+        return `Cash means currency only. ${threshold} or more, with the 24 hour rule.`;
+    }
+    return `threshold ${threshold}`;
 }

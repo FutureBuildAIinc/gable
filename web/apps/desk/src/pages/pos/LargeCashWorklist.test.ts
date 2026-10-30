@@ -100,7 +100,8 @@ describe("the manager's large cash worklist", () => {
         const rows = all(el, 'large-cash-row');
         expect(rows.length).toBe(2);
         expect(rows[0].textContent).toContain('Riverbend Builders');
-        expect(rows[0].textContent).toContain('$12000.00');
+        expect(rows[0].textContent).toContain('$12,000.00');
+        expect(rows[0].textContent).toContain('threshold $10,000.00');
         expect(rows[0].textContent).toContain('Kelowna Main');
         expect(q(rows[0], 'large-cash-deadline').textContent).toContain('The filing is due 2026-03-17');
         expect(q(rows[0], 'large-cash-adviser').textContent).toContain('confirms each filing with its own adviser');
@@ -149,6 +150,39 @@ describe("the manager's large cash worklist", () => {
         const rows = all(el, 'large-cash-row');
         expect(q(rows[0], 'large-cash-file')).toBeNull();
         expect(q(rows[0], 'large-cash-note').textContent).toContain('not a FINTRAC report');
+        el.remove();
+    });
+
+    it('speaks the Canadian regime on a Canadian queue, never the IRS', async () => {
+        const el = await mount([row({
+            event_id: 'ev-ca',
+            event_state: 'recorded',
+            rule_family: 'CA_DEALER',
+            currency: 'CAD',
+            total_cents: 1_212_960,
+            filing_state: 'not_reportable',
+            filing_deadline: null,
+            recommended_action: 'dealer_record',
+            note: "This is for the dealer's own records. It is not a FINTRAC report.",
+            adviser_note: 'The dealer confirms its own threshold policy with its adviser.',
+        })]);
+        const rows = all(el, 'large-cash-row');
+        // the amounts are money in the branch's own currency, never raw cents
+        expect(rows[0].textContent).toContain('CA$12,129.60');
+        expect(rows[0].textContent).toContain('CA$10,000.00 or more');
+        // the Canadian words: currency only, the 24 hour rule, nothing filed
+        expect(rows[0].textContent).toContain('currency only');
+        expect(rows[0].textContent).toContain('24 hour');
+        expect(q(rows[0], 'large-cash-deadline').textContent).toContain('the dealer files nothing');
+        expect(q(rows[0], 'large-cash-adviser').textContent).toContain('confirms its own threshold policy');
+        // no filing, no Form 8300 data set, on a row that owes neither
+        expect(q(rows[0], 'large-cash-file')).toBeNull();
+        expect(q(rows[0], 'large-cash-form')).toBeNull();
+        // and the whole queue speaks the branch's regime: no IRS, no Form 8300, no BSA, no USD
+        const page = el.textContent ?? '';
+        for (const wrong of ['IRS', 'Internal Revenue', '8300', 'BSA', 'USD', 'cents']) {
+            expect(page).not.toContain(wrong);
+        }
         el.remove();
     });
 
@@ -244,6 +278,7 @@ describe("the manager's large cash worklist", () => {
         await new Promise((r) => setTimeout(r, 0));
         await el.updateComplete;
         expect(q(el, 'large-cash-form-data').textContent).toContain('Form 8300 for Riverbend Builders');
+        expect(q(el, 'large-cash-form-data').textContent).toContain('$12,000.00');
         expect(q(el, 'large-cash-form-data').textContent).toContain('00-1234567');
         expect(q(el, 'large-cash-form-data').textContent).toContain('Gable does not file this.');
         el.remove();

@@ -206,6 +206,59 @@ func TestFilingIsRefusedForACanadianRecordAndAnIdentityDeclinedCrossing(t *testi
 	}
 }
 
+// TestTheCanadianRowSpeaksTheDealersOwnWordsNeverAFilings: the branch's
+// country picks the regime, and the row the server sends speaks that regime's
+// words. A Canadian crossing is the dealer's own record: its adviser note is
+// the dealer's own policy, not a filing's, and nothing on the row says IRS,
+// Form 8300 or BSA E-Filing, because a building materials dealer files none
+// of them.
+func TestTheCanadianRowSpeaksTheDealersOwnWordsNeverAFilings(t *testing.T) {
+	db := testutil.RequireDB(t)
+	ctx := context.Background()
+	svc := keyedService(t, db)
+	// the Canadian dealer policy, on, at the threshold
+	if err := svc.SaveSettings(ctx, &largecash.Settings{CountryDefault: "US", CAEnabled: true,
+		CAThresholdCents: largecash.ThresholdCents}, "ca-words-test"); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM audit_log WHERE user_id = 'ca-words-test'`)
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM system_settings WHERE key LIKE 'largecash.%' OR key = 'country.default'`)
+	})
+	canada := seedCrossing(t, db, svc, crossingOptions{country: "CA", name: "ca words fixture",
+		cashCents: largecash.ThresholdCents + 200_000, payer: usPayer()})
+	list, err := svc.Worklist(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	row := rowFor(t, list, canada)
+	if row.RuleFamily != largecash.RuleCA {
+		t.Fatalf("the rule family = %q, want %q", row.RuleFamily, largecash.RuleCA)
+	}
+	if row.Note != largecash.CanadaNote {
+		t.Fatalf("the note = %q, want %q", row.Note, largecash.CanadaNote)
+	}
+	if row.AdviserNote != largecash.CAAdviserNote {
+		t.Fatalf("the adviser note = %q, want the dealer's own policy words %q", row.AdviserNote, largecash.CAAdviserNote)
+	}
+	if row.FilingDeadline != nil {
+		t.Fatal("a Canadian row carries a filing deadline, but the dealer files nothing")
+	}
+	if row.Action != largecash.ActionDealerRecord {
+		t.Fatalf("the action = %q, want %q", row.Action, largecash.ActionDealerRecord)
+	}
+	// and no word on the row names the United States regime's paperwork.
+	raw, err := json.Marshal(row)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, wrong := range []string{"IRS", "8300", "BSA"} {
+		if strings.Contains(string(raw), wrong) {
+			t.Fatalf("the Canadian row says %q: %s", wrong, raw)
+		}
+	}
+}
+
 // TestThreeManagersFilingTheSameCrossingHaveOneWinner: the house's
 // concurrency rule: three contenders at pool size four. Exactly one of them
 // lands the filing and the other two are told the crossing is already filed,
