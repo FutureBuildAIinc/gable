@@ -548,6 +548,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/admin/settings/market-index-source": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Show where market index values come from
+         * @description Admin or owner, or a key holding admin:settings. The deployment's market index source document (migration 159): manual (the default) or the FB Connect feed, whether a feed URL is stored, the header the feed key rides in, whether a feed key is stored, the staleness threshold in days, and the last pull's result (null until the pull exists, a later slice). Never returns the feed URL or the feed key: both are secrets, and the document says only whether one is stored. revision rides the ETag.
+         */
+        get: operations["adminGetMarketIndexSourceSettings"];
+        /**
+         * Choose where market index values come from
+         * @description Admin or owner, or a key holding admin:settings. Every field is optional but a save must name something. feed_url and feed_key are write only: absent leaves one, empty clears it, a value replaces it, and both are sealed at rest the way the AI keys are and never echoed back. The audit row and event record only that they changed. The save, its audit row and the admin_settings.saved event are one transaction on the row's revision: a write without a precondition is 428, a stale one 409, and the answer carries the new revision in body and ETag.
+         */
+        put: operations["adminSaveMarketIndexSourceSettings"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/admin/settings/routing": {
         parameters: {
             query?: never;
@@ -8102,6 +8126,66 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/market-indices/import/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Preview what a market index file would do
+         * @description Guarded admin or owner. The file is a CSV whose header names the columns: index_code, value and as_of_date are required, source and source_url are optional. The preview writes nothing. It answers every row's fate: the index the code matched, whether the row will be written, and, for a row that cannot be applied, the reason (an unknown index code, a value that is not a positive number, an as of date that is not a date, a second row for an index and day the file already carries, or a value already stored for that index and day).
+         */
+        post: operations["marketIndexImportPreview"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/market-indices/import/apply": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Apply a market index file
+         * @description Guarded admin or owner. The file is the same CSV the preview takes. Every row the preview accepted is written through the same path a manual refresh takes: the newest as of date an index's rows carry becomes the index's current value, older rows are history only, and the exposure scan runs once for each index whose value moved. A value for one index, day and source is stored once, so importing the same file twice changes nothing the second time and scans nothing.
+         */
+        post: operations["marketIndexImportApply"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/market-indices/staleness": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * How old the market index values are
+         * @description Guarded admin or owner. The threshold the deployment set, whether anything is stale, and each active index's freshness: the day of its newest stored value and how many days old that is. An index with no stored value is stale. The banner on the market indices screen, the quotes exposure screen and the quote page shows this.
+         */
+        get: operations["marketIndexStaleness"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/pricing/levels": {
         parameters: {
             query?: never;
@@ -11386,6 +11470,36 @@ export interface components {
         /** @description Go type techadmin.SaveRoutingSettingsRequest. */
         AdminSaveRoutingSettingsRequest: {
             api_key: string;
+            revision?: number;
+        };
+        /** @description Go type techadmin.MarketIndexSourceSettings. Two facts are never answered: the feed URL and the feed key's value. The URL is itself a secret (it carries the feed's identity in its path), so it is written and masked exactly like the key. The document says only whether one is stored. feed_key_header is the header the key rides in; it is configuration, not a credential, and it is empty by default. */
+        MarketIndexSourceSettings: {
+            /** @enum {string} */
+            source: "manual" | "fb_connect_feed";
+            /** @description Whether a feed URL is stored. The URL itself is never answered. */
+            feed_url_set: boolean;
+            /** @description The header the feed key rides in; empty means no header. */
+            feed_key_header: string;
+            /** @description Whether a feed key is stored. The key itself is never answered. */
+            feed_key_set: boolean;
+            staleness_days: number;
+            /** Format: date-time */
+            last_pull_at: string | null;
+            last_pull_ok: boolean | null;
+            last_pull_error: string | null;
+            revision: number;
+        };
+        /** @description Go type techadmin.SaveMarketIndexSourceRequest. Every field is optional but a save must name something. feed_url and feed_key are write only: absent leaves one, empty clears it, a value replaces it. Neither is ever echoed back. revision is the body form of the If-Match precondition. */
+        AdminSaveMarketIndexSourceRequest: {
+            /** @enum {string} */
+            source?: "manual" | "fb_connect_feed";
+            /** @description The FB Connect feed address. Write only; never answered. */
+            feed_url?: string;
+            /** @description The header the feed key rides in; empty means no header. */
+            feed_key_header?: string;
+            /** @description The feed key's value. Write only; never answered. */
+            feed_key?: string;
+            staleness_days?: number;
             revision?: number;
         };
         /** @description Go type staff.Staff. A member of the dealer roster, the identity AI_LM authenticates against; role is a free text label, and modules is the raw grant set, never null and not filtered by the global enable flag. counter_pin_set and locked are the two facts the staff screen shows of the manager's counter PIN; the hash never leaves the server. */
@@ -19919,6 +20033,61 @@ export interface components {
             reference?: string;
             reason?: string;
         };
+        /** @description Go type pricing.IndexImportRow. One row of a file and its fate: accepted (it will be written), unchanged (the value is already stored, so nothing moves and no scan runs) or refused (with the reason). */
+        MarketIndexImportRow: {
+            /** @description The line in the file, the header being line 1. */
+            line: number;
+            index_code: string;
+            /** Format: uuid */
+            index_id?: string;
+            index_name?: string;
+            /** @description The value as the file carries it. */
+            value: string;
+            /** @description The day the value is for, as the file carries it. */
+            as_of_date: string;
+            source: string;
+            source_url?: string;
+            /** @enum {string} */
+            status: "accepted" | "unchanged" | "refused";
+            reason?: string;
+        };
+        /** @description Go type pricing.IndexImportPreview. What a file would do: every row's fate and the counts that answer how much of the file lands. */
+        MarketIndexImportPreview: {
+            rows: components["schemas"]["MarketIndexImportRow"][];
+            accepted_count: number;
+            unchanged_count: number;
+            refused_count: number;
+            indices_affected: number;
+        };
+        /** @description Go type pricing.IndexImportResult. What a file did: the rows written, the indices whose current value moved, and the exposure scans that ran. */
+        MarketIndexImportResult: {
+            rows: components["schemas"]["MarketIndexImportRow"][];
+            applied_count: number;
+            changed_indices: number;
+            scans: number;
+            unchanged_count: number;
+            refused_count: number;
+        };
+        /** @description Go type pricing.IndexFreshness. One active index and the day of its newest stored value. An index whose newest value carries no day cannot be judged old, so it is not stale. */
+        MarketIndexFreshness: {
+            /** Format: uuid */
+            index_id: string;
+            index_code: string;
+            name: string;
+            current_value: number;
+            /** Format: date-time */
+            newest_date?: string | null;
+            /** @description How many days old the newest value is; -1 when the index's newest value carries no day, which says nothing about how old it is. */
+            days_old: number;
+            stale: boolean;
+        };
+        /** @description Go type pricing.IndexStalenessDocument. The threshold the deployment set, whether anything is stale, and each index's freshness. */
+        MarketIndexStaleness: {
+            threshold_days: number;
+            stale: boolean;
+            stale_indices: components["schemas"]["MarketIndexFreshness"][];
+            indices: components["schemas"]["MarketIndexFreshness"][];
+        };
         /**
          * @description Where a price came from, lowercase (ADR 0006 section 7.3).
          * @enum {string}
@@ -20358,6 +20527,18 @@ export interface components {
             recorded_at: string;
             recorded_by?: string;
             source: string;
+            /**
+             * Format: date-time
+             * @description The day the value is for, as the source states it. Null for a value typed by hand, whose only date is when it was recorded.
+             */
+            as_of_date?: string | null;
+            /** @description Where the value came from. */
+            source_url?: string;
+            /**
+             * Format: date-time
+             * @description When the value was fetched.
+             */
+            fetched_at?: string | null;
         };
         MarketIndexHistoryResponse: {
             /** Format: uuid */
@@ -24262,6 +24443,70 @@ export interface operations {
             };
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            500: components["responses"]["WireInternalError"];
+        };
+    };
+    adminGetMarketIndexSourceSettings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The settings document. */
+            200: {
+                headers: {
+                    /** @description The revision in quotes, the strong form If-Match reads. */
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MarketIndexSourceSettings"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["WireInternalError"];
+        };
+    };
+    adminSaveMarketIndexSourceSettings: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+                /** @description The revision this write preconditions on, quoted ("3"); the weak form W/"3" is accepted. */
+                "If-Match"?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AdminSaveMarketIndexSourceRequest"];
+            };
+        };
+        responses: {
+            /** @description The settings document after the save. */
+            200: {
+                headers: {
+                    /** @description The new revision in quotes. */
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MarketIndexSourceSettings"];
+                };
+            };
+            400: components["responses"]["WireBadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["WireConflict"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
+            428: components["responses"]["WirePreconditionRequired"];
             500: components["responses"]["WireInternalError"];
         };
     };
@@ -39464,6 +39709,99 @@ export interface operations {
             409: components["responses"]["ConflictEither"];
             413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    marketIndexImportPreview: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": {
+                    /**
+                     * Format: binary
+                     * @description The CSV file of index values.
+                     */
+                    file: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The preview: every row's fate and the counts. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MarketIndexImportPreview"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            413: components["responses"]["PayloadTooLarge"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    marketIndexImportApply: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": {
+                    /**
+                     * Format: binary
+                     * @description The CSV file of index values.
+                     */
+                    file: string;
+                };
+            };
+        };
+        responses: {
+            /** @description What the file did: the rows written, the indices that moved and the scans that ran. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MarketIndexImportResult"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            413: components["responses"]["PayloadTooLarge"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    marketIndexStaleness: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The staleness answer. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MarketIndexStaleness"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             500: components["responses"]["InternalError"];
         };
     };
