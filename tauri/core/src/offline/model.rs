@@ -232,6 +232,16 @@ pub struct SignSaleRequest {
     pub sold_at: String,
     pub lines: Vec<SignLineRequest>,
     pub tenders: Vec<SignTenderRequest>,
+    /// The open server cart this sale replaces, or the result unknown cart it
+    /// defaults to (ADR 0011 section 5.3). Signed when present.
+    #[serde(default)]
+    pub replaces_sale_id: Option<String>,
+    /// The clerk's declaration that the sale is for another customer than the
+    /// result unknown cart's; it then names that cart in `unknown_cart_id`.
+    #[serde(default)]
+    pub different_customer: bool,
+    #[serde(default)]
+    pub unknown_cart_id: Option<String>,
 
     #[serde(default)]
     pub device_seq: Option<i64>,
@@ -343,7 +353,20 @@ pub struct SignedOfflineSale {
     pub confirmed_mark: i64,
     pub lines: Vec<SignedSaleLine>,
     pub tenders: Vec<SignedSaleTender>,
+    /// The replaced cart and the declaration (ADR 0011 section 5.3), signed
+    /// fields when present: the server builds the canonical form from the
+    /// item as received, so absent ones are left out here too.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub replaces_sale_id: Option<String>,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub different_customer: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub unknown_cart_id: Option<String>,
     pub device_sig: String,
+}
+
+fn is_false(v: &bool) -> bool {
+    !*v
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
