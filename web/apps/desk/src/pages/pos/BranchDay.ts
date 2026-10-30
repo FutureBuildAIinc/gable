@@ -244,14 +244,14 @@ export class GableBranchDay extends LitElement {
                         ${day.open_session_count > 0 ? `${day.open_session_count} drawer${day.open_session_count === 1 ? ' is' : 's are'} still open. ` : ''}${day.pending_signoff_count > 0 ? `${day.pending_signoff_count} counted drawer${day.pending_signoff_count === 1 ? ' waits' : 's wait'} for a manager's sign off. ` : ''}The day closes when every drawer is counted and settled.
                     </p>` : nothing}
                 <div class="flex flex-wrap items-end gap-3">
-                    <label class="block">
+                    <label class="block w-full sm:w-auto">
                         <span class="block text-zinc-400 text-sm uppercase font-bold mb-1">Deposit slip reference</span>
                         <input type="text" data-testid="day-slip-input" .value=${this.slip} maxlength="64"
                             @input=${(e: Event) => { this.slip = (e.target as HTMLInputElement).value; }}
-                            class="px-3 py-2 bg-black/20 border border-zinc-700 rounded text-white font-mono" />
+                            class="w-full sm:w-auto px-3 py-2 bg-black/20 border border-zinc-700 rounded text-white font-mono" />
                     </label>
                     ${needsBank ? html`
-                        <label class="block min-w-[14rem]">
+                        <label class="block w-full sm:w-auto sm:min-w-[14rem]">
                             <span class="block text-zinc-400 text-sm uppercase font-bold mb-1">Deposit to</span>
                             <gable-select data-testid="day-bank" label="Deposit to" placeholder="Choose the bank account"
                                 .value=${this.bank} .options=${this.banks.map((b) => ({ value: b.id, label: b.name }))}
@@ -277,8 +277,8 @@ export class GableBranchDay extends LitElement {
         }
         const t = day.totals;
         return html`
-            <div class="bg-zinc-900 border border-zinc-800 rounded-lg p-6" data-testid="branch-day">
-                <div class="flex items-center justify-between mb-6 gap-4">
+            <div class="bg-zinc-900 border border-zinc-800 rounded-lg p-4 sm:p-6" data-testid="branch-day">
+                <div class="flex flex-wrap items-center justify-between mb-6 gap-x-4 gap-y-2">
                     <h2 class="text-xl font-bold text-emerald-400">End of Day (${formatDay(day.business_date)})</h2>
                     <gable-date-field label="Business day" data-testid="day-date" .value=${this.date}
                         @change=${(e: Event) => {
@@ -290,29 +290,29 @@ export class GableBranchDay extends LitElement {
                 ${day.registers.length === 0 ? html`
                     <p class="text-zinc-500" data-testid="day-empty">No drawer was opened at this branch on this day.</p>` : html`
                     <div class="overflow-x-auto">
-                    <table class="w-full text-sm" data-testid="day-registers">
-                        <thead>
+                    <table class="block sm:table w-full text-sm" data-testid="day-registers">
+                        <thead class="hidden sm:table-header-group">
                             <tr class="text-zinc-400 uppercase text-xs text-right">
                                 <th class="text-left py-2">Register</th><th>Drawers</th><th>Sales</th><th>Expected cash</th><th>Counted cash</th><th>Over / short</th>
                             </tr>
                         </thead>
-                        <tbody class="font-mono text-white">
+                        <tbody class="block sm:table-row-group font-mono text-white">
                             ${day.registers.map((r) => html`
-                                <tr class="text-right border-t border-zinc-800" data-testid="day-register-${r.register_id}">
-                                    <td class="text-left py-2">${r.register_id}</td>
-                                    <td>${r.session_count}</td>
-                                    <td>${formatCents(r.sales_total_cents)}</td>
-                                    <td>${cashOf(r.expected_by_method)}</td>
-                                    <td>${cashOf(r.counted_by_method)}</td>
-                                    <td class=${r.over_short_cents === 0 ? '' : r.over_short_cents < 0 ? 'text-red-400' : 'text-amber-500'}>${signed(r.over_short_cents)}</td>
+                                <tr class="block sm:table-row text-right border-t border-zinc-800 py-2 sm:py-0" data-testid="day-register-${r.register_id}">
+                                    <td class="flex justify-between gap-3 sm:table-cell before:content-[attr(data-label)] before:font-sans before:text-xs before:uppercase before:text-zinc-400 sm:before:hidden text-left sm:py-2" data-label="Register">${r.register_id}</td>
+                                    <td class="flex justify-between gap-3 sm:table-cell before:content-[attr(data-label)] before:font-sans before:text-xs before:uppercase before:text-zinc-400 sm:before:hidden" data-label="Drawers">${r.session_count}</td>
+                                    <td class="flex justify-between gap-3 sm:table-cell before:content-[attr(data-label)] before:font-sans before:text-xs before:uppercase before:text-zinc-400 sm:before:hidden" data-label="Sales">${formatCents(r.sales_total_cents)}</td>
+                                    <td class="flex justify-between gap-3 sm:table-cell before:content-[attr(data-label)] before:font-sans before:text-xs before:uppercase before:text-zinc-400 sm:before:hidden" data-label="Expected cash">${cashOf(r.expected_by_method)}</td>
+                                    <td class="flex justify-between gap-3 sm:table-cell before:content-[attr(data-label)] before:font-sans before:text-xs before:uppercase before:text-zinc-400 sm:before:hidden" data-label="Counted cash">${cashOf(r.counted_by_method)}</td>
+                                    <td data-label="Over / short" class="flex justify-between gap-3 sm:table-cell before:content-[attr(data-label)] before:font-sans before:text-xs before:uppercase before:text-zinc-400 sm:before:hidden ${r.over_short_cents === 0 ? '' : r.over_short_cents < 0 ? 'text-red-400' : 'text-amber-500'}">${signed(r.over_short_cents)}</td>
                                 </tr>`)}
-                            <tr class="text-right border-t border-zinc-700 font-bold" data-testid="day-totals">
-                                <td class="text-left py-2">Branch</td>
-                                <td>${t.session_count}</td>
-                                <td>${formatCents(t.sales_total_cents)}</td>
-                                <td>${cashOf(t.expected_by_method)}</td>
-                                <td>${cashOf(t.counted_by_method)}</td>
-                                <td class=${t.over_short_cents === 0 ? '' : t.over_short_cents < 0 ? 'text-red-400' : 'text-amber-500'}>${signed(t.over_short_cents)}</td>
+                            <tr class="block sm:table-row text-right border-t border-zinc-700 font-bold py-2 sm:py-0" data-testid="day-totals">
+                                <td class="flex justify-between gap-3 sm:table-cell before:content-[attr(data-label)] before:font-sans before:text-xs before:uppercase before:text-zinc-400 sm:before:hidden text-left sm:py-2" data-label="Register">Branch</td>
+                                <td class="flex justify-between gap-3 sm:table-cell before:content-[attr(data-label)] before:font-sans before:text-xs before:uppercase before:text-zinc-400 sm:before:hidden" data-label="Drawers">${t.session_count}</td>
+                                <td class="flex justify-between gap-3 sm:table-cell before:content-[attr(data-label)] before:font-sans before:text-xs before:uppercase before:text-zinc-400 sm:before:hidden" data-label="Sales">${formatCents(t.sales_total_cents)}</td>
+                                <td class="flex justify-between gap-3 sm:table-cell before:content-[attr(data-label)] before:font-sans before:text-xs before:uppercase before:text-zinc-400 sm:before:hidden" data-label="Expected cash">${cashOf(t.expected_by_method)}</td>
+                                <td class="flex justify-between gap-3 sm:table-cell before:content-[attr(data-label)] before:font-sans before:text-xs before:uppercase before:text-zinc-400 sm:before:hidden" data-label="Counted cash">${cashOf(t.counted_by_method)}</td>
+                                <td data-label="Over / short" class="flex justify-between gap-3 sm:table-cell before:content-[attr(data-label)] before:font-sans before:text-xs before:uppercase before:text-zinc-400 sm:before:hidden ${t.over_short_cents === 0 ? '' : t.over_short_cents < 0 ? 'text-red-400' : 'text-amber-500'}">${signed(t.over_short_cents)}</td>
                             </tr>
                         </tbody>
                     </table>
