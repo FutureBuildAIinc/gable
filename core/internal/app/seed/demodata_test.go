@@ -24,6 +24,7 @@ import (
 
 	"github.com/gablelbm/gable/internal/account"
 	"github.com/gablelbm/gable/internal/dashboard"
+	"github.com/gablelbm/gable/internal/staff"
 	"github.com/gablelbm/gable/internal/testutil"
 )
 
@@ -147,6 +148,40 @@ func TestDemoImport(t *testing.T) {
 		t.Fatalf("the import wrote nothing: %+v", first)
 	}
 
+	t.Run("the demo carries a read-first warning and a plain note at the counter", func(t *testing.T) {
+		var warnings, notes int
+		if err := db.QueryRow(`SELECT
+			COUNT(*) FILTER (WHERE kind = 'warning' AND acknowledge_required),
+			COUNT(*) FILTER (WHERE kind = 'note' AND NOT acknowledge_required)
+			FROM customer_alerts WHERE created_by = 'demo-seed' AND show_at_counter AND ended_at IS NULL`).Scan(&warnings, &notes); err != nil {
+			t.Fatal(err)
+		}
+		if warnings != 1 || notes != 1 {
+			t.Errorf("demo alerts: %d acknowledge-required warnings and %d notes, want 1 and 1", warnings, notes)
+		}
+	})
+	t.Run("the counter manager can approve with the demo PIN", func(t *testing.T) {
+		// P2 7 of walk B: a fresh demo had no approver. The seed's counter
+		// manager holds an approver role, an active row and a PIN that the
+		// step up verifies, and the picker's own query lists them.
+		var hash, role string
+		if err := db.QueryRow(`SELECT counter_pin_hash, role FROM staff
+			WHERE staff_no = 'STF-046' AND active AND NOT counter_pin_locked`).Scan(&hash, &role); err != nil {
+			t.Fatalf("read the counter manager: %v", err)
+		}
+		if !staff.VerifyCounterPIN(hash, DemoCounterPIN) {
+			t.Errorf("the demo counter PIN does not verify against the seeded hash")
+		}
+		if staff.VerifyCounterPIN(hash, "0000") {
+			t.Errorf("a wrong PIN verifies")
+		}
+		var listed int
+		if err := db.QueryRow(`SELECT COUNT(*) FROM staff
+			WHERE active AND counter_pin_hash IS NOT NULL AND NOT counter_pin_locked
+			  AND LOWER(role) IN ('admin', 'owner') AND staff_no = 'STF-046'`).Scan(&listed); err != nil || listed != 1 {
+			t.Errorf("the override approver list holds the counter manager %d times (%v), want once", listed, err)
+		}
+	})
 	t.Run("no vendor carries the dealer's own name", func(t *testing.T) {
 		// The dealer buying from a vendor of its own name reads as the dealer
 		// buying from itself on every product and purchase order. A vendor that
@@ -941,6 +976,10 @@ func runCommand(t *testing.T, dbURL, pkg string) {
 		"DATABASE_URL="+dbURL,
 		demoSeedEnv+"=1",
 		demoImportEnv+"=1",
+		// the stack is a local dev one, and the environment's manager PIN is
+		// unset, so the fixed local PIN is the one the seed may write
+		"AUTH_MODE=dev",
+		demoManagerPINEnv+"=",
 	)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("go run %s: %v\n%s", pkg, err, out)
@@ -1444,5 +1483,30 @@ func TestLumberVendorRowIsNotTheDealersOwnFeed(t *testing.T) {
 		if strings.Contains(strings.ToLower(string(vendorKeysData)), w) {
 			t.Errorf("vendor_keys.json still says %q", w)
 		}
+	}
+}
+
+// The fixed counter PIN is a local dev fixture: outside dev mode the seed
+// refuses it, in dev mode it writes it, and the environment's value wins
+// in any mode (CP walk B, P2 7).
+func TestDemoCounterPINIsFixedOnlyInDevMode(t *testing.T) {
+	for _, mode := range []string{"", "production", "staging"} {
+		if pin, ok, err := demoCounterPIN("", mode); ok || pin != "" || err != nil {
+			t.Errorf("AUTH_MODE %q: got (%q, %v, %v), want the fixed PIN refused", mode, pin, ok, err)
+		}
+	}
+	for _, mode := range []string{"dev", "DEV"} {
+		if pin, ok, err := demoCounterPIN("", mode); !ok || pin != DemoCounterPIN || err != nil {
+			t.Errorf("AUTH_MODE %q: got (%q, %v, %v), want the fixed PIN written", mode, pin, ok, err)
+		}
+	}
+	if pin, ok, err := demoCounterPIN("7391", "production"); !ok || pin != "7391" || err != nil {
+		t.Errorf("an environment PIN outside dev: got (%q, %v, %v), want it used", pin, ok, err)
+	}
+	if pin, _, _ := demoCounterPIN("7391", "dev"); pin != "7391" {
+		t.Errorf("the environment PIN must win in dev mode, got %q", pin)
+	}
+	if _, ok, err := demoCounterPIN("1234", "dev"); ok || err == nil {
+		t.Errorf("a plain run PIN from the environment must be refused, got ok=%v err=%v", ok, err)
 	}
 }

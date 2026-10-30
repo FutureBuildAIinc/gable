@@ -102,6 +102,7 @@ Optional values, all with a default:
 | `RATE_LIMIT_PER_MINUTE` | `120` | The API's request limit per caller address. |
 | `SMTP_HOST`, `SMTP_PORT`, `SMTP_FROM`, `SMTP_TLS` | empty | Mail. Left empty, the report runs and its result is logged instead of being delivered, and the report's screen says that the delivery was logged and not sent. |
 | `DEMO_SEED_ONCE` | `1` | The seed's memory. With it on, the seed runs on the first start only. |
+| `DEMO_MANAGER_PIN` | empty | The demo counter manager's PIN (four to eight digits, no plain run). No default and never printed: left empty, the manager has no PIN and "Ask a manager to approve" has no approver. |
 | `DEMO_SEED_FORCE` | empty | `1` asks for a reseed on purpose. |
 | `POSTGRES_USER`, `POSTGRES_DB` | `gable_user`, `gable_db` | The database's user and name. |
 | `AUTH_ISSUER` | empty | Optional in the customer variant: the expected token issuer (`iss` claim) when `JWKS_URL` is used. |
