@@ -115,6 +115,10 @@ var publicAPIPaths = []string{
 	"/api/v1/auth/signout",
 }
 
+// uploadsRoles are the roles that may fetch an uploaded file: every mapped
+// staff role (ADR 0012 section 5), which replaces the old "user" role.
+var uploadsRoles = middleware.StaffRoles()
+
 // machineKeyValidator adapts the techadmin service to the machine-key auth
 // core's KeyValidator seam: a credential failure (unknown, revoked or
 // malformed key) crosses as middleware.ErrInvalidMachineKey, anything else as
@@ -1277,7 +1281,7 @@ func Run() {
 	// Static file serving for uploaded photos (auth-protected, no directory listing)
 	uploadFS := noListingFileSystem{fs: http.Dir("uploads")}
 	fileServer := http.FileServer(uploadFS)
-	mux.Handle("/uploads/", middleware.RequireRole("admin", "owner", "user")(http.StripPrefix("/uploads/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	mux.Handle("/uploads/", middleware.RequireRole(uploadsRoles...)(http.StripPrefix("/uploads/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Disposition", "attachment")
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		fileServer.ServeHTTP(w, r)

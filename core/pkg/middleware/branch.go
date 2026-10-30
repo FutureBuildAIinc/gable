@@ -395,6 +395,11 @@ func ClaimsHaveAnyRole(claims *UserClaims, roles ...string) bool {
 // roleOrder is the fixed order of Gable roles (ADR 0012 section 5).
 var roleOrder = []string{"owner", "admin", "sales", "finance", "purchasing", "warehouse", "cashier", "driver"}
 
+// StaffRoles returns the Gable role vocabulary a staff session can hold, in
+// the fixed order. A guard that names a role outside it can never admit a
+// staff session, which a test pins.
+func StaffRoles() []string { return append([]string(nil), roleOrder...) }
+
 // ClaimsPrimaryRole returns the first of the claims' mapped roles in the fixed
 // order owner, admin, sales, finance, purchasing, warehouse, cashier, driver,
 // so a recorded role string does not depend on the order of roles. A role

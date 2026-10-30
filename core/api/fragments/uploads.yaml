@@ -3,7 +3,7 @@
 #
 # The /uploads/ file server, transcribed from internal/app/serve/serve.go as
 # it behaves today. A static file server over the "uploads" directory, behind
-# the user JWT (BearerJWT) and the RequireRole guard (admin, owner, user). A
+# the user JWT (BearerJWT) and the RequireRole guard (every mapped staff role: owner, admin, sales, finance, purchasing, warehouse, cashier, driver). A
 # machine key is refused 403 here: keys are accepted on /api/v1 module routes
 # only (pkg/middleware/machinekey.go, TestMachineKeyOutsideModuleRoutesRefused).
 # Content-Type comes from net/http's FileServer: the file extension first
@@ -28,7 +28,7 @@ paths:
         nosniff. A nonexistent file is a 404. The mount registers for every
         HTTP method and the file server ignores the method, so any other
         method on the same path answers the same file with the same status.
-        A user JWT whose roles do not include admin, owner or user is a 403;
+        A user JWT whose roles include none of the staff roles (owner, admin, sales, finance, purchasing, warehouse, cashier, driver) is a 403;
         a machine key is a 403 on this path whatever scope it holds.
       security:
         - BearerJWT: []
