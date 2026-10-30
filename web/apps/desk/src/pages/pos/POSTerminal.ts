@@ -3093,11 +3093,11 @@ export class POSTerminal extends LitElement {
             ${this._tenderMethod === null ? 'Amount' : isCash ? 'Cash tendered' : html`<span class="capitalize">${this._tenderMethod}</span> amount`}
           </label>
           <input id="pos-tender-amount" type="text" inputmode="decimal" autocomplete="off"
-            placeholder=${owed > 0 ? (owed / 100).toFixed(2) : ''} .value=${this._tenderAmount}
+            placeholder=${owed > 0 ? `Owed ${formatCents(owed)}` : ''} .value=${this._tenderAmount}
             ?disabled=${!hasLines || !open || this._tenderMethod === null}
             @input=${(e: Event) => { this._tenderAmount = (e.target as HTMLInputElement).value; this._scheduleLargeCashLook(); }}
             @blur=${() => this._formatTenderAmount()}
-            class="mt-1 w-full rounded border border-white/10 bg-deep-space px-3 py-2 text-right font-mono text-xl font-bold text-white outline-none focus:border-gable-green"
+            class="mt-1 w-full rounded border border-white/10 bg-deep-space px-3 py-2 text-right font-mono text-xl font-bold text-white placeholder:text-sm placeholder:font-normal placeholder:text-slate-500 outline-none focus:border-gable-green"
             aria-label="Tender amount" />
           ${cardFee !== null ? html`
             <div class="mt-2 rounded-lg border border-white/10 bg-deep-space/60 p-3 text-sm text-slate-300" role="status" data-testid="pos-card-fee">

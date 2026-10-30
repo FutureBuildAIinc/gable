@@ -465,6 +465,16 @@ describe('the counter as the Panels layout', () => {
       expect(input.value).toBe('150.50');
     });
 
+    it('hints the amount owed in words, small and dim, so it never reads as typed', async () => {
+      const el = await mount(sale());
+      const input = el.querySelector('#pos-tender-amount') as HTMLInputElement;
+      expect(input.placeholder).toMatch(/^Owed \$/);
+      expect(input.value).toBe('');
+      expect(input.className).toContain('placeholder:text-sm');
+      expect(input.className).toContain('placeholder:font-normal');
+      expect(input.className).toContain('placeholder:text-slate-500');
+    });
+
     it('flows the right column with the page: one scroller, no sticky column, no inner region, no pinned block', async () => {
       const el = await mount(sale());
       const body = q(el, 'pos-body');
