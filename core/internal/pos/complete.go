@@ -200,7 +200,9 @@ func (s *Service) CompleteSale(ctx context.Context, saleID uuid.UUID, ifMatch st
 	if preRoundingMode == RoundingNearest5Cents && cashTendered > 0 {
 		cashLegExact := cashTendered - change
 		if cashLegExact > 0 {
-			cashLegRounded, preDiff := RoundCash(cashLegExact)
+			// The same carrier rule as the transaction, so the pre-check and
+			// the sale agree on what the drawer keeps.
+			cashLegRounded, preDiff, _ := roundCashLeg(tenders, cashTendered, cashLegExact)
 			if preDiff != 0 {
 				change = cashTendered - cashLegRounded
 				if change < 0 {
@@ -522,30 +524,9 @@ func (s *Service) completeSaleTx(ctx context.Context, saleID uuid.UUID, ifMatch 
 		// the change. It is the leg the rule moves; the card, the cheque, the
 		// account and the store credit settle to the exact cent.
 		cashLegExact := cashTendered - change
-		cashLegRounded, roundingDiff := cashLegExact, int64(0)
-		roundingCarrier := -1
+		cashLegRounded, roundingDiff, roundingCarrier := cashLegExact, int64(0), -1
 		if roundingMode == RoundingNearest5Cents && cashLegExact > 0 {
-			cashLegRounded, roundingDiff = RoundCash(cashLegExact)
-			if roundingDiff != 0 {
-				// The change falls out of the rounded figure, so the cash leg
-				// pays what the drawer keeps. The payment that carries the
-				// difference is the leg's largest one: it can stand the
-				// difference on its own, and the other cash payments keep
-				// their whole amount.
-				roundedChange := cashTendered - cashLegRounded
-				legPayments := cashLegPayments(tenders, roundedChange)
-				for i := range legPayments {
-					if legPayments[i] > 0 && (roundingCarrier < 0 || legPayments[i] > legPayments[roundingCarrier]) {
-						roundingCarrier = i
-					}
-				}
-				if roundingCarrier < 0 || legPayments[roundingCarrier] < roundingDiff {
-					// No leg can stand the difference: the money is taken
-					// exactly rather than half rounded.
-					cashLegRounded, roundingDiff = cashLegExact, 0
-					roundingCarrier = -1
-				}
-			}
+			cashLegRounded, roundingDiff, roundingCarrier = roundCashLeg(tenders, cashTendered, cashLegExact)
 		}
 		if roundingDiff != 0 {
 			change = cashTendered - cashLegRounded
@@ -1199,6 +1180,31 @@ func (s tenderSums) legsRefusal() error {
 		return conflict("one_store_credit_leg", "a sale takes at most one store credit tender: put the whole amount on one")
 	}
 	return nil
+}
+
+// roundCashLeg rounds the exact cash leg to the nearest five cents (CP-18) and
+// returns the rounded figure, the difference and the index of the tender that
+// carries it (-1 when nothing is rounded). The change falls out of the rounded
+// figure, so the cash leg pays what the drawer keeps. The payment that carries
+// the difference is the leg's largest one: it can stand the difference on its
+// own, and the other cash payments keep their whole amount. When no leg can
+// stand the difference the money is taken exactly rather than half rounded.
+func roundCashLeg(tenders []TenderIn, cashTendered, cashLegExact int64) (rounded, diff int64, carrier int) {
+	rounded, diff = RoundCash(cashLegExact)
+	if diff == 0 {
+		return cashLegExact, 0, -1
+	}
+	carrier = -1
+	legPayments := cashLegPayments(tenders, cashTendered-rounded)
+	for i := range legPayments {
+		if legPayments[i] > 0 && (carrier < 0 || legPayments[i] > legPayments[carrier]) {
+			carrier = i
+		}
+	}
+	if carrier < 0 || legPayments[carrier] < diff {
+		return cashLegExact, 0, -1
+	}
+	return rounded, diff, carrier
 }
 
 // cashLegPayments splits the cash tenders into the payments they become: the
