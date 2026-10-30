@@ -253,6 +253,21 @@ describe('the counter when the connection drops', () => {
       expect(q(el, 'pos-offline-sign-in')).toBeTruthy();
       el.remove();
     });
+
+    it('says the server cannot be reached, and keeps the ask, when the methods answer degraded during a drop', async () => {
+      core.refuse['sync_offline_queue'] = noSession;
+      auth.authMethodsConfig.mockResolvedValue({ ...methods([{ method: 'email_password', kind: 'form' }]), degraded: true, notice: 'degraded' });
+      const el = await mount();
+      await settle(el);
+      core.calls.length = 0;
+      (q(el, 'pos-offline-sign-in') as HTMLButtonElement).click();
+      await settle(el);
+      expect(core.calls.some((c) => c.command === 'begin_sign_in')).toBe(false);
+      expect(q(el, 'pos-offline-strip')?.textContent).toContain('The server cannot be reached');
+      expect(q(el, 'pos-offline-strip')?.textContent).not.toContain('no sign in method');
+      expect(q(el, 'pos-offline-sign-in')).toBeTruthy();
+      el.remove();
+    });
   });
 
   it('reads the unknown cart on reconnect: abandoned by a linked sale, the clerk is asked and the answer recorded', async () => {
