@@ -536,3 +536,27 @@ func TestOfflineResolve_ALatePostNeedsAnOpenDate(t *testing.T) {
 	}
 	wantNothingPosted(t, f, sale)
 }
+
+// RULE (ADR 0011 6.3 under an accept): an accept judges no price, tax or cap
+// again, but the session must still be the register's own and the cashier
+// its cashier: a stored row naming another register's session is refused
+// out_of_wall and posts nothing.
+func TestOfflineResolve_AnAcceptKeepsTheSessionRules(t *testing.T) {
+	f := newFixture(t, testutil.RequireDB(t))
+	offlinePolicyOn(t, f)
+	b := newOfflineBench(t, f)
+	other := newOfflineBench(t, f, "REG-OXO-"+uuid.NewString()[:8])
+	raw, sale := b.build(t, saleSpec{lines: []offlineLine{line(f.productID, "1")}}, func(s *pos.SignedOfflineSale) {
+		s.Lines[0].UnitPriceTenThousandths = 10000
+		s.Lines[0].LineTotalCents = 100
+		s.SubtotalCents, s.TaxCents, s.TotalCents = 100, 9, 109
+		s.Tenders[0].AmountCents = 109
+		s.QueueTotalCents = 109
+	})
+	id := *wantOutcome(t, b.sync(t, raw), sale, pos.OfflineRefused, "price_unverified").ExceptionID
+	mustExec(t, f.db, `UPDATE pos_offline_exceptions SET signed_sale = jsonb_set(signed_sale, '{till_session_id}', to_jsonb($2::text))
+		WHERE id = $1`, id, other.session.String())
+	_, err := resolveAs(t, f, id, pos.ResolveAccept, offlineManager)
+	wantRefused(t, err, "out_of_wall")
+	wantNothingPosted(t, f, sale)
+}
