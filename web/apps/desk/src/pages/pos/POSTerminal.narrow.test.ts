@@ -40,7 +40,7 @@ import type { POSTerminal } from './POSTerminal';
 import type { CounterRegister } from '../../types/pos';
 
 const REG_01: CounterRegister = {
-  id: 'REG-01', name: 'Front till', branch_id: 'b-main', branch_code: 'MAIN', branch_name: 'main yard',
+  id: 'REG-01', name: 'Front till', branch_id: 'b-main', branch_code: 'MAIN', branch_name: 'main yard', card_terminal: 'run',
 };
 const OPEN_TILL = { id: 't', register_id: 'REG-01', cashier_id: 'c', status: 'open', opening_float_cents: 20000 };
 

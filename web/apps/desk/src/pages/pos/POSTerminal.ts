@@ -18,7 +18,7 @@ import { CustomerService } from '../../services/CustomerService';
 import type { ShipTo } from '../../types/customer';
 import {
   chargeRefusal, standingOf, money, PO_REFUSAL, JOB_REFUSAL, verdictLine, waysForward, wayLabel, buyerRefusal, checkRefusal,
-  storeCreditOffer, tenderMethods, idRefusal, idRequired, idRequiredWords, holdStanding, type CheckIDRule,
+  storeCreditOffer, tenderMethods, idRefusal, idRequired, idRequiredWords, holdStanding, cardRefusal, cardRefundRefusal, cardSimulatorNote, type CheckIDRule,
 } from './standing';
 import { differenceOf, exchangeTotals, reasonLabel, returnRefusal } from './exchange';
 import { signatureRefusal, sealedWords } from './signatureLogic';
@@ -657,7 +657,9 @@ export class POSTerminal extends LitElement {
     try {
       const enrolment = await offlineCounter.enrolment();
       const snapshot = await offlineCounter.snapshot();
-      this._registers = [{ id: enrolment.register_id, name: enrolment.register_id, branch_id: snapshot.branch_id, branch_code: '', branch_name: 'Offline' }];
+      // offline the register runs no card terminal: Card is refused in words, as
+      // the server refuses a card offline (CP-05 round 3 P1-B)
+      this._registers = [{ id: enrolment.register_id, name: enrolment.register_id, branch_id: snapshot.branch_id, branch_code: '', branch_name: 'Offline', card_terminal: 'none' }];
       this._register = this._registers[0];
       this._registersLoaded = true;
       this._registersFailed = false;
@@ -1126,6 +1128,21 @@ export class POSTerminal extends LitElement {
     } catch (err: unknown) {
       this._error = err instanceof Error ? err.message : 'Failed to save the purchase order';
     }
+  }
+
+  /** The words beside Card when the terminal is the simulator and no card is charged (CP-05 round 2). */
+  private get _cardSimulatorNote(): string | null {
+    return cardSimulatorNote(this._register);
+  }
+
+  /** Why Card is not offered, or null when it is: the register has no card terminal (CP-05 A1). */
+  private get _cardRefusal(): string | null {
+    return cardRefusal(this._register);
+  }
+
+  /** The same, in a refund's words, for the return dialog (CP-05 round 3 P3-C). */
+  private get _cardRefundRefusal(): string | null {
+    return cardRefundRefusal(this._register);
   }
 
   /** Why the charge to the account is not offered, or null when it is. */
@@ -1616,8 +1633,9 @@ export class POSTerminal extends LitElement {
         return open && (this._step === 'payment' || this._step === 'summary');
       case 'tender-cash':
       case 'tender-check':
-      case 'tender-card':
         return till && open && hasLines && this._changing.size === 0;
+      case 'tender-card':
+        return till && open && hasLines && this._changing.size === 0 && this._cardRefusal === null;
       case 'tender-account':
         return till && open && hasLines && this._changing.size === 0 && this._accountRefusal === null;
       case 'pay':
@@ -1951,6 +1969,13 @@ export class POSTerminal extends LitElement {
     if (this._till === null) return;
     if (method === 'account') {
       const refusal = this._accountRefusal;
+      if (refusal) {
+        this._error = refusal;
+        return;
+      }
+    }
+    if (method === 'card') {
+      const refusal = this._cardRefusal;
       if (refusal) {
         this._error = refusal;
         return;
@@ -3034,7 +3059,9 @@ export class POSTerminal extends LitElement {
             <gable-select .value=${this._returnMethod}
               .options=${[
                 { value: 'cash', label: 'Cash (out of the drawer)' },
-                { value: 'card', label: 'Card (back on the card)' },
+                this._cardRefundRefusal !== null
+                  ? { value: 'card', label: `Card (${this._cardRefundRefusal})`, disabled: true }
+                  : { value: 'card', label: 'Card (back on the card)' },
                 { value: 'account', label: 'Account credit' },
               ]}
               @change=${(e: Event) => { this._returnMethod = (e.target as HTMLSelectElement).value as RefundMethod; }}
@@ -3114,7 +3141,7 @@ export class POSTerminal extends LitElement {
             <label style="font-size:13px;color:rgb(var(--gb-till-muted))">Customer pays by</label>
             <div style="flex:1">
               <gable-select data-testid="exchange-tender" .value=${this._exchangeTender}
-                .options=${[{ value: 'cash', label: 'Cash' }, { value: 'check', label: 'Check' }, { value: 'card', label: 'Card' }]}
+                .options=${[{ value: 'cash', label: 'Cash' }, { value: 'check', label: 'Check' }]}
                 @change=${(e: Event) => { this._exchangeTender = (e.target as HTMLSelectElement).value as ExchangeTenderMethod; }}
               ></gable-select>
             </div>
@@ -3389,13 +3416,14 @@ export class POSTerminal extends LitElement {
           <div class="mt-4 text-xs font-semibold uppercase tracking-wide text-slate-400">How is the customer paying?</div>
           <div class="mt-2 grid grid-cols-2 gap-2" role="group" aria-label="Tender">
             ${tenderMethods(this._standing).map((m) => {
-              const refused = m === 'account' ? this._accountRefusal : null;
+              const refused = m === 'account' ? this._accountRefusal : m === 'card' ? this._cardRefusal : null;
               const chosen = this._tenderMethod === m && this._till !== null;
               const noCredit = m === 'store_credit' && storeCreditOffer(this._standing, owed) <= 0;
               return html`
                 <button data-testid="tender-${m}" @click=${() => this._chooseMethod(m)}
                   ?disabled=${this._till === null || !hasLines || !open || refused !== null || noCredit || this._changing.size > 0}
                   title=${m === 'account' ? (refused ?? 'Charge the sale to the customer’s account')
+                    : m === 'card' ? (refused ?? '')
                     : m === 'store_credit' ? `The account holds ${money(this._standing?.open_credit_memo_cents ?? 0)} of store credit` : ''}
                   aria-pressed=${chosen ? 'true' : 'false'}
                   class="min-h-14 rounded-lg border px-3 py-3 text-base font-semibold ${m === 'store_credit' ? 'col-span-2 min-[768px]:col-span-1 ' : ''}${m === 'account' || m === 'store_credit' ? '' : 'capitalize'} disabled:cursor-not-allowed ${chosen ? 'border-gable-green text-gable-green' : 'border-white/10 text-white disabled:opacity-40'}">
@@ -3403,6 +3431,10 @@ export class POSTerminal extends LitElement {
                 </button>`;
             })}
           </div>
+          ${this._cardRefusal !== null && this._till !== null ? html`
+            <p class="mt-2 text-xs text-slate-400" data-testid="pos-card-refusal">${this._cardRefusal}</p>` : nothing}
+          ${this._cardSimulatorNote !== null && this._till !== null ? html`
+            <p class="mt-2 text-xs text-amber-400" data-testid="pos-card-simulated">${this._cardSimulatorNote}</p>` : nothing}
           ${accountWhy !== null ? html`
             <div class="mt-3 rounded-lg border border-amber-400/40 bg-amber-400/10 p-3 text-sm text-amber-400" data-testid="pos-account-refusal">
               <p>${accountWhy}</p>

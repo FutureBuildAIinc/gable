@@ -23,6 +23,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/gablelbm/gable/internal/payment"
 	"github.com/gablelbm/gable/internal/testutil"
 )
 
@@ -134,7 +135,8 @@ func TestCP18_OffByDefault(t *testing.T) {
 // check sale settle to the exact cent.
 func TestCP18_CashOnlyRounded(t *testing.T) {
 	testutil.LockOutboxTables(t)
-	f := newFixture(t, testutil.RequireDB(t))
+	// the card runs on the simulated terminal: with none wired the counter refuses a card (CP-05 A1)
+	f := newFixture(t, testutil.RequireDB(t), withTerminal(payment.SimApprove, 0))
 	f.noTax()
 	f.setRounding("NEAREST_5_CENTS")
 
@@ -221,7 +223,8 @@ func TestCP18_CashOnlyRounded(t *testing.T) {
 // exact cent and the total is not rounded as a whole.
 func TestCP18_SplitTenderRoundsCashLeg(t *testing.T) {
 	testutil.LockOutboxTables(t)
-	f := newFixture(t, testutil.RequireDB(t))
+	// the card runs on the simulated terminal: with none wired the counter refuses a card (CP-05 A1)
+	f := newFixture(t, testutil.RequireDB(t), withTerminal(payment.SimApprove, 0))
 	f.noTax()
 	f.setRounding("NEAREST_5_CENTS")
 
