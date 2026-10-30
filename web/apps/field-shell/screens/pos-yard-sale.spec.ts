@@ -15,23 +15,9 @@ import { join } from 'node:path';
 const SHOTS_DIR = process.env.SHOTS_DIR ?? 'screens/shots';
 mkdirSync(SHOTS_DIR, { recursive: true });
 
-// A structurally valid but invented JWT (never a real credential: `none`
-// algorithm, placeholder signature, far future exp as a bare epoch number).
-function fakeToken(claims: Record<string, unknown>): string {
-  const seg = (v: unknown) => Buffer.from(JSON.stringify(v)).toString('base64url');
-  return `${seg({ alg: 'none', typ: 'JWT' })}.${seg(claims)}.${seg({ sig: 'stub' })}`;
-}
-
-const SESSION = {
-  v: 1,
-  kind: 'token',
-  token: fakeToken({
-    sub: 'screens-yard-sale',
-    name: 'Casey Ng',
-    roles: ['cashier'],
-    exp: 4102444800,
-  }),
-};
+// The session the core answers for the cookie (custody holds a staff session in
+// memory only, so each document asks GET /api/v1/auth/session at boot).
+const SESSION = { sub: 'screens-yard-sale', roles: ['cashier'] };
 
 const BRANCHES = [
   { id: 'b-kel', code: 'KEL-MAIN', name: 'Kelowna Main Yard', is_home: true },
@@ -81,12 +67,12 @@ async function mockApi(page: Page): Promise<void> {
 async function boot(page: Page, theme: 'dark' | 'light', width: number, height: number): Promise<void> {
   await page.setViewportSize({ width, height });
   await mockApi(page);
+  await page.route('**/api/v1/auth/session', (route) => route.fulfill({ json: SESSION }));
   await page.context().addInitScript(
-    ({ session, theme: t }) => {
-      sessionStorage.setItem('gable.auth.session.v1', JSON.stringify(session));
+    ({ theme: t }) => {
       localStorage.setItem('gable_theme', t);
     },
-    { session: SESSION, theme },
+    { theme },
   );
   await page.goto('/field/');
   await page.locator('gable-shell-header header[data-mode="phone"]').waitFor();

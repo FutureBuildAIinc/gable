@@ -35,7 +35,7 @@ import {
 } from 'lucide';
 import { icon, cn, useThemeSubject, googleGlyph, microsoftGlyph } from '@gable/design-system';
 import {
-  authCustody, authConfig, InvalidTokenError,
+  authCustody, authConfig, InvalidTokenError, signInStaff, signOutStaff, restoreStaffSession,
   authMethodsConfig, resetAuthMethodsCache, recordIdentity, readIdentity, forgetIdentity,
   type AuthMethodsRuntimeConfig, type SignInMethodCode, type SignInMethodConfig, type TappedIdentity,
 } from '@gable/auth';
@@ -114,9 +114,8 @@ export class GableFrontDoor extends LitElement {
   @state() private _userName: string | null = null;
   @state() private _roles: string[] = [];
   @state() private _devName = 'Local Developer';
-  @state() private _token = '';
   @state() private _signInError: string | null = null;
-  @state() private _errorSource: SignInMethodCode | 'continue-as' | 'token' | 'session' | null = null;
+  @state() private _errorSource: SignInMethodCode | 'continue-as' | 'dev' | 'session' | null = null;
   // The runtime auth methods config (S8): the dealer's allowed sign in
   // methods, discovered from the server, in the server's order. Null until
   // the answer arrives (or fails closed) in a production build.
@@ -149,6 +148,9 @@ export class GableFrontDoor extends LitElement {
     // boot; a dev build keeps its persona cards and never asks.
     if (!authConfig.devMode) {
       void this._loadAuthConfig();
+      // A fresh tab holds no display data but may hold a live session
+      // cookie: ask the core who it is.
+      if (session === null) void this._restoreSession();
       // Every refused callback lands on /?sign_in=failed: one fixed line,
       // whatever the reason.
       if (new URLSearchParams(window.location.search).get('sign_in') === 'failed') {
@@ -156,6 +158,19 @@ export class GableFrontDoor extends LitElement {
         this._signInError = 'That sign in did not work. Try again, or use another method.';
       }
     }
+  }
+
+  private async _restoreSession() {
+    if (!(await restoreStaffSession())) return;
+    this._adoptStaffSession();
+    void this._loadCatalog();
+  }
+
+  /** Pick up the display data custody now holds (name, roles, theme). */
+  private _adoptStaffSession() {
+    useThemeSubject(authCustody.subject);
+    this._userName = authCustody.displayName;
+    this._roles = authCustody.roles;
   }
 
   private async _loadAuthConfig() {
@@ -231,7 +246,10 @@ export class GableFrontDoor extends LitElement {
     }
   }
 
-  /** The email and password form: the portal login answers the session cookie. */
+  /**
+   * The email and password form: the core signs the person in through
+   * Appwrite and answers the session cookie; custody keeps display data.
+   */
   private async _signInEmailPassword() {
     this._signInError = null;
     this._errorSource = 'email_password';
@@ -239,23 +257,15 @@ export class GableFrontDoor extends LitElement {
       this._signInError = 'Enter your email and password.';
       return;
     }
-    try {
-      const resp = await fetch('/api/portal/v1/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({ email: this._email, password: this._password }),
-      });
-      if (resp.ok) {
-        // The session rides the portal cookie; the portal is where this
-        // sign in continues.
-        window.location.assign('/portal');
-        return;
-      }
-      this._signInError = await serverMessage(resp) ?? 'Sign in failed.';
-    } catch {
-      this._signInError = 'The server could not be reached.';
+    const result = await signInStaff(this._email, this._password);
+    this._password = '';
+    if (!result.ok) {
+      this._signInError = result.message;
+      return;
     }
+    this._adoptStaffSession();
+    this._tapIdentity(null, 'email_password');
+    void this._loadCatalog();
   }
 
   private async _loadCatalog() {
@@ -276,19 +286,16 @@ export class GableFrontDoor extends LitElement {
     }
   }
 
+  /** The dev build's free name sign in (the core runs AUTH_MODE=dev). */
   private _signIn() {
     this._signInError = null;
-    this._errorSource = 'token';
+    this._errorSource = 'dev';
     try {
-      if (authConfig.devMode) {
-        authCustody.signInDev(this._devName);
-      } else {
-        authCustody.signInWithToken(this._token);
-      }
+      authCustody.signInDev(this._devName);
     } catch (err) {
       this._signInError = err instanceof Error ? err.message : String(err);
       if (err instanceof InvalidTokenError) {
-        this._signInError = 'That token was refused: it is not a readable, unexpired JWT.';
+        this._signInError = 'Enter a name to sign in.';
       }
       return;
     }
@@ -380,6 +387,12 @@ export class GableFrontDoor extends LitElement {
       return;
     }
     this._focusFirstAllowedMethod();
+  }
+
+  /** The Sign out button: a staff session is revoked at the core first. */
+  private async _signOutClicked() {
+    if (authCustody.session?.kind === 'staff') await signOutStaff();
+    this._signOut();
   }
 
   private _signOut() {
@@ -508,7 +521,7 @@ export class GableFrontDoor extends LitElement {
               </div>
             ` : nothing}
             <button
-              @click=${() => this._signOut()}
+              @click=${() => void this._signOutClicked()}
               class="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-sm text-zinc-300 hover:text-white hover:border-gable-green/40 transition-colors"
             >
               Sign out
@@ -791,37 +804,6 @@ export class GableFrontDoor extends LitElement {
       <div class="space-y-2.5">
         ${this._renderMethodList(this._authCfg.methods)}
       </div>
-      <details class="border-t border-white/15 pt-4">
-        <summary class="text-xs uppercase tracking-wider text-muted-foreground cursor-pointer select-none rounded hover:text-white hover:underline underline-offset-4 focus:outline-none focus-visible:ring-2 focus-visible:ring-gable-green transition-colors">
-          Use a bearer token instead
-        </summary>
-        <div class="pt-3 space-y-3">
-          <p class="text-xs text-zinc-400">
-            Paste the bearer token your identity provider issued. It is held for this tab only and cleared when you sign out.
-          </p>
-          <label class="block space-y-1.5">
-            <span class="text-xs uppercase tracking-wider text-muted-foreground">Bearer token</span>
-            <textarea
-              .value=${this._token}
-              @input=${(e: Event) => { this._token = (e.target as HTMLTextAreaElement).value; }}
-              rows="4"
-              aria-label="Bearer token"
-              placeholder="Paste the token"
-              class="w-full bg-surface-2 border border-zinc-500 rounded-lg px-3 py-2 text-base sm:text-xs font-mono text-white placeholder:font-sans placeholder:tracking-normal placeholder:text-zinc-400 focus:outline-none focus:ring-1 focus:ring-gable-green focus:border-gable-green transition-all"
-            ></textarea>
-          </label>
-          <button
-            type="button"
-            @click=${() => this._signIn()}
-            class="w-full min-h-[44px] sm:min-h-0 rounded-lg bg-surface-2 border border-zinc-500 px-4 py-3 sm:py-2.5 text-sm font-medium text-zinc-300 hover:text-white hover:border-gable-green focus:outline-none focus-visible:ring-2 focus-visible:ring-gable-green transition-all"
-          >
-            Sign in with the token
-          </button>
-          ${this._signInError && this._errorSource === 'token' ? html`
-            <p role="alert" class="text-sm text-safety-red">${this._signInError}</p>
-          ` : nothing}
-        </div>
-      </details>
     `;
   }
 
@@ -1001,7 +983,7 @@ export class GableFrontDoor extends LitElement {
     // passes dev callers through every guard).
     const session = authCustody.session;
     let rolesForTiles: string[] | null;
-    if (session?.kind === 'token') {
+    if (session?.kind === 'token' || session?.kind === 'staff') {
       rolesForTiles = this._roles;
     } else if (session?.kind === 'dev' && authCustody.personaRole !== null) {
       rolesForTiles = [authCustody.personaRole];

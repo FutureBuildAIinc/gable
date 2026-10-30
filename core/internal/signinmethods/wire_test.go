@@ -201,8 +201,8 @@ func TestConfigBeforeSignIn(t *testing.T) {
 	if first["method"] != "email_password" || first["kind"] != "form" {
 		t.Errorf("the default method = %v (%v), want email_password (form)", first["method"], first["kind"])
 	}
-	if first["start_url"] != "/api/portal/v1/login" {
-		t.Errorf("the form method's start_url = %v, want the portal login", first["start_url"])
+	if first["start_url"] != "/api/v1/auth/signin" {
+		t.Errorf("the form method's start_url = %v, want the staff sign in", first["start_url"])
 	}
 
 	// When the dealer profile carries a trading name, legal name, contact

@@ -419,6 +419,34 @@ describe('gable-app-shell: the person menu', () => {
     expect(goToDoor).toHaveBeenCalled()
   })
 
+  it('Sign out of a staff session revokes it at the core, with the CSRF header, before the door opens', async () => {
+    authConfig.devMode = false
+    authCustody.signInStaff({ sub: 'sub-1', roles: ['cashier'], name: 'till@example.test' })
+    const order: string[] = []
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      order.push(`${init?.method ?? 'GET'} ${url} csrf=${new Headers(init?.headers).get('X-Gable-CSRF')}`)
+      return new Response(null, { status: 204 })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    const el = await shellAt('/orders')
+    await flush()
+    await update(el, {})
+    const goToDoor = vi.spyOn(el as unknown as { _goToDoor: () => void }, '_goToDoor')
+      .mockImplementation(() => { order.push('door') })
+
+    q<HTMLButtonElement>(el, 'button[aria-haspopup="menu"]').click()
+    await update(el, {})
+    q<HTMLButtonElement>(el, '[role="menuitem"]').click()
+    await flush()
+
+    const out = order.indexOf('POST /api/v1/auth/signout csrf=1')
+    expect(out).toBeGreaterThanOrEqual(0)
+    expect(order.indexOf('door')).toBeGreaterThan(out)
+    expect(authCustody.session).toBeNull()
+    expect(goToDoor).toHaveBeenCalled()
+    vi.unstubAllGlobals()
+  })
+
   it('Escape closes the menu and returns the focus to the chip', async () => {
     const el = await signedInShell()
     const chip = q<HTMLButtonElement>(el, 'button[aria-haspopup="menu"]')

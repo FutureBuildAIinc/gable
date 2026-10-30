@@ -73,7 +73,7 @@ export function degradedAuthMethodsConfig(): AuthMethodsRuntimeConfig {
         method: 'email_password',
         kind: 'form',
         label: 'Email and password',
-        start_url: '/api/portal/v1/login',
+        start_url: '/api/v1/auth/signin',
         issuer_url: null,
         client_id: null,
       },

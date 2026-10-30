@@ -80,8 +80,9 @@ func labelOf(code string) string {
 const StartPath = "/api/v1/auth/start/"
 
 // formStartAction is where the door's email and password form posts: the
-// portal login, the one email and password sign in the server implements.
-const formStartAction = "/api/portal/v1/login"
+// staff sign in the core makes through Appwrite (ADR 0012). The portal's own
+// login page posts to the portal login directly and does not read this.
+const formStartAction = "/api/v1/auth/signin"
 
 // Row is one stored allowed method.
 type Row struct {

@@ -9661,7 +9661,7 @@ export interface paths {
         };
         /**
          * The runtime auth config
-         * @description Public (answers before any sign in). The auth mode the server runs in, the dealer's public display name and optional mark URL for the white labelled door (read from the single dealer_profile row), and the dealer's allowed sign in methods in the stored order, each with what the front door needs to render it: the kind (form, passkey, link or redirect), the label, the start URL (the portal login for the form method, the start route for the others). The oidc issuer is configured in Appwrite, so its issuer URL and client id are always null here. A strict allowlist response type: it never carries a secret, an internal host or another tenant's data. The dealer is the install's single tenant.
+         * @description Public (answers before any sign in). The auth mode the server runs in, the dealer's public display name and optional mark URL for the white labelled door (read from the single dealer_profile row), and the dealer's allowed sign in methods in the stored order, each with what the front door needs to render it: the kind (form, passkey, link or redirect), the label, the start URL (the staff sign in for the form method, the start route for the others). The oidc issuer is configured in Appwrite, so its issuer URL and client id are always null here. A strict allowlist response type: it never carries a secret, an internal host or another tenant's data. The dealer is the install's single tenant.
          */
         get: operations["authConfigGet"];
         put?: never;
@@ -21747,7 +21747,7 @@ export interface components {
             kind: "form" | "passkey" | "link" | "redirect";
             /** @description The door's label; an oidc row carries its own. */
             label: string;
-            /** @description Where the method starts: the portal login for the form method, the start route for every other. */
+            /** @description Where the method starts: the staff sign in for the form method, the start route for every other. */
             start_url: string | null;
             /** @description Retired (the issuer is configured in Appwrite); always null. */
             issuer_url: string | null;

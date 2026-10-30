@@ -184,9 +184,19 @@ describe('fetchWithAuth — header construction', () => {
     expect(sentHeaders().has('Content-Type')).toBe(false)
   })
 
-  it('always sends cookies (portal auth uses an httpOnly cookie)', async () => {
+  it('always sends cookies to its own origin (the staff session and the portal use httpOnly cookies)', async () => {
     await fetchWithAuth('/api/portal/v1/orders')
-    expect(sentInit().credentials).toBe('include')
+    expect(sentInit().credentials).toBe('same-origin')
+  })
+
+  it.each(writeVerbs)('a %s carries the CSRF header the cookie path requires', async (method) => {
+    await fetchWithAuth('/api/v1/orders', { method })
+    expect(sentHeaders().get('X-Gable-CSRF')).toBe('1')
+  })
+
+  it.each(readVerbs)('a %s carries no CSRF header', async (method) => {
+    await fetchWithAuth('/api/v1/orders', { method })
+    expect(sentHeaders().has('X-Gable-CSRF')).toBe(false)
   })
 
   it('forwards the method and body unchanged', async () => {

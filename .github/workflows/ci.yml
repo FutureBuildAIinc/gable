@@ -558,12 +558,35 @@ jobs:
   # proves the sign in, role mapping, session end, admission refusal,
   # platform redirect and key-versus-client behaviours against the live
   # service. Booting that stack on every PR would tax the whole workflow for
-  # nothing, so the gate step diffs the PR base against HEAD and the test
-  # runs only when the proof's own paths changed.
+  # nothing, so the gate step diffs the PR base against HEAD and each leg
+  # runs only when its own paths changed.
+  #
+  # Slice 3 leg (item 323): the same job then boots the seeded stack again,
+  # builds a core WITHOUT the devauth tag (no AUTH_MODE=dev, Appwrite
+  # settings from the seed file) and both web bundles without
+  # VITE_AUTH_DEV_MODE, and runs web/e2e/staff-sign-in.spec.ts with
+  # APPWRITE_E2E=1. The server key is minted by setup.sh on the runner each
+  # run and lives only in a temp file; nothing secret is committed.
   appwrite:
     name: Appwrite proof
     if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
+    timeout-minutes: 40
+
+    services:
+      postgres:
+        image: mirror.gcr.io/library/postgres:16-alpine
+        env:
+          POSTGRES_USER: gable_user
+          POSTGRES_PASSWORD: gable_password
+          POSTGRES_DB: gable_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U gable_user -d gable_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
 
     steps:
       - uses: actions/checkout@v4
@@ -576,16 +599,25 @@ jobs:
           base="${{ github.event.pull_request.base.sha || github.event.before }}"
           if [ -z "$base" ] || [ "$base" = "0000000000000000000000000000000000000000" ]; then
             echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "e2e=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          if git diff --name-only "$base" HEAD | grep -qE '^(scripts/appwrite/|core/internal/appwrite/|core/internal/config/|core/internal/app/serve/)'; then
+          changed="$(git diff --name-only "$base" HEAD)"
+          proof='^(scripts/appwrite/|core/internal/appwrite/|core/internal/config/|core/internal/app/serve/)'
+          signin='^(core/internal/staffauth/|web/packages/auth/|web/apps/front-door/|web/e2e/staff-sign-in\.spec\.ts$|web/scripts/e2e-stack\.sh$|core/pkg/middleware/|web/apps/desk/src/components/ui/session-expired\.ts$|web/apps/desk/src/components/layout/app-shell\.ts$|web/apps/work-shell/|web/apps/field-shell/|\.github/workflows/ci\.yml$)'
+          if echo "$changed" | grep -qE "$proof"; then
             echo "run=true" >> "$GITHUB_OUTPUT"
           else
             echo "run=false" >> "$GITHUB_OUTPUT"
           fi
+          if echo "$changed" | grep -qE "$proof|$signin"; then
+            echo "e2e=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "e2e=false" >> "$GITHUB_OUTPUT"
+          fi
 
       - uses: actions/setup-go@v5
-        if: steps.gate.outputs.run == 'true'
+        if: steps.gate.outputs.run == 'true' || steps.gate.outputs.e2e == 'true'
         with:
           go-version: ${{ env.GO_VERSION }}
           cache-dependency-path: core/go.sum
@@ -594,6 +626,75 @@ jobs:
         if: steps.gate.outputs.run == 'true'
         working-directory: core
         run: go test -tags appwrite -timeout 25m ./internal/appwrite/...
+
+      - uses: actions/setup-node@v4
+        if: steps.gate.outputs.e2e == 'true'
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install dependencies
+        if: steps.gate.outputs.e2e == 'true'
+        working-directory: web
+        run: npm ci
+
+      # No VITE_AUTH_DEV_MODE: the door offers the real sign in only.
+      - name: Build both bundles (no dev auth)
+        if: steps.gate.outputs.e2e == 'true'
+        working-directory: web
+        run: npm run build
+
+      - name: Migrate
+        if: steps.gate.outputs.e2e == 'true'
+        working-directory: core
+        env:
+          DATABASE_URL: postgres://gable_user:gable_password@localhost:5432/gable_test?sslmode=disable
+        run: go run ./cmd/migrate
+
+      - name: Boot and seed the local Appwrite
+        if: steps.gate.outputs.e2e == 'true'
+        run: |
+          docker compose -p s9proof -f scripts/appwrite/docker-compose.yaml up -d --wait
+          seed="$(mktemp)"
+          scripts/appwrite/setup.sh --out "$seed"
+          echo "APPWRITE_SEED_JSON=$seed" >> "$GITHUB_ENV"
+
+      - name: Pull nginx through the Docker Hub mirror
+        if: steps.gate.outputs.e2e == 'true'
+        run: |
+          docker pull mirror.gcr.io/library/nginx:1.27-alpine
+          docker tag mirror.gcr.io/library/nginx:1.27-alpine nginx:1.27-alpine
+
+      - name: Start the stack (core without devauth, and nginx)
+        if: steps.gate.outputs.e2e == 'true'
+        env:
+          DATABASE_URL: postgres://gable_user:gable_password@localhost:5432/gable_test?sslmode=disable
+        run: web/scripts/e2e-stack.sh up
+
+      - name: Install Chromium
+        if: steps.gate.outputs.e2e == 'true'
+        working-directory: web
+        run: npx playwright install --with-deps chromium
+
+      - name: Staff sign in specs
+        if: steps.gate.outputs.e2e == 'true'
+        working-directory: web
+        env:
+          APPWRITE_E2E: "1"
+          BASE_URL: http://127.0.0.1:18080
+        run: npx playwright test e2e/staff-sign-in.spec.ts
+
+      - name: Stack log on failure
+        if: failure() && steps.gate.outputs.e2e == 'true'
+        run: tail -n 100 /tmp/gable-e2e/core.log || true
+
+      - name: Stop the stacks and drop the seed
+        if: always() && steps.gate.outputs.e2e == 'true'
+        run: |
+          web/scripts/e2e-stack.sh down || true
+          docker compose -p s9proof -f scripts/appwrite/docker-compose.yaml down -v || true
+          rm -f "$APPWRITE_SEED_JSON"
 
   # ---------------------------------------------------------------------------
   # Advisory. NOT a merge gate.
