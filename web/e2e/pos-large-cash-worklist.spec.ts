@@ -200,6 +200,30 @@ test('a United States cash sale over the threshold lands on the worklist with it
   // and the worklist says so
   const after = await worklistRows(request);
   expect(after.find((r) => r.event_id === crossing!.event_id)?.filing_state).toBe('filed');
+
+  // with the filing done the manager issues the customer statement and gets
+  // the sheet to print and keep: the dealer as the sender, the payer as the
+  // addressee, the year's cash and the sentence that says the IRS was told
+  await row.getByTestId('large-cash-statement').click();
+  const sheet = page.getByTestId('large-cash-statement-view');
+  await expect(sheet).toBeVisible({ timeout: 10000 });
+  await expect(sheet).toContainText('Statement of cash received');
+  await expect(sheet).toContainText(payer);
+  await expect(sheet.getByTestId('large-cash-statement-note')).toContainText('furnished to the Internal Revenue Service');
+  await expect(sheet.getByTestId('large-cash-statement-print')).toBeVisible();
+  await page.screenshot({ path: path.join(SHOTS_DIR, 'large-cash-statement.png'), fullPage: true });
+
+  // and the year's list holds it, openable again
+  const listed = page.getByTestId('large-cash-statements').locator('[data-testid="large-cash-statement-row"]', { hasText: payer });
+  await expect(listed).toContainText('Issued');
+  await sheet.getByTestId('large-cash-statement-close').click();
+  await expect(sheet).toHaveCount(0);
+  await listed.getByTestId('large-cash-statement-open').click();
+  await expect(page.getByTestId('large-cash-statement-view')).toContainText(payer);
+
+  // a second issue of the same statement is refused by the server
+  const again = await request.post(`/api/v1/large-cash/events/${crossing!.event_id}/statement`, { data: {} });
+  expect(again.status()).toBe(409);
 });
 
 test('a walk-in over the floor who declined to identify shows as identity declined, with no filing to make', async ({ page, request }) => {
