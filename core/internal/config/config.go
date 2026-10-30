@@ -145,6 +145,20 @@ type Config struct {
 	// the default in a production configuration.
 	POSTerminalSimulator string // POS_TERMINAL_SIMULATOR
 
+	// POSTerminal selects the card terminal driver by configuration, the
+	// way the simulator is selected: "run" wires the Run Terminal API driver
+	// (CP-05). An unset value wires no terminal at all, so a production
+	// configuration without a provisioned Run terminal runs none.
+	POSTerminal string // POS_TERMINAL
+
+	// The Run Reporting API credential set (its own OAuth client id and
+	// secret, separate from the Terminal API key): the transaction lookup a
+	// lost answer resolves by and the terminal settlement batch read.
+	// Optional; env values only until Run provisions them.
+	RunReportingBaseURL      string // RUN_REPORTING_BASE_URL
+	RunReportingClientID     string // RUN_REPORTING_CLIENT_ID
+	RunReportingClientSecret string // RUN_REPORTING_CLIENT_SECRET
+
 	// POSScaleSimulator selects the simulated scale on a demo stack (CP-19,
 	// ruling D8): the value "1" wires the SMA simulator on loopback and a
 	// device row per branch. An unset value wires no scale, so the simulator
@@ -270,7 +284,12 @@ func Load() (*Config, error) {
 
 		RateLimitPerMinute:   getEnvInt("RATE_LIMIT_PER_MINUTE", 120),
 		POSTerminalSimulator: getEnv("POS_TERMINAL_SIMULATOR", ""),
+		POSTerminal:          getEnv("POS_TERMINAL", ""),
 		POSScaleSimulator:    getEnv("POS_SCALE_SIMULATOR", ""),
+
+		RunReportingBaseURL:      getEnv("RUN_REPORTING_BASE_URL", ""),
+		RunReportingClientID:     getEnv("RUN_REPORTING_CLIENT_ID", ""),
+		RunReportingClientSecret: getEnv("RUN_REPORTING_CLIENT_SECRET", ""),
 
 		// Database Pool
 		DBMaxConns:        int32(getEnvInt("DB_MAX_CONNS", 10)),
