@@ -706,6 +706,87 @@ func TestWeighedSaleReceiptPrintsTheTicket(t *testing.T) {
 	}
 }
 
+// errorWords reads the refusal's message, the words the clerk reads.
+func errorWords(t *testing.T, r resp) string {
+	t.Helper()
+	e, ok := r.body["error"].(map[string]any)
+	if !ok {
+		t.Fatalf("no error envelope in %s", r.raw)
+	}
+	msg, _ := e["message"].(string)
+	return msg
+}
+
+// openTicketCount reads how many open tickets the branch holds, so a refusal
+// proves it recorded nothing.
+func (f *fixture) openTicketCount() int {
+	f.t.Helper()
+	r := f.do("GET", "/api/v1/pos/scale/tickets?register_id="+f.register+"&status=open", nil, "X-Test-Role", "cashier")
+	if r.status != http.StatusOK {
+		f.t.Fatalf("ticket list = %d: %s", r.status, r.raw)
+	}
+	items, _ := r.body["items"].([]any)
+	return len(items)
+}
+
+// A scale that reads zero at the weigh in is refused with words that say the
+// fix, and nothing is recorded: no ticket, no number spent (walk B, CP-19).
+func TestScaleWeighInAtZeroIsRefusedWithWords(t *testing.T) {
+	db := testutil.RequireDB(t)
+	f := newFixture(t, db, withScale())
+	f.scale.SetWeightStableMilli(0, scale.UnitPound)
+	r := f.weighIn("TRUCK-Z")
+	if r.status != http.StatusConflict {
+		t.Fatalf("weigh in at zero = %d, want 409: %s", r.status, r.raw)
+	}
+	if code, _, _ := errorOf(t, r); code != "scale_reading_refused" {
+		t.Errorf("code = %q", code)
+	}
+	if msg := errorWords(t, r); !strings.Contains(msg, "enter a weight above zero") {
+		t.Errorf("message = %q, want words that say to enter a weight above zero", msg)
+	}
+	if got := f.openTicketCount(); got != 0 {
+		t.Errorf("%d open tickets after a refused weigh in, want none recorded", got)
+	}
+}
+
+// The same refusal at the weigh out: the loaded reading is zero, the net
+// cannot be, and the words say the fix while the weigh in stays open and the
+// line keeps no weight (walk B, CP-19).
+func TestScaleWeighOutAtZeroReadingIsRefusedWithWords(t *testing.T) {
+	db := testutil.RequireDB(t)
+	f := newFixture(t, db, withScale())
+	productID := f.bulkProduct(t, "TON", "30.00", "")
+	f.scale.SetWeightStableMilli(32000000, scale.UnitPound)
+	in := f.weighIn("TRUCK-Z2")
+	if in.status != http.StatusCreated {
+		t.Fatalf("weigh in = %d: %s", in.status, in.raw)
+	}
+	saleID := f.startSale(nil)
+	added := f.addLine(saleID, map[string]any{"product_id": productID.String(), "quantity": "1"})
+	lineID := str(t, firstLineOf(t, added.body), "id")
+	f.scale.SetWeightStableMilli(0, scale.UnitPound)
+	r := f.do("POST", "/api/v1/pos/scale/weigh-out", map[string]any{
+		"sale_id": saleID, "line_id": lineID, "weigh_in_ticket_id": str(t, in.body, "id"),
+		"revision": rev(t, added)}, "X-Test-Role", "cashier", "X-Test-Sub", mustUUID(t))
+	if r.status != http.StatusConflict {
+		t.Fatalf("weigh out at zero = %d, want 409: %s", r.status, r.raw)
+	}
+	if code, _, _ := errorOf(t, r); code != "scale_reading_refused" {
+		t.Errorf("code = %q, want the zero reading named as a refused reading", code)
+	}
+	if msg := errorWords(t, r); !strings.Contains(msg, "enter a weight above zero") {
+		t.Errorf("message = %q, want words that say to enter a weight above zero", msg)
+	}
+	if got := f.openTicketCount(); got != 1 {
+		t.Errorf("%d open tickets, want the weigh in still open alone", got)
+	}
+	cur := f.getSale(t, saleID)
+	if got := firstLineOf(t, cur)["weight_source"]; got != nil && got != "" {
+		t.Errorf("the line carries weight_source %v after a refused weigh out", got)
+	}
+}
+
 func TestManualWeightReceiptPrintsTheMarking(t *testing.T) {
 	testutil.LockOutboxTables(t)
 	db := testutil.RequireDB(t)

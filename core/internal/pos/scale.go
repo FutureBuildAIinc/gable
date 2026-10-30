@@ -295,7 +295,7 @@ func (s *Service) WeighIn(ctx context.Context, registerID, vehicleRef string, ac
 	}
 	lb, _ := reading.PoundsMilli()
 	if lb <= 0 {
-		return nil, scaleConflict("scale_reading_refused", "the scale reads nothing to weigh in")
+		return nil, scaleConflict("scale_reading_refused", "the scale reads zero: enter a weight above zero")
 	}
 	gross := milliToQuantity(lb)
 	ticket := &ScaleTicket{
@@ -396,6 +396,9 @@ func (s *Service) WeighOut(ctx context.Context, in WeighOutInput, ifMatch string
 			return err
 		}
 		grossOutMilli, _ := reading.PoundsMilli()
+		if grossOutMilli <= 0 {
+			return scaleConflict("scale_reading_refused", "the scale reads zero: enter a weight above zero")
+		}
 		grossInMilli := quantityToMilli(*weighIn.GrossLb)
 		netMilli := grossOutMilli - grossInMilli
 		if netMilli <= 0 {
@@ -482,7 +485,7 @@ func (s *Service) EnterManualWeight(ctx context.Context, saleID, lineID uuid.UUI
 		return nil, invalid("note", "is required when the reason is other")
 	}
 	if in.WeightLb <= 0 {
-		return nil, invalid("weight_lb", "must be more than zero")
+		return nil, invalid("weight_lb", "must be above zero: enter a weight above zero")
 	}
 	var out *Sale
 	err := s.inTx(ctx, func(ctx context.Context) error {
