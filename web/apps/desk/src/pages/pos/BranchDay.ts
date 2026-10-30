@@ -289,6 +289,7 @@ export class GableBranchDay extends LitElement {
 
                 ${day.registers.length === 0 ? html`
                     <p class="text-zinc-500" data-testid="day-empty">No drawer was opened at this branch on this day.</p>` : html`
+                    <div class="overflow-x-auto">
                     <table class="w-full text-sm" data-testid="day-registers">
                         <thead>
                             <tr class="text-zinc-400 uppercase text-xs text-right">
@@ -314,7 +315,8 @@ export class GableBranchDay extends LitElement {
                                 <td class=${t.over_short_cents === 0 ? '' : t.over_short_cents < 0 ? 'text-red-400' : 'text-amber-500'}>${signed(t.over_short_cents)}</td>
                             </tr>
                         </tbody>
-                    </table>`}
+                    </table>
+                    </div>`}
 
                 <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 mt-6">
                     ${this.figure('Cash to deposit', formatCents(t.cash_to_deposit_cents), 'day-cash')}

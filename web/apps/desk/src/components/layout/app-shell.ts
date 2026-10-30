@@ -338,7 +338,7 @@ export class GableAppShell extends LitElement {
             <span class="hidden md:block"><gable-brand-logo variant="text" size="md"></gable-brand-logo></span>
           </a>
 
-          <div class="flex-1 max-w-xl mx-auto">
+          <div class="flex-1 min-w-0 max-w-xl mx-auto">
             <div class="relative group">
               ${icon(Search, 16, 'absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500 group-focus-within:text-gable-green transition-colors')}
               <input
