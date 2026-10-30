@@ -192,3 +192,11 @@ func TestStoreSweepRemovesOnlyTheDead(t *testing.T) {
 		}
 	}
 }
+
+func TestSortRolesIsTheFixedOrder(t *testing.T) {
+	got := sortRoles([]string{"driver", "finance", "owner", "sales"})
+	want := []string{"owner", "sales", "finance", "driver"}
+	if !equalRoles(got, want) {
+		t.Fatalf("sortRoles = %v, want %v", got, want)
+	}
+}
