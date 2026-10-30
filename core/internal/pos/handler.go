@@ -191,6 +191,12 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux, roleGuard ...func(http.Hand
 	mux.HandleFunc("PUT /api/v1/pos/till/policy", resolveMount(h.PutVariancePolicy))
 	mux.HandleFunc("GET /api/v1/pos/offline/policy", policyRead(h.GetOfflinePolicy))
 	mux.HandleFunc("PUT /api/v1/pos/offline/policy", policyWrite(h.PutOfflinePolicy))
+	// A register's device (CP-13 O2, ADR 0011 section 6.1): enrolment and
+	// revocation are owner or admin acts with the counter PIN, on the policy
+	// write's mount; the read adds finance, on the policy read's.
+	mux.HandleFunc("GET /api/v1/pos/offline/registers/{id}/device", policyRead(h.GetRegisterDevice))
+	mux.HandleFunc("POST /api/v1/pos/offline/registers/{id}/device", policyWrite(h.EnrolRegisterDevice))
+	mux.HandleFunc("POST /api/v1/pos/offline/registers/{id}/device/revoke", policyWrite(h.RevokeRegisterDevice))
 
 	// The manager step up (CP-04 slice 3): the roster the picker shows, and
 	// the PIN verified approval one act spends. Any person at the counter may

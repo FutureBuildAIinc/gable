@@ -351,6 +351,18 @@ type Repository interface {
 	BranchDayClosedOn(ctx context.Context, branch uuid.UUID, date time.Time) (bool, error)
 	OfflineAccountUsedSince(ctx context.Context, register string, customer uuid.UUID, since time.Time) (int64, error)
 
+	// Device enrolment and the snapshot (ADR 0011, slice O2)
+	LockRegisterForEnrolment(ctx context.Context, register string) (bool, error)
+	RegisterDevices(ctx context.Context, register string) (active, previous *RegisterDevice, maxEpoch int64, err error)
+	PublicKeyEnrolled(ctx context.Context, key string) (bool, error)
+	RevokeRegisterDevice(ctx context.Context, register string, epoch int64, by, reason string) (*RegisterDevice, error)
+	InsertRegisterDevice(ctx context.Context, register string, branch uuid.UUID, epoch int64, key, by string) (*RegisterDevice, error)
+	RecordedMark(ctx context.Context, register string, epoch int64) (int64, error)
+	OpenBadCopy(ctx context.Context, register string, epoch int64) (*int64, error)
+	RegisterOpenSession(ctx context.Context, register string) (*offlineOpenSession, error)
+	InsertUnknownTail(ctx context.Context, register string, branch uuid.UUID, epoch, from, to int64,
+		session *uuid.UUID, businessDate time.Time, message string) (uuid.UUID, error)
+
 	// The manager step up (CP-04 slice 3)
 	FindStepUpManager(ctx context.Context, manager string) (*StepUpManager, bool, error)
 	FindStepUpManagerForUpdate(ctx context.Context, manager string) (*StepUpManager, bool, error)
