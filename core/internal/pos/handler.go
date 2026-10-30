@@ -191,6 +191,12 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux, roleGuard ...func(http.Hand
 	mux.HandleFunc("PUT /api/v1/pos/till/policy", resolveMount(h.PutVariancePolicy))
 	mux.HandleFunc("GET /api/v1/pos/offline/policy", policyRead(h.GetOfflinePolicy))
 	mux.HandleFunc("PUT /api/v1/pos/offline/policy", policyWrite(h.PutOfflinePolicy))
+	// The offline exception queue (CP-13 O4, ADR 0011 3.4): the managers read
+	// it on the branch day page; a resolution is an owner's or an admin's,
+	// on the policy write's mount, and never the sale's own cashier.
+	mux.HandleFunc("GET /api/v1/pos/offline/exceptions", policyRead(h.ListOfflineExceptions))
+	mux.HandleFunc("GET /api/v1/pos/offline/exceptions/{id}", policyRead(h.GetOfflineException))
+	mux.HandleFunc("POST /api/v1/pos/offline/exceptions/{id}/resolve", policyWrite(h.ResolveOfflineException))
 
 	// The manager step up (CP-04 slice 3): the roster the picker shows, and
 	// the PIN verified approval one act spends. Any person at the counter may

@@ -325,9 +325,48 @@ type Repository interface {
 	// A branch that has never set it rounds nothing.
 	BranchCashRoundingMode(ctx context.Context, branchID uuid.UUID) (RoundingMode, error)
 
-	// Offline sync
-	SaleExists(ctx context.Context, id uuid.UUID) (bool, error)
+	// Offline sync (ADR 0011, slice O3)
 	LogSyncBatch(ctx context.Context, batch LogBatch) error
+	LockRegisterDevice(ctx context.Context, register string, epoch int64) (*registerDevice, error)
+	AdvanceDeviceMark(ctx context.Context, deviceID uuid.UUID, seq int64, digest string) error
+	ConfirmDeviceMark(ctx context.Context, register string, epoch, reported int64) (int64, error)
+	OfflinePostedRecord(ctx context.Context, id uuid.UUID) (*offlinePosted, error)
+	OfflineExceptionsOf(ctx context.Context, id uuid.UUID) ([]offlineExceptionRow, error)
+	OfflineSequenceHolder(ctx context.Context, register string, epoch, seq int64, id uuid.UUID) (bool, error)
+	OfflineGapCovering(ctx context.Context, register string, epoch, seq int64) (*uuid.UUID, error)
+	CloseGapFound(ctx context.Context, id uuid.UUID) error
+	SupersedeBadCopies(ctx context.Context, id uuid.UUID) error
+	InsertOfflineException(ctx context.Context, e *offlineExceptionRow) (uuid.UUID, error)
+	OfflineExceptionRefs(ctx context.Context, it *offlineItem) (*offlineRefs, error)
+	MarkOfflineSale(ctx context.Context, id uuid.UUID, it *offlineItem, snapshot uuid.UUID) error
+	LockReplacedCart(ctx context.Context, id uuid.UUID) (*replacedCart, error)
+	SaleHasOpenTerminalIntent(ctx context.Context, id uuid.UUID) (bool, error)
+	AbandonSale(ctx context.Context, id uuid.UUID) error
+	OfflineInvoiceNumber(ctx context.Context, id uuid.UUID) (string, error)
+	LockHeldAt(ctx context.Context, register string, epoch, seq int64) (*offlineExceptionRow, error)
+	ReopenHeldAs(ctx context.Context, id uuid.UUID, code, message string) error
+	MarkHeldRelinked(ctx context.Context, id, saleID uuid.UUID) error
+	OfflineSnapshotByID(ctx context.Context, id uuid.UUID) (*offlineSnapshotRow, error)
+	OfflineSessionFacts(ctx context.Context, id uuid.UUID) (*offlineSessionFacts, error)
+	BranchDayClosedOn(ctx context.Context, branch uuid.UUID, date time.Time) (bool, error)
+	OfflineAccountUsedSince(ctx context.Context, register string, customer uuid.UUID, since time.Time) (int64, error)
+
+	// The offline exception queue (ADR 0011 3.4, slice O4)
+	OfflineExceptionHead(ctx context.Context, id uuid.UUID) (*offlineExceptionHead, error)
+	LockOfflineException(ctx context.Context, id uuid.UUID) (*OfflineException, error)
+	GetOfflineException(ctx context.Context, id uuid.UUID) (*OfflineException, error)
+	ListOfflineExceptions(ctx context.Context, branch uuid.UUID, statuses []string, after *time.Time, afterID *uuid.UUID,
+		limit int) ([]OfflineException, bool, error)
+	ResolveOfflineExceptionRow(ctx context.Context, id uuid.UUID, status, action, reason, actor string, posted *uuid.UUID) error
+	SetOfflineExceptionPosted(ctx context.Context, id, sale uuid.UUID) error
+	InsertOfflineGap(ctx context.Context, held *OfflineException, from, to int64, action, reason, actor string) (uuid.UUID, error)
+	OfflineHeldBelow(ctx context.Context, register string, epoch, seq int64) (bool, error)
+	MarkResolvedOfflineSale(ctx context.Context, id uuid.UUID, it *offlineItem, snapshot uuid.UUID, seq *int64,
+		offlineSession *uuid.UUID) error
+	EarliestOpenBusinessDate(ctx context.Context, branch uuid.UUID, from time.Time) (time.Time, bool, error)
+	OpenOfflineExceptionsOfSession(ctx context.Context, session uuid.UUID) ([]string, error)
+	OpenOfflineExceptionsOfDay(ctx context.Context, branch uuid.UUID, date string) ([]string, error)
+	OfflineUndrained(ctx context.Context, register string) (epoch, reported, high int64, found bool, err error)
 
 	// The manager step up (CP-04 slice 3)
 	FindStepUpManager(ctx context.Context, manager string) (*StepUpManager, bool, error)
@@ -410,8 +449,11 @@ type ReturnFilter struct {
 type LogBatch struct {
 	BatchID, RegisterID                     string
 	Synced, Duplicates, ErrorCount, Pending int
-	Errors                                  []SyncItemResult
-	Details                                 []SyncItemResult
+	// Refused and Gaps are the items the batch sent to the exception queue
+	// and the items it held for a missing predecessor (ADR 0011 6.4).
+	Refused, Gaps int
+	Errors        []SyncItemResult
+	Details       []SyncItemResult
 }
 
 // SyncItemResult is one offline sale's outcome in the sync log.
@@ -814,17 +856,24 @@ func (r *PostgresRepository) AddLines(ctx context.Context, saleID uuid.UUID, lin
 				stock_uom, stock_quantity, board_thickness_in, board_width_in,
 				unit_price, priced_unit_price, price_source, price_basis, override_reason,
 				discount_percent, discount_amount, discount_reason, price_adjusted_by,
-				line_total, taxable, revenue_account_code, cost_source, unit_cost, created_at)
+				line_total, taxable, revenue_account_code, cost_source, unit_cost, created_at,
+				weight_source, weight_gross_lb, weight_tare_lb, weight_net_lb, weight_net_basis, scale_device_id,
+				scale_ticket_id, scale_ticket_number, manual_weight_reason, weight_captured_by, weight_captured_at)
 			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::numeric / 10000, $11, $12, $13::numeric / 10000,
 				$14::numeric / 10000, $15, $16::numeric / 10000, $17::numeric / 10000, $18::numeric / 10000,
 				$19::numeric / 10000, $20::numeric / 10000, $21, $22, $23, $24::numeric / 10000,
-				$25::numeric / 100, $26, $27, $28::numeric / 100, $29, $30, $31, $32::numeric / 10000, NOW())`,
+				$25::numeric / 100, $26, $27, $28::numeric / 100, $29, $30, $31, $32::numeric / 10000, NOW(),
+				$33, $34::numeric / 10000, $35::numeric / 10000, $36::numeric / 10000, $37, $38,
+				$39, $40, $41, $42, $43)`,
 			l.ID, saleID, l.Position, string(l.LineType), l.ParentLineID, l.ProductID, l.ChargeCodeID,
 			l.SKU, l.Description, qtyArg(l.Quantity), l.UOM, l.PriceUOM, qtyArg(l.UOMQty), qtyArg(l.PriceUOMQty),
 			strArg(l.StockUOM), qtyArg(l.StockQuantity), qtyArg(l.TallyThickness()), qtyArg(l.TallyWidth()),
 			priceArg(l.UnitPrice), priceArg(l.PricedUnitPrice), string(l.PriceSource), strArg(l.PriceBasis), l.OverrideReason,
 			qtyArg(l.DiscountPercent), centsArg(l.DiscountAmount), l.DiscountReason, l.PriceAdjustedBy,
-			centsArg(l.LineTotal), l.Taxable, l.RevenueAccountCode, strArg(l.CostSource), priceArg(l.StockingUnitCost))
+			centsArg(l.LineTotal), l.Taxable, l.RevenueAccountCode, strArg(l.CostSource), priceArg(l.StockingUnitCost),
+			upperOrNil(l.WeightSource), qtyArg(l.WeightGrossLb), qtyArg(l.WeightTareLb), qtyArg(l.WeightNetLb),
+			upperOrNil(l.WeightNetBasis), l.ScaleDeviceID, l.ScaleTicketID, l.ScaleTicketNumber,
+			l.ManualWeightReason, l.WeightCapturedBy, timestampArg(l.WeightCapturedAt))
 		if err != nil {
 			return fmt.Errorf("failed to add the sale line: %w", mapWriteError(err))
 		}
@@ -897,6 +946,13 @@ func qtyArg(q *httpx.Quantity) any {
 		return nil
 	}
 	return int64(*q)
+}
+
+func timestampArg(t *httpx.Timestamp) any {
+	if t == nil {
+		return nil
+	}
+	return t.Time
 }
 
 func priceArg(p *httpx.Price) any {
@@ -2482,12 +2538,6 @@ func (r *PostgresRepository) BranchCashRoundingMode(ctx context.Context, branchI
 	return ParseRoundingMode(mode), nil
 }
 
-func (r *PostgresRepository) SaleExists(ctx context.Context, id uuid.UUID) (bool, error) {
-	var exists bool
-	err := r.ex(ctx).QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM pos_transactions WHERE id = $1)`, id).Scan(&exists)
-	return exists, err
-}
-
 func (r *PostgresRepository) LogSyncBatch(ctx context.Context, b LogBatch) error {
 	// The jsonb carries both the failures and the pending items (a pending
 	// offline sale stays visible in the log until a retry completes it).
@@ -2499,8 +2549,10 @@ func (r *PostgresRepository) LogSyncBatch(ctx context.Context, b LogBatch) error
 		return err
 	}
 	_, err = r.ex(ctx).Exec(ctx, `
-		INSERT INTO pos_sync_log (batch_id, register_id, synced_count, duplicate_count, error_count, errors)
-		VALUES ($1, $2, $3, $4, $5, $6::jsonb)`, b.BatchID, b.RegisterID, b.Synced, b.Duplicates, b.ErrorCount, string(raw))
+		INSERT INTO pos_sync_log (batch_id, register_id, synced_count, duplicate_count, error_count, errors,
+			refused_count, gap_count)
+		VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8)`, b.BatchID, b.RegisterID, b.Synced, b.Duplicates, b.ErrorCount,
+		string(raw), b.Refused, b.Gaps)
 	return err
 }
 

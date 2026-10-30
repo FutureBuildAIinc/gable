@@ -198,12 +198,18 @@ func (r *Repository) transactionsSince(ctx context.Context, payerKey, rule strin
 }
 
 // InsertTender records one tender that counted, with the classifier's
-// reason and instrument, the audit a later dispute reads.
+// reason and instrument, the audit a later dispute reads. The caller holds
+// the payer's advisory lock, and the row is stamped with the clock at the
+// write, never the transaction's start (the column's NOW() default): the
+// running total since a crossing orders tenders and crossings by the order
+// the lock admitted them, so a completion that began before a crossing and
+// took the lock after it counts toward the next one, and a tender a
+// crossing consumed never counts again.
 func (r *Repository) InsertTender(ctx context.Context, transactionID, branchID uuid.UUID, ruleFamily, payerKey string,
 	countedCents int64, instrument, reason string, tenderIndex int) error {
 	_, err := r.exec(ctx).Exec(ctx, `
-		INSERT INTO large_cash_tenders (transaction_id, branch_id, rule_family, payer_key, counted_cents, instrument, reason, tender_index)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+		INSERT INTO large_cash_tenders (transaction_id, branch_id, rule_family, payer_key, counted_cents, instrument, reason, tender_index, created_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, clock_timestamp())`,
 		transactionID, branchID, ruleFamily, payerKey, countedCents, instrument, reason, tenderIndex)
 	return err
 }
@@ -226,13 +232,15 @@ func (r *Repository) InsertPayer(ctx context.Context, transactionID, branchID uu
 }
 
 // InsertEvent records one threshold crossing: reportable is the United
-// States duty, recorded is the Canadian dealer policy.
+// States duty, recorded is the Canadian dealer policy. Like the tenders it
+// is stamped with the clock at the write, under the payer's lock, after the
+// crossing's own tenders, so the running total it resets starts after them.
 func (r *Repository) InsertEvent(ctx context.Context, payerKey string, customerID *uuid.UUID, branchID uuid.UUID, ruleFamily, currency string,
 	amountCents, totalCents int64, transactionIDs []uuid.UUID, tenderCount int, state string) error {
 	_, err := r.exec(ctx).Exec(ctx, `
 		INSERT INTO large_cash_events (payer_key, customer_id, branch_id, rule_family, currency, amount_cents, total_cents,
-			transaction_ids, tender_count, state)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+			transaction_ids, tender_count, state, created_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, clock_timestamp())`,
 		payerKey, customerID, branchID, ruleFamily, currency, amountCents, totalCents, transactionIDs, tenderCount, state)
 	return err
 }

@@ -14822,7 +14822,7 @@ paths:
       tags: [pos]
       summary: What the large cash rule asks of this payment
       description: >-
-        The counter's look before Pay (CP-17a): the server classifies the named tenders against the sale it holds under the branch's country rule (the United States Form 8300 family, or the Canadian dealer threshold when the dealer has it on) and answers whether the payer's details will be required and which fields the rule needs. The branch's walk-in identity floor rides the same answer: over the floor the counter asks a walk-in who paid cash to identify themselves, so their cash sales are counted together, and the identity the counter already holds may be carried here so the preview and the completion key the same person. Writes nothing; the completion's own capture is the authority.
+        The counter's look before Pay (CP-17a): the server classifies the named tenders against the sale it holds under the branch's country rule (the United States Form 8300 family, or the Canadian dealer threshold when the dealer has it on) and answers whether the payer's details will be required and which fields the rule needs. The branch's walk-in identity floor rides the same answer: over the floor the counter asks a walk-in who paid cash to identify themselves, so their cash sales are counted together, and the identity the counter already holds may be carried here so the preview and the completion key the same person. A payer carried on a server with no valid vault key is refused 503 with the blocker large_cash_vault_unavailable, as the completion refuses it. Writes nothing; the completion's own capture is the authority.
       requestBody:
         required: true
         content:
@@ -14846,6 +14846,8 @@ paths:
           $ref: "#/components/responses/WireNotFound"
         "500":
           $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
   /api/v1/pos/transactions/{id}/void:
     post:
       operationId: posTransactionVoid
@@ -15514,6 +15516,120 @@ paths:
           $ref: "#/components/responses/ForbiddenEither"
         "404":
           $ref: "#/components/responses/WireNotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/pos/offline/exceptions:
+    get:
+      operationId: posOfflineExceptionList
+      tags: [pos]
+      summary: A branch's offline exception queue
+      description: >-
+        The offline sales the sync could not post or could not verify (ADR 0011 section 3.4), oldest first, a cursor page. status open (the default) lists the open and held rows, held only the held ones, resolved the rows a manager or the sync settled, all every row. Each row carries the actions a manager may take now. Admin, owner and finance; a branch the caller may not target is 403.
+      parameters:
+        - name: branch_id
+          in: query
+          required: true
+          schema: {type: string, format: uuid}
+        - name: status
+          in: query
+          required: false
+          schema: {type: string, enum: [open, held, resolved, all]}
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/PageLimit"
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: The page of offline exceptions.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PosOfflineExceptionPage"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/pos/offline/exceptions/{id}:
+    get:
+      operationId: posOfflineExceptionGet
+      tags: [pos]
+      summary: One offline exception
+      description: >-
+        One row of the offline exception queue with the signed sale as received. Admin, owner and finance; a row of a branch the caller may not target is 403.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: The offline exception.
+          headers:
+            ETag:
+              description: The row's revision.
+              schema: {type: string}
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PosOfflineException"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/pos/offline/exceptions/{id}/resolve:
+    post:
+      operationId: posOfflineExceptionResolve
+      tags: [pos]
+      summary: Resolve an offline exception
+      description: >-
+        A manager's resolution (ADR 0011 section 3.4), in one transaction under the register's device row and then the exception row: retry, accept, late_post, write_off, post_separate, restate or review, as the row's actions allow (409 resolution_not_allowed otherwise). A posting the live checks refuse again answers 409 with the check's own code (insufficient_stock, session_closed, stock_unit_changed and the like) and writes nothing. A late post with no open date is 409 no_open_date; a held item above another held one is 409 offline_gap_order. Owner and admin only, never a machine key and never the sale's own cashier (403). Audited as pos.offline_exception.resolved with the event pos_offline.exception_resolved.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+        - $ref: "#/components/parameters/IfMatch"
+        - $ref: "#/components/parameters/XBranchId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PosOfflineResolveRequest"
+      responses:
+        "200":
+          description: The exception as the resolution left it.
+          headers:
+            ETag:
+              description: The row's revision.
+              schema: {type: string}
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PosOfflineException"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "409":
+          $ref: "#/components/responses/ConflictEither"
+        "428":
+          $ref: "#/components/responses/WirePreconditionRequired"
         "500":
           $ref: "#/components/responses/InternalError"
   /api/v1/pos/end-of-day:
@@ -34588,7 +34704,7 @@ components:
             $ref: "#/components/schemas/PosTenderRequest"
         picked_up_by: {type: [string, "null"], description: "Who collected the basket, at most 200 characters."}
         revision: {type: integer, format: int64, minimum: 1, description: "The sale's revision; or send If-Match."}
-        payer: {$ref: "#/components/schemas/PosPayerCapture", description: "The payer's details the counter captured for a large cash crossing (CP-17a); required when this payment takes the payer over the branch's threshold, refused 409 payer_details_required without them."}
+        payer: {$ref: "#/components/schemas/PosPayerCapture", description: "The payer's details the counter captured for a large cash crossing (CP-17a); required when this payment takes the payer over the branch's threshold, refused 409 payer_details_required without them, and refused 503 large_cash_vault_unavailable on a server with no valid vault key, never stored in clear."}
         payer_declined: {type: boolean, description: "The counter's record that the walk-in declined to identify over the branch's walk-in identity floor (CP-17a); the sale goes ahead and the fact is recorded for the manager's worklist as an identity declined."}
         suspected_avoidance: {type: boolean, description: "The manager's mark that an instrument may be being used to avoid reporting (CP-17a); it makes a qualifying instrument count as cash whatever was sold."}
     PosPayerCapture:
@@ -34905,7 +35021,7 @@ components:
           description: >-
             The customer's counter alerts the clerk read and acknowledged before taking the exchange's replacement sale. A warning that asks to be acknowledged must be named here, or the exchange is refused with 409 alert_unacknowledged and nothing is written.
           items: {type: string, format: uuid}
-        payer: {$ref: "#/components/schemas/PosPayerCapture", description: "The payer's details the counter captured for a large cash crossing (CP-17a); required when this exchange's cash difference takes the payer over the branch's threshold, refused 409 payer_details_required without them."}
+        payer: {$ref: "#/components/schemas/PosPayerCapture", description: "The payer's details the counter captured for a large cash crossing (CP-17a); required when this exchange's cash difference takes the payer over the branch's threshold, refused 409 payer_details_required without them, and refused 503 large_cash_vault_unavailable on a server with no valid vault key, never stored in clear."}
         payer_declined: {type: boolean, description: "The counter's record that the walk-in declined to identify over the branch's walk-in identity floor (CP-17a); the exchange goes ahead and the fact is recorded for the manager's worklist as an identity declined."}
         suspected_avoidance: {type: boolean, description: "The manager's suspected avoidance mark (CP-17a); it makes a qualifying instrument count as cash whatever was sold."}
         tender_method: {type: string, enum: [cash, check, card], description: "The preview only: the method the counter will tender for the difference, so the server can say what the branch's large cash rule needs of this exchange before it is rung. The exchange takes the tender itself in tenders."}
@@ -35590,6 +35706,64 @@ components:
         updated_by: {type: [string, "null"]}
         updated_at: {type: [string, "null"], format: date-time}
         revision: {type: [integer, "null"], format: int64}
+    PosOfflineAction:
+      type: string
+      enum: [retry, accept, late_post, write_off, post_separate, restate, review]
+    PosOfflineException:
+      type: object
+      required: [id, sale_id, register_id, branch_id, device_epoch, device_seq, gap_from_seq, gap_to_seq, offline_ref, till_session_id, business_date, customer_id, cashier_id, warning_alert_ids, reason_code, reason_message, cash_cents, check_cents, account_cents, total_cents, status, actions, resolution_action, resolution_reason, resolved_by, resolved_at, posted_sale_id, signed_sale, revision, created_at]
+      properties:
+        id: {type: string, format: uuid}
+        sale_id: {type: string, format: uuid}
+        register_id: {type: string}
+        branch_id: {type: string, format: uuid}
+        device_epoch: {type: integer, format: int64}
+        device_seq: {type: integer, format: int64}
+        gap_from_seq: {type: [integer, "null"], format: int64, description: "The first missing number a sequence_gap or unknown tail item names."}
+        gap_to_seq: {type: [integer, "null"], format: int64}
+        offline_ref: {type: string, description: "The printed number <register>-<epoch>-<seq>; empty on a gap item."}
+        till_session_id: {type: [string, "null"], format: uuid}
+        business_date: {type: string, format: date}
+        customer_id: {type: [string, "null"], format: uuid}
+        cashier_id: {type: [string, "null"], format: uuid, description: "The signed sale's cashier, who may not resolve it."}
+        warning_alert_ids:
+          type: array
+          items: {type: string, format: uuid}
+        reason_code: {type: string}
+        reason_message: {type: string}
+        cash_cents: {type: integer, format: int64, description: "The cash the drawer kept (the change out of it)."}
+        check_cents: {type: integer, format: int64}
+        account_cents: {type: integer, format: int64}
+        total_cents: {type: integer, format: int64}
+        status: {type: string, enum: [open, held, resolved, relinked, superseded, found, reviewed]}
+        actions:
+          type: array
+          items: {$ref: "#/components/schemas/PosOfflineAction"}
+        resolution_action: {type: [string, "null"]}
+        resolution_reason: {type: [string, "null"]}
+        resolved_by: {type: [string, "null"]}
+        resolved_at: {type: [string, "null"], format: date-time}
+        posted_sale_id: {type: [string, "null"], format: uuid}
+        signed_sale: {type: object, additionalProperties: true, description: "The signed sale as received ({} on a gap or unknown tail item)."}
+        revision: {type: integer, format: int64}
+        created_at: {type: string, format: date-time}
+    PosOfflineExceptionPage:
+      type: object
+      required: [items, next_cursor, limit]
+      properties:
+        items:
+          type: array
+          items: {$ref: "#/components/schemas/PosOfflineException"}
+        next_cursor: {type: [string, "null"]}
+        limit: {type: integer}
+    PosOfflineResolveRequest:
+      type: object
+      additionalProperties: false
+      required: [action, reason]
+      properties:
+        action: {$ref: "#/components/schemas/PosOfflineAction"}
+        reason: {type: string, minLength: 1, description: "Why the manager resolves it so."}
+        revision: {type: integer, format: int64, description: "The row's revision; If-Match is the alternative."}
     PosOfflinePolicyRequest:
       type: object
       required: [branch_id]

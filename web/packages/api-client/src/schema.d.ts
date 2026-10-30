@@ -6528,7 +6528,7 @@ export interface paths {
         put?: never;
         /**
          * What the large cash rule asks of this payment
-         * @description The counter's look before Pay (CP-17a): the server classifies the named tenders against the sale it holds under the branch's country rule (the United States Form 8300 family, or the Canadian dealer threshold when the dealer has it on) and answers whether the payer's details will be required and which fields the rule needs. The branch's walk-in identity floor rides the same answer: over the floor the counter asks a walk-in who paid cash to identify themselves, so their cash sales are counted together, and the identity the counter already holds may be carried here so the preview and the completion key the same person. Writes nothing; the completion's own capture is the authority.
+         * @description The counter's look before Pay (CP-17a): the server classifies the named tenders against the sale it holds under the branch's country rule (the United States Form 8300 family, or the Canadian dealer threshold when the dealer has it on) and answers whether the payer's details will be required and which fields the rule needs. The branch's walk-in identity floor rides the same answer: over the floor the counter asks a walk-in who paid cash to identify themselves, so their cash sales are counted together, and the identity the counter already holds may be carried here so the preview and the completion key the same person. A payer carried on a server with no valid vault key is refused 503 with the blocker large_cash_vault_unavailable, as the completion refuses it. Writes nothing; the completion's own capture is the authority.
          */
         post: operations["posLargeCashPreview"];
         delete?: never;
@@ -6883,6 +6883,66 @@ export interface paths {
          */
         put: operations["posOfflinePolicyPut"];
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pos/offline/exceptions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * A branch's offline exception queue
+         * @description The offline sales the sync could not post or could not verify (ADR 0011 section 3.4), oldest first, a cursor page. status open (the default) lists the open and held rows, held only the held ones, resolved the rows a manager or the sync settled, all every row. Each row carries the actions a manager may take now. Admin, owner and finance; a branch the caller may not target is 403.
+         */
+        get: operations["posOfflineExceptionList"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pos/offline/exceptions/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * One offline exception
+         * @description One row of the offline exception queue with the signed sale as received. Admin, owner and finance; a row of a branch the caller may not target is 403.
+         */
+        get: operations["posOfflineExceptionGet"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pos/offline/exceptions/{id}/resolve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Resolve an offline exception
+         * @description A manager's resolution (ADR 0011 section 3.4), in one transaction under the register's device row and then the exception row: retry, accept, late_post, write_off, post_separate, restate or review, as the row's actions allow (409 resolution_not_allowed otherwise). A posting the live checks refuse again answers 409 with the check's own code (insufficient_stock, session_closed, stock_unit_changed and the like) and writes nothing. A late post with no open date is 409 no_open_date; a held item above another held one is 409 offline_gap_order. Owner and admin only, never a machine key and never the sale's own cashier (403). Audited as pos.offline_exception.resolved with the event pos_offline.exception_resolved.
+         */
+        post: operations["posOfflineExceptionResolve"];
         delete?: never;
         options?: never;
         head?: never;
@@ -17354,7 +17414,7 @@ export interface components {
              * @description The sale's revision; or send If-Match.
              */
             revision?: number;
-            /** @description The payer's details the counter captured for a large cash crossing (CP-17a); required when this payment takes the payer over the branch's threshold, refused 409 payer_details_required without them. */
+            /** @description The payer's details the counter captured for a large cash crossing (CP-17a); required when this payment takes the payer over the branch's threshold, refused 409 payer_details_required without them, and refused 503 large_cash_vault_unavailable on a server with no valid vault key, never stored in clear. */
             payer?: components["schemas"]["PosPayerCapture"];
             /** @description The counter's record that the walk-in declined to identify over the branch's walk-in identity floor (CP-17a); the sale goes ahead and the fact is recorded for the manager's worklist as an identity declined. */
             payer_declined?: boolean;
@@ -17780,7 +17840,7 @@ export interface components {
             picked_up_by?: string | null;
             /** @description The customer's counter alerts the clerk read and acknowledged before taking the exchange's replacement sale. A warning that asks to be acknowledged must be named here, or the exchange is refused with 409 alert_unacknowledged and nothing is written. */
             acknowledged_alert_ids?: string[];
-            /** @description The payer's details the counter captured for a large cash crossing (CP-17a); required when this exchange's cash difference takes the payer over the branch's threshold, refused 409 payer_details_required without them. */
+            /** @description The payer's details the counter captured for a large cash crossing (CP-17a); required when this exchange's cash difference takes the payer over the branch's threshold, refused 409 payer_details_required without them, and refused 503 large_cash_vault_unavailable on a server with no valid vault key, never stored in clear. */
             payer?: components["schemas"]["PosPayerCapture"];
             /** @description The counter's record that the walk-in declined to identify over the branch's walk-in identity floor (CP-17a); the exchange goes ahead and the fact is recorded for the manager's worklist as an identity declined. */
             payer_declined?: boolean;
@@ -18698,6 +18758,88 @@ export interface components {
             updated_at: string | null;
             /** Format: int64 */
             revision: number | null;
+        };
+        /** @enum {string} */
+        PosOfflineAction: "retry" | "accept" | "late_post" | "write_off" | "post_separate" | "restate" | "review";
+        PosOfflineException: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            sale_id: string;
+            register_id: string;
+            /** Format: uuid */
+            branch_id: string;
+            /** Format: int64 */
+            device_epoch: number;
+            /** Format: int64 */
+            device_seq: number;
+            /**
+             * Format: int64
+             * @description The first missing number a sequence_gap or unknown tail item names.
+             */
+            gap_from_seq: number | null;
+            /** Format: int64 */
+            gap_to_seq: number | null;
+            /** @description The printed number <register>-<epoch>-<seq>; empty on a gap item. */
+            offline_ref: string;
+            /** Format: uuid */
+            till_session_id: string | null;
+            /** Format: date */
+            business_date: string;
+            /** Format: uuid */
+            customer_id: string | null;
+            /**
+             * Format: uuid
+             * @description The signed sale's cashier, who may not resolve it.
+             */
+            cashier_id: string | null;
+            warning_alert_ids: string[];
+            reason_code: string;
+            reason_message: string;
+            /**
+             * Format: int64
+             * @description The cash the drawer kept (the change out of it).
+             */
+            cash_cents: number;
+            /** Format: int64 */
+            check_cents: number;
+            /** Format: int64 */
+            account_cents: number;
+            /** Format: int64 */
+            total_cents: number;
+            /** @enum {string} */
+            status: "open" | "held" | "resolved" | "relinked" | "superseded" | "found" | "reviewed";
+            actions: components["schemas"]["PosOfflineAction"][];
+            resolution_action: string | null;
+            resolution_reason: string | null;
+            resolved_by: string | null;
+            /** Format: date-time */
+            resolved_at: string | null;
+            /** Format: uuid */
+            posted_sale_id: string | null;
+            /** @description The signed sale as received ({} on a gap or unknown tail item). */
+            signed_sale: {
+                [key: string]: unknown;
+            };
+            /** Format: int64 */
+            revision: number;
+            /** Format: date-time */
+            created_at: string;
+        };
+        PosOfflineExceptionPage: {
+            items: components["schemas"]["PosOfflineException"][];
+            next_cursor: string | null;
+            limit: number;
+        };
+        PosOfflineResolveRequest: {
+            action: components["schemas"]["PosOfflineAction"];
+            /** @description Why the manager resolves it so. */
+            reason: string;
+            /**
+             * Format: int64
+             * @description The row's revision; If-Match is the alternative.
+             */
+            revision?: number;
         };
         PosOfflinePolicyRequest: {
             /** Format: uuid */
@@ -35681,6 +35823,7 @@ export interface operations {
             403: components["responses"]["ForbiddenEither"];
             404: components["responses"]["WireNotFound"];
             500: components["responses"]["InternalError"];
+            503: components["responses"]["ServiceUnavailable"];
         };
     };
     posTransactionVoid: {
@@ -36341,6 +36484,114 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["ForbiddenEither"];
             404: components["responses"]["WireNotFound"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    posOfflineExceptionList: {
+        parameters: {
+            query: {
+                branch_id: string;
+                status?: "open" | "held" | "resolved" | "all";
+                /** @description The opaque cursor of the previous page's next_cursor, passed back verbatim. A malformed cursor, or one minted for another ordering, is a 400 naming cursor. */
+                cursor?: components["parameters"]["Cursor"];
+                /** @description Page size of a converted list, 1 to 200, default 50. Anything else is a 400 naming limit (ADR 0001 section 2); it is never clamped. */
+                limit?: components["parameters"]["PageLimit"];
+            };
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The page of offline exceptions. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PosOfflineExceptionPage"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    posOfflineExceptionGet: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The offline exception. */
+            200: {
+                headers: {
+                    /** @description The row's revision. */
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PosOfflineException"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["WireNotFound"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    posOfflineExceptionResolve: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description The document revision the client read, in quotes ("3"; the weak form W/"3" is accepted too). The body's revision field is the alternative; a write carrying neither is 428, a stale one 409 stale_revision, and * or a list of tags is a 400. */
+                "If-Match"?: components["parameters"]["IfMatch"];
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PosOfflineResolveRequest"];
+            };
+        };
+        responses: {
+            /** @description The exception as the resolution left it. */
+            200: {
+                headers: {
+                    /** @description The row's revision. */
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PosOfflineException"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["ConflictEither"];
+            428: components["responses"]["WirePreconditionRequired"];
             500: components["responses"]["InternalError"];
         };
     };

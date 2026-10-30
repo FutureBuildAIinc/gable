@@ -826,12 +826,33 @@ func Run() {
 		logger.Warn("the simulated card terminal is wired: a demo stack only, never a production configuration",
 			"script", cfg.POSTerminalSimulator)
 	}
+	// The Run card terminal driver (CP-05): selected by configuration like
+	// the simulator, never by default. Its credentials are the Run Payments
+	// set (resolved at call time, DB-first); the Reporting API set is
+	// optional and only three things need it: the lookup before every
+	// charge-card POST, the lost answer lookup and the settlement batch.
+	// Without it the lookup cannot run, and the driver's own per order
+	// guard is what keeps a re dispatch from charging twice.
+	// A demo stack's simulator wins: both are never wired.
+	if cfg.POSTerminal == "run" && cfg.POSTerminalSimulator == "" {
+		runTerm := payment.NewRunTerminal(paymentKeys.Resolve, terminalLedger, logger).
+			OnKeyRotated(func(apiKey, refreshToken string) {
+				if err := paymentKeys.PersistRotatedKey(apiKey, refreshToken); err != nil {
+					logger.Error("failed to persist rotated Run Payments api_key", "error", err)
+				}
+			}).
+			WithReporting(cfg.RunReportingBaseURL, cfg.RunReportingClientID, cfg.RunReportingClientSecret)
+		posSvc.WithTerminal(runTerm, terminalLedger)
+		logger.Info("the Run card terminal driver is wired",
+			"transaction_lookup", cfg.RunReportingBaseURL != "")
+	}
+
 	// The large cash rules of the branch's country (CP-17a): the payer
 	// capture at the counter, the classifier and the two aggregations, the
 	// sensitive values sealed with the same payment vault key.
 	lcVault, lcVaultErr := payment.NewVault(cfg.PaymentVaultKey)
 	if lcVaultErr != nil {
-		logger.Error("PAYMENT_VAULT_KEY is not a valid vault key; the large cash payer's sensitive values cannot be sealed")
+		logger.Error("PAYMENT_VAULT_KEY is not a valid vault key; the large cash payer's sensitive values cannot be sealed, so every capture of a payer is refused")
 	}
 	largeCashSvc := largecash.NewService(db, lcVault, cfg.PaymentVaultKey)
 	posSvc.WithLargeCash(largeCashSvc)
