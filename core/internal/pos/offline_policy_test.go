@@ -22,7 +22,7 @@ import (
 
 func TestOfflinePolicy_BranchDefaultNoneAndExposure(t *testing.T) {
 	testutil.LockOutboxTables(t)
-	f := newOwnBranchFixture(t, testutil.RequireDB(t))
+	f := newFixture(t, testutil.RequireDB(t))
 	ctx := context.Background()
 	mustExec(t, f.db, `DELETE FROM pos_offline_policy WHERE branch_id = $1`, f.branchID)
 	mustExec(t, f.db, `DELETE FROM pos_register_devices WHERE branch_id = $1`, f.branchID)
@@ -228,7 +228,7 @@ func TestOfflinePolicy_CarriesTheBranchWall(t *testing.T) {
 func TestRacingOfflinePolicyWritesProduceMonotonicRevisionsAndMatchingAuditRows(t *testing.T) {
 	testutil.LockOutboxTables(t)
 	db := testutil.RequireDBMaxConns(t, 4)
-	f := newOwnBranchFixture(t, db)
+	f := newFixture(t, db)
 	mustExec(t, db, `DELETE FROM pos_offline_policy WHERE branch_id = $1`, f.branchID)
 	mustExec(t, db, `DELETE FROM audit_log WHERE action = 'pos.offline.policy' AND entity_id = $1::uuid`, f.branchID.String())
 	t.Cleanup(func() {
