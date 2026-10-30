@@ -377,9 +377,11 @@ only (section 4); the one time secret it brings back is spent by the core.
 - **Sign out** revokes the core's session and clears the client's copy.
   There is no Appwrite session to end, because none outlived the sign in.
 - **Brute force.** Appwrite's own rate limits do not apply to the core's API
-  key calls, so the core limits its own routes: the staff sign in and every
-  redirect method's start route (the magic link's included) per client
-  address and per email, and the shell's code redemption and refresh per
+  key calls, so the core limits its own routes: the staff sign in (the
+  browser's and the shell's email and password doors share one budget per
+  client address and per email) and every redirect method's start route
+  (the magic link's included) per client address and per email, and the
+  shell's code redemption and refresh per
   client address, refusing past the limit with the same fixed answer plus
   `Retry-After`. The portal login keeps its own limiter.
 - **Audit.** Sign in, every refusal (with the attempted email and a fixed
@@ -417,7 +419,9 @@ only (section 4); the one time secret it brings back is spent by the core.
   sign in again.
 - **Shells (Tauri).** A shell is a public client of the core, not of
   Appwrite. Email and password is posted from the shell's own door to the
-  core. Every redirect method opens the system browser on the core's start
+  core's `POST /api/v1/auth/shell/signin`, which answers the shell's token
+  pair in the body, never a cookie, and refuses any request that carries an
+  `Origin` (every browser POST does), so no page can use it. Every redirect method opens the system browser on the core's start
   route with a PKCE challenge (S256) and the shell's return target; the core
   runs the sign in and finishes by redirecting to the shell with a one time
   code. The core accepts as the return target only the registered `gable`
@@ -461,7 +465,7 @@ Gable's own session (section 2).
 
 | Gable code | The person's path | The core's Appwrite calls |
 |---|---|---|
-| `email_password` | browser or shell to the core: `POST /api/v1/auth/sign-in`, which carries the CSRF header or passes the same origin `Origin` check (section 3) | `account.createEmailPasswordSession` |
+| `email_password` | browser to the core: `POST /api/v1/auth/signin`, which carries the CSRF header or passes the same origin `Origin` check (section 3); shell to the core: `POST /api/v1/auth/shell/signin`, which carries no `Origin` and answers the shell's token pair (section 3) | `account.createEmailPasswordSession` |
 | `google` | browser to the core's start route; the core redirects it to Appwrite's `createOAuth2Token` URL for the provider (navigation only); Appwrite runs the provider redirect and sends the browser to Gable's callback with the user id and one time secret | `account.createSession` with that user id and secret |
 | `microsoft` | as `google`, with the console step below | as `google` |
 | `oidc` | as `google`, with Appwrite's generic OIDC provider pointed at the dealer's issuer | as `google` |

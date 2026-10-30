@@ -9840,6 +9840,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/auth/shell/signin": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Sign a Tauri shell in with email and password
+         * @description Public. The shell's own email and password door (ADR 0012 section 3). The same Appwrite check and admission as /api/v1/auth/signin, then the shell's opaque access token (prefix gst_) and rotating refresh token in the body, never a cookie. Only the shell's native post may use it: a request that carries any Origin header, Gable's own included, gets the fixed 401 and no CORS allowance, so no browser page can sign in here or read the tokens. The dealer's allowlist must hold email_password (403 otherwise) before any credential is read. It shares the web door's limits per client address and per email, one budget across both doors, and every refusal gets the one fixed 401 answer the web door gives.
+         */
+        post: operations["authShellSignIn"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/auth/shell/redeem": {
         parameters: {
             query?: never;
@@ -43007,6 +43027,44 @@ export interface operations {
                 };
                 content?: never;
             };
+            /** @description Too many attempts; retry after the Retry-After seconds. */
+            429: {
+                headers: {
+                    "Retry-After"?: number;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WireError"];
+                };
+            };
+            503: components["responses"]["WireUnavailable"];
+        };
+    };
+    authShellSignIn: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StaffSignInRequest"];
+            };
+        };
+        responses: {
+            /** @description The shell's tokens. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ShellTokens"];
+                };
+            };
+            400: components["responses"]["WireBadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             /** @description Too many attempts; retry after the Retry-After seconds. */
             429: {
                 headers: {

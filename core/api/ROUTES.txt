@@ -206,6 +206,7 @@ POST	/api/v1/auth/refresh	internal/staffauth	h.Refresh
 GET	/api/v1/auth/session	internal/staffauth	h.Session
 POST	/api/v1/auth/shell/redeem	internal/staffauth	h.ShellRedeem
 POST	/api/v1/auth/shell/refresh	internal/staffauth	h.ShellRefresh
+POST	/api/v1/auth/shell/signin	internal/staffauth	h.ShellSignIn
 POST	/api/v1/auth/shell/signout	internal/staffauth	h.ShellSignOut
 POST	/api/v1/auth/signin	internal/staffauth	h.SignIn
 POST	/api/v1/auth/signout	internal/staffauth	h.SignOut
