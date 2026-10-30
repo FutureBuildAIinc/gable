@@ -728,4 +728,67 @@ on orders, and the branch's tax jurisdiction and rate set on the admin screen. A
    sale at `REG-01`: the summary's tax is the new rate on the subtotal. `LK` keeps its own rate, and its register
    `REG-LK` prices at it, not at `KEL-MAIN`'s.
 
+### CP-13: the counter keeps selling when the connection drops (ADR 0011)
+
+Proves: CP-13. A register in the work shell, enrolled and holding a snapshot, sells cash, check and account sales with the
+network cut, prints an offline receipt, sends the queue when the connection returns, and hands every sale it could not
+post to a manager. Across two yards: `KEL-MAIN` (`REG-01`) and `LK` (`REG-LK`), two registers on two machines (or two
+work shell windows with separate keychains). Needs the Linux work shell, and for steps 14 to 16 a Mac and a Windows
+machine of your own: a simulator does not count. The browser specs of the same behaviour are
+`web/e2e/pos-offline.spec.ts`, `pos-offline-two-registers.spec.ts` and `pos-offline-worker.spec.ts`.
+
+Before you start: Admin, Offline selling (`/admin/offline-counter`) for each yard: on, tenders Cash, Check and Account,
+the per sale cap $500.00, the account cap $1,000.00. Note the worst case line it shows for the account cap.
+
+1. **Enrol the register (manager).** In the register's work shell, Admin, Register devices: Enrol with the manager's staff
+   number and counter PIN. The row reads the new epoch and the shell holds the key. A cashier's PIN is refused in plain
+   words and writes no device row.
+2. **Take a snapshot.** Open the till, then ring one line online. The strip reads Ready to sell offline. Open a second
+   drawer on the other register and do the same.
+3. **Cut the connection mid sale.** With two lines on the cart, switch the network off. The banner reads "Offline: sales
+   are kept on this register and sent when the connection returns". The cart shows "Offline prices: promotions, quantity
+   breaks and job prices are not applied". Add a line.
+4. **Tenders offline.** Card and Store credit are greyed with "needs the connection". Search for an account: only the
+   cached accounts answer, with the room left. Charge a sale over the account's room: refused at the counter. A kit
+   product is refused with "kits do not sell offline".
+5. **Take the sale in cash and print.** The receipt reads OFFLINE SALE, an offline reference `<register>-<epoch>-<seq>`,
+   each line's price charged, the sentence that promotions, quantity breaks and job prices were not applied offline, and no
+   invoice number. The strip counts 1 waiting with its total and the room left under the caps.
+6. **Reload offline.** Reload the counter with the network still off. It comes back, and the waiting sale is still counted.
+7. **Reconnect.** Switch the network on. The strip reads "Sent 1". The invoice exists with the sale's date and the
+   customer's name; the old cart reads Abandoned in the sales list, with no void against it. The sale and its cash show in
+   the till report's expected cash; close the drawer: the Z report counts the sale once.
+8. **Result unknown.** Ring a sale and, at the moment of paying, switch the network off after pressing Pay. The cart reads
+   "Result unknown", offers no offline tender, and the Close Till button is greyed with its reason. Switch the network on:
+   the sale shows complete and nothing is queued.
+9. **Re-ring the same goods offline.** Do step 8 again, then ring the same goods offline without touching "different
+   customer". Reconnect: one posting, and one item "needs a manager" (settled cart), nothing voided. Ring a third sale with
+   "different customer" ticked: it posts, and the branch day page shows the declaration beside the cart's outcome.
+10. **Refused stock.** Sell a product offline, then take its stock to zero on the other machine, then reconnect. The strip
+    reads "needs a manager", and Close Till waits with that reason. On the branch day page the item is open; resolve it by
+    Retry (refused again, stays open), then Accept with a reason: it posts at the recorded figures, the item reads
+    resolved, and the drawer closes.
+11. **Two registers.** Take one cash sale on each machine while both are offline, then reconnect both at once. Each
+    receipt's offline reference is different; the POS numbers and the invoice numbers are all different, with no gap in
+    the invoice series.
+12. **Store missing.** Quit the shell, delete the register's queue file from its data folder, start it again offline. The
+    strip reads "This register must be enrolled again before it can sell offline" and no offline tender is offered.
+    Reconnect and re-enrol: the branch day page lists an unknown tail item naming the old epoch; the drawer will not close
+    until a manager accepts it.
+13. **A snapshot that is refused.** With a sale waiting, hold the sync (block the server from this machine) and reconnect.
+    The strip names the item that waits and its number and says the register keeps selling on the snapshot it holds.
+14. **WebKitGTK (Linux work shell).** With the shell online and signed in, open the counter once. Switch the network off
+    and reload the counter window. The counter appears from the cache, the strip reads offline, and no "Do not reload while
+    offline" warning shows. Evidence: the screen, and the shell's log with no asset request after the cut
+    (`notes/c1-fix2-REPORT.md` is the pattern).
+15. **WKWebView (macOS work shell, a real Mac).** Repeat step 14 on the Mac. The three outcomes are: the counter reloads
+    from the cache (the pass), the strip shows "Do not reload while offline" and the counter stays mounted without a
+    reload (a named fallback: record it and do not reload), or the counter is blank after the reload (a fail, file it
+    against CP-13). Record the macOS and shell versions and the screen.
+16. **WebView2 (Windows work shell, a real Windows machine).** Repeat step 14 and record the same three outcomes, the
+    Windows build and the shell version. CP-13 is not done until steps 14, 15 and 16 are each shown on their own machine.
+
+Parity row: CP-13 turns Yes only when steps 1 to 16 pass; steps 15 and 16 are owed on real machines (item 315) and are not
+run in the build box.
+
 None of the other walks of the plan are written yet; they land with their items.
