@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: LicenseRef-OpenLBM-Surface-1.0
+// SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
 
 /**
  * The Kit Components tab edits a kit's definition: what the kit holds, per one
