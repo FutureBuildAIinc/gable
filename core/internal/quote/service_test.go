@@ -504,41 +504,43 @@ func costedLine(qty, cost int64) QuoteLine {
 	return QuoteLine{ID: uuid.New(), ProductID: &id, Quantity: httpx.Quantity(qty * 10000), UnitCost: httpx.Price(cost)}
 }
 
-// Accepting raises a PO for every costed (special order) line and no other,
-// with the line's own quantity and unit cost, after the commit.
-func TestTransition_AutoPOOnlyForCostedLines(t *testing.T) {
+// A plain acceptance (no order was created) raises no purchase order at all:
+// a purchase order line links to the ORDER line it serves, and the convert
+// raises them for the created order's special order lines instead. The
+// earlier fallback that linked the quote line itself never reached the
+// database (the foreign key to order_lines refused it), so nothing is lost.
+func TestTransition_APlainAcceptRaisesNoPurchaseOrder(t *testing.T) {
 	svc, repo, _ := newTestService()
-	special := costedLine(3, 882500)
-	stock := costedLine(10, 0)
-	q := repo.seed(QuoteStateDraft, stock, special)
+	q := repo.seed(QuoteStateSent, costedLine(3, 882500))
 	po := &fakePO{}
 	svc.WithAutoPO(po)
 
-	rev := int64(1)
-	if _, err := svc.Transition(context.Background(), q.ID, QuoteStateAccepted, Precondition{Revision: &rev}); err != nil {
+	if err := svc.UpdateState(context.Background(), q.ID, QuoteStateAccepted); err != nil {
 		t.Fatal(err)
 	}
-	if len(po.calls) != 1 {
-		t.Fatalf("raised %d POs, want 1", len(po.calls))
+	if len(po.calls) != 0 {
+		t.Fatalf("the plain accept raised %d purchase order(s), want none", len(po.calls))
 	}
-	got := po.calls[0]
-	if got.productID != nil || got.quantity != 3 || got.unitCost != 88.25 || got.lineID != special.ID {
-		t.Errorf("PO call = %+v, want the plain accept's inert line (no product) at 3 and 88.25", got)
-	}
-	if got.branch != q.BranchID {
-		t.Errorf("PO call branch = %s, want the quote's own branch %s, never one resolved from the caller's grants", got.branch, q.BranchID)
+	if repo.quotes[q.ID].Status != QuoteStateAccepted {
+		t.Error("the quote must still be accepted")
 	}
 }
 
-func TestTransition_AutoPOFailureDoesNotBlockAcceptance(t *testing.T) {
+// A failing auto purchase order never blocks the act that raised it: the
+// convert still accepts the quote and answers the order (the raise is
+// fire-and-forget after the commit).
+func TestConvert_AutoPOFailureDoesNotBlockTheConvert(t *testing.T) {
 	svc, repo, _ := newTestService()
 	q := repo.seed(QuoteStateSent, costedLine(1, 500000))
+	svc.WithOrderCreator(&fakeOrderCreator{specialLines: true})
 	svc.WithAutoPO(&fakePO{err: errors.New("vendor unavailable")})
-	if err := svc.UpdateState(context.Background(), q.ID, QuoteStateAccepted); err != nil {
-		t.Fatalf("a failed auto-PO must not undo the acceptance: %v", err)
+	rev := int64(1)
+	o, err := svc.Convert(context.Background(), q.ID, Precondition{Revision: &rev})
+	if err != nil {
+		t.Fatalf("a failed auto-PO must not undo the convert: %v", err)
 	}
-	if repo.quotes[q.ID].Status != QuoteStateAccepted {
-		t.Error("quote must still be accepted")
+	if o == nil || repo.quotes[q.ID].Status != QuoteStateAccepted {
+		t.Fatalf("convert = %+v, quote %s, want the order and an accepted quote", o, repo.quotes[q.ID].Status)
 	}
 }
 

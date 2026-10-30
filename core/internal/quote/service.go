@@ -25,10 +25,9 @@ import (
 	"github.com/google/uuid"
 )
 
-// AutoPOService is an optional interface for triggering purchase orders from accepted quotes.
+// AutoPOService is an optional interface for triggering purchase orders from
+// the special order lines of a created order.
 type AutoPOService interface {
-	// productID is nil for a line that carries no product on its purchase
-	// order line (the plain accept path, whose lines are inert on receipt).
 	CreatePOFromSpecialOrderLine(ctx context.Context, productID *uuid.UUID, vendorID *uuid.UUID, quantity float64, unitCost float64, linkedSOLineID uuid.UUID, branch uuid.UUID) error
 }
 
@@ -805,10 +804,9 @@ func (s *Service) transition(ctx context.Context, id uuid.UUID, to QuoteState, p
 		return nil, err
 	}
 
-	// Auto-PO: when accepted, trigger POs for special-order items.
-	if to == QuoteStateAccepted && s.poSvc != nil {
-		s.triggerAutoPO(ctx, out, nil)
-	}
+	// A plain acceptance raises no purchase order: triggerAutoPO acts on the
+	// special order lines of a created ORDER (the convert's), and this path
+	// created none.
 	// Price-protection: when sent, snapshot index baselines for commodity
 	// lines. Best-effort: a pricing-module failure must never block a send.
 	if to == QuoteStateSent && s.snapshotSvc != nil {
@@ -1026,60 +1024,59 @@ func (s *Service) record(ctx context.Context, q *Quote, eventType, fromStatus st
 }
 
 // triggerAutoPO creates purchase order lines for the SPECIAL ORDER lines of
-// an accepted quote, and only those: an ordinary stocked line is served from
-// the stock it allocated, and a product carrying purchase order line for it
-// would put its receipt on hand and re-average the cost of stock the dealer
-// already holds (PR 40 round 2 P3-2, PR 43 review round 1 P3-3). On the
-// convert the gate is the ORDER line the quote line became
+// an accepted quote's ORDER, and only those: an ordinary stocked line is
+// served from the stock it allocated, and a product carrying purchase order
+// line for it would put its receipt on hand and re-average the cost of stock
+// the dealer already holds (PR 40 round 2 P3-2, PR 43 review round 1 P3-3).
+// The gate is the ORDER line the quote line became
 // (order_lines.is_special_order); a converted quote line is never a special
-// order line, so the convert creates none. This is fire-and-forget: failures
-// are logged but don't block acceptance. The purchase order line links to the
-// ORDER line (order_lines.quote_line_id; its linked_so_line_id is a foreign
-// key to order_lines), so a line that has no order line (no order was
-// created, as on the plain transition) links the quote line itself and
-// carries no product, the base's inert line only its own tests use.
+// order line, so a plain convert creates none. An acceptance that created no
+// order (the plain transition, the dealer link's accept) raises no purchase
+// order at all: a purchase order line links to the ORDER line it serves
+// (purchase_order_lines.linked_so_line_id is a foreign key to order_lines),
+// so with no order there is nothing to serve, and the earlier fallback that
+// linked the quote line itself could not be inserted by the database (the
+// foreign key refused it, aborting the acceptance's transaction, whose audit
+// row then failed, and the public accept answered 500; QE-01). This is
+// fire-and-forget: failures are logged but don't block the accept.
 func (s *Service) triggerAutoPO(ctx context.Context, q *Quote, created *order.Order) {
+	if created == nil {
+		return
+	}
 	orderLine := map[uuid.UUID]*order.OrderLine{}
-	if created != nil {
-		for i := range created.Lines {
-			if created.Lines[i].QuoteLineID != nil {
-				orderLine[*created.Lines[i].QuoteLineID] = &created.Lines[i]
-			}
+	for i := range created.Lines {
+		if created.Lines[i].QuoteLineID != nil {
+			orderLine[*created.Lines[i].QuoteLineID] = &created.Lines[i]
 		}
 	}
 	for _, line := range q.Lines {
 		// Only create POs for lines that have a unit cost (special order indicator)
-		if line.UnitCost > 0 && line.ProductID != nil {
-			linked := line.ID
-			product := (*uuid.UUID)(nil)
-			if ol, ok := orderLine[line.ID]; ok {
-				if !ol.IsSpecialOrder {
-					continue
-				}
-				linked = ol.ID
-				pid := *line.ProductID
-				product = &pid
-			} else if created != nil {
-				s.logger.Info("auto-PO skipped: the quote line has no order line", "quote_id", q.ID, "line_id", line.ID)
-				continue
-			}
-			// The draft sits at the branch of the order the line belongs to
-			// (the quote's own when no order was created), never at a branch
-			// resolved from the caller's grants.
-			branch := q.BranchID
-			if created != nil {
-				branch = created.BranchID
-			}
-			err := s.poSvc.CreatePOFromSpecialOrderLine(
-				ctx, product, nil, float64(line.Quantity)/10000, float64(line.UnitCost)/10000, linked, branch,
-			)
-			if err != nil {
-				s.logger.Warn("auto-PO failed for quote line",
-					"quote_id", q.ID, "line_id", line.ID, "product_id", line.ProductID, "error", err)
-			} else {
-				s.logger.Info("auto-PO created for quote line",
-					"quote_id", q.ID, "line_id", line.ID, "product_id", line.ProductID)
-			}
+		if line.UnitCost <= 0 || line.ProductID == nil {
+			continue
+		}
+		ol, ok := orderLine[line.ID]
+		if !ok {
+			s.logger.Info("auto-PO skipped: the quote line has no order line", "quote_id", q.ID, "line_id", line.ID)
+			continue
+		}
+		if !ol.IsSpecialOrder {
+			continue
+		}
+		linked := ol.ID
+		pid := *line.ProductID
+		product := &pid
+		// The draft sits at the branch of the order the line belongs to,
+		// never at a branch resolved from the caller's grants.
+		branch := created.BranchID
+		err := s.poSvc.CreatePOFromSpecialOrderLine(
+			ctx, product, nil, float64(line.Quantity)/10000, float64(line.UnitCost)/10000, linked, branch,
+		)
+		if err != nil {
+			s.logger.Warn("auto-PO failed for quote line",
+				"quote_id", q.ID, "line_id", line.ID, "product_id", line.ProductID, "error", err)
+		} else {
+			s.logger.Info("auto-PO created for quote line",
+				"quote_id", q.ID, "line_id", line.ID, "product_id", line.ProductID)
 		}
 	}
 }
