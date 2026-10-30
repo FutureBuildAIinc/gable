@@ -18,7 +18,7 @@ import { CustomerService } from '../../services/CustomerService';
 import type { ShipTo } from '../../types/customer';
 import {
   chargeRefusal, standingOf, money, PO_REFUSAL, JOB_REFUSAL, verdictLine, waysForward, wayLabel, buyerRefusal, checkRefusal,
-  storeCreditOffer, tenderMethods, idRefusal, idRequired, idRequiredWords, holdStanding, cardRefusal, type CheckIDRule,
+  storeCreditOffer, tenderMethods, idRefusal, idRequired, idRequiredWords, holdStanding, cardRefusal, cardSimulatorNote, type CheckIDRule,
 } from './standing';
 import { differenceOf, exchangeTotals, reasonLabel, returnRefusal } from './exchange';
 import { signatureRefusal, sealedWords } from './signatureLogic';
@@ -1124,6 +1124,11 @@ export class POSTerminal extends LitElement {
     } catch (err: unknown) {
       this._error = err instanceof Error ? err.message : 'Failed to save the purchase order';
     }
+  }
+
+  /** The words beside Card when the terminal is the simulator and no card is charged (CP-05 round 2). */
+  private get _cardSimulatorNote(): string | null {
+    return cardSimulatorNote(this._register);
   }
 
   /** Why Card is not offered, or null when it is: the register has no card terminal (CP-05 A1). */
@@ -3417,6 +3422,8 @@ export class POSTerminal extends LitElement {
           </div>
           ${this._cardRefusal !== null && this._till !== null ? html`
             <p class="mt-2 text-xs text-slate-400" data-testid="pos-card-refusal">${this._cardRefusal}</p>` : nothing}
+          ${this._cardSimulatorNote !== null && this._till !== null ? html`
+            <p class="mt-2 text-xs text-amber-400" data-testid="pos-card-simulated">${this._cardSimulatorNote}</p>` : nothing}
           ${accountWhy !== null ? html`
             <div class="mt-3 rounded-lg border border-amber-400/40 bg-amber-400/10 p-3 text-sm text-amber-400" data-testid="pos-account-refusal">
               <p>${accountWhy}</p>

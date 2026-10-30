@@ -170,6 +170,14 @@ export function cardRefusal(register: CounterRegister | null): string | null {
     return register?.card_terminal === 'none' ? NO_CARD_TERMINAL : null;
 }
 
+/** The counter's plain words beside Card at a register whose card terminal is the simulator (CP-05 round 2). */
+export const SIMULATED_CARD_TERMINAL = 'Simulated card terminal: no card is charged';
+
+/** The note beside Card when the register's terminal is the simulator, or null: nothing real is charged there. */
+export function cardSimulatorNote(register: CounterRegister | null): string | null {
+    return register?.card_terminal === 'simulator' ? SIMULATED_CARD_TERMINAL : null;
+}
+
 /** The ID kinds a check or charge may record, as the select lists them. */
 export const idRefusal = (checked: boolean, type: string): string | null =>
     checked && type === '' ? 'Pick the kind of ID that was checked' : null;

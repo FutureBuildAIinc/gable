@@ -95,4 +95,18 @@ describe('Card at a register with no card terminal', () => {
       el.remove();
     });
   }
+
+  it('says in words beside Card that a simulated terminal charges no card', async () => {
+    const el = await mount('simulator');
+    expect(q(el, 'pos-card-simulated')?.textContent?.trim()).toBe('Simulated card terminal: no card is charged');
+    el.remove();
+  });
+
+  for (const state of ['run', 'none'] as const) {
+    it(`shows no simulator note where the card terminal is ${state}`, async () => {
+      const el = await mount(state);
+      expect(q(el, 'pos-card-simulated')).toBeNull();
+      el.remove();
+    });
+  }
 });
