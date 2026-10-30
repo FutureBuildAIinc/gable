@@ -511,8 +511,8 @@ func (s *Service) postOfflineSale(ctx context.Context, branch uuid.UUID, batchID
 
 // insertOfflineSale writes the sale row with the client's id and the offline
 // provenance, its lines as recorded and their tally rows, and settles the
-// replaced cart, in the order of ADR 0011 section 3.2 step 1 (the sale rows
-// in id order).
+// replaced cart, in the order of ADR 0011 section 3.2 step 1 and ADR 0005
+// section 11 (the replaced cart, the session and step 1a before the insert).
 func (s *Service) insertOfflineSale(ctx context.Context, it *offlineItem, v *offlineVerdict) (*Sale, error) {
 	id := uuid.MustParse(it.Sale.ClientID)
 	walkInID, defaultCurrency, err := s.repo.WalkInCustomer(ctx)
@@ -536,9 +536,23 @@ func (s *Service) insertOfflineSale(ctx context.Context, it *offlineItem, v *off
 		r := uuid.MustParse(*it.Sale.ReplacesSaleID)
 		replaced = &r
 	}
-	// the replaced cart's row first when its id sorts first
-	if replaced != nil && replaced.String() < id.String() {
+	// ADR 0005 section 11 before any write: the replaced cart's row (step
+	// 1, whatever its id: the new sale row is not yet visible, so no other
+	// act can wait on it), the session FOR SHARE (1b) and the customer's
+	// credit lock (1a), all before the sale row's insert, whose customer
+	// foreign key takes the customer row FOR KEY SHARE; a live completion of
+	// the cart or the customer holds the cart and 1a, then the customer row
+	// FOR UPDATE (step 7)
+	if replaced != nil {
 		if err := s.settleReplacedCart(ctx, it, *replaced); err != nil {
+			return nil, err
+		}
+	}
+	if err := s.repo.LockTillSession(ctx, session, false); err != nil {
+		return nil, err
+	}
+	if sale.CustomerID != nil {
+		if err := s.repo.LockCustomerCredit(ctx, *sale.CustomerID); err != nil {
 			return nil, err
 		}
 	}
@@ -547,11 +561,6 @@ func (s *Service) insertOfflineSale(ctx context.Context, it *offlineItem, v *off
 	}
 	if err := s.repo.MarkOfflineSale(ctx, id, it, v.snapshotID); err != nil {
 		return nil, err
-	}
-	if replaced != nil && replaced.String() >= id.String() {
-		if err := s.settleReplacedCart(ctx, it, *replaced); err != nil {
-			return nil, err
-		}
 	}
 	lines, err := s.offlineLines(ctx, it)
 	if err != nil {
