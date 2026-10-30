@@ -223,19 +223,52 @@ func (s *Service) auditEvent(ctx context.Context, action string, entity uuid.UUI
 // admitted, issues a fresh core session. It returns the raw session id for
 // the cookie; only its hash is stored.
 func (s *Service) SignIn(ctx context.Context, email, password, clientKind string) (string, Identity, error) {
+	aws, refuse, err := s.openPasswordSession(ctx, email, password, map[string]any{"client_kind": clientKind})
+	if err != nil {
+		return "", Identity{}, err
+	}
+	return s.admitSession(ctx, aws, clientKind, refuse)
+}
+
+// ShellSignIn is the shell's own email and password door (ADR 0012 section
+// 3): the same Appwrite check and admission as SignIn, then the shell's
+// access and refresh pair, issued at once. The admission read is the one
+// this call made, so no second membership read is needed.
+func (s *Service) ShellSignIn(ctx context.Context, email, password string) (ShellTokens, error) {
+	aws, refuse, err := s.openPasswordSession(ctx, email, password, map[string]any{
+		"client_kind": "shell", "method": "email_password",
+	})
+	if err != nil {
+		return ShellTokens{}, err
+	}
+	_, who, err := s.admitSession(ctx, aws, "shell", refuse)
+	if err != nil {
+		return ShellTokens{}, err
+	}
+	return s.issueShell(ctx, who, aws.UserID, "email_password")
+}
+
+// openPasswordSession opens an Appwrite session by email and password with
+// the key. Its refuse closure writes the refusal row: the attempted email,
+// a fixed reason and the tags given, never the password.
+func (s *Service) openPasswordSession(ctx context.Context, email, password string, tags map[string]any) (
+	appwrite.Session, func(string, error) (string, Identity, error), error) {
 	email = strings.TrimSpace(email)
 	attempt := uuid.NewSHA1(subjectNamespace, []byte("email:"+strings.ToLower(email)))
 	refuse := func(reason string, err error) (string, Identity, error) {
-		s.auditEvent(ctx, "staff.sign_in_refused", attempt, "", map[string]any{
-			"reason": reason, "email": email, "client_kind": clientKind,
-		})
+		changes := map[string]any{"reason": reason, "email": email}
+		for k, v := range tags {
+			changes[k] = v
+		}
+		s.auditEvent(ctx, "staff.sign_in_refused", attempt, "", changes)
 		return "", Identity{}, err
 	}
 	if email == "" || password == "" {
-		return refuse("missing_credentials", ErrRefused)
+		_, _, err := refuse("missing_credentials", ErrRefused)
+		return appwrite.Session{}, nil, err
 	}
 	if s.floorClosed(ctx) {
-		return "", Identity{}, ErrUnavailable
+		return appwrite.Session{}, nil, ErrUnavailable
 	}
 	cctx, cancel := context.WithTimeout(ctx, s.set.CallTimeout)
 	aws, err := s.dir.CreateEmailPasswordSession(cctx, email, password)
@@ -243,12 +276,13 @@ func (s *Service) SignIn(ctx context.Context, email, password, clientKind string
 	if err != nil {
 		var ae *appwrite.Error
 		if errors.As(err, &ae) && ae.StatusCode >= 400 && ae.StatusCode < 500 && ae.StatusCode != http.StatusTooManyRequests {
-			return refuse("bad_credentials", ErrRefused)
+			_, _, err := refuse("bad_credentials", ErrRefused)
+			return appwrite.Session{}, nil, err
 		}
 		s.log.Warn("appwrite sign in unavailable", "error", err)
-		return "", Identity{}, ErrUnavailable
+		return appwrite.Session{}, nil, ErrUnavailable
 	}
-	return s.admitSession(ctx, aws, clientKind, refuse)
+	return aws, refuse, nil
 }
 
 // admitSession is the end every sign in method shares: read the account and
