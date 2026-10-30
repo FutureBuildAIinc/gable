@@ -121,7 +121,7 @@ func TestOfflineResolve_TheHeldAcceptBesideTheSyncAndTheClose(t *testing.T) {
 	testutil.LockOutboxTables(t)
 	f := newFixture(t, testutil.RequireDBMaxConns(t, 4))
 	offlinePolicyOn(t, f)
-	for round := 0; round < 4; round++ {
+	for round := 0; round < 8; round++ {
 		b := newOfflineBench(t, f, "REG-OXH-"+uuid.NewString()[:8])
 		r1, s1 := b.build(t, saleSpec{lines: []offlineLine{line(f.productID, "1")}})
 		r2, s2 := b.build(t, saleSpec{lines: []offlineLine{line(f.productID, "1")}})
@@ -156,6 +156,12 @@ func TestOfflineResolve_TheHeldAcceptBesideTheSyncAndTheClose(t *testing.T) {
 		}
 		if seq, _ := b.deviceMark(t); seq != 2 {
 			t.Errorf("round %d: mark = %d, want 2", round, seq)
+		}
+		// a gap item never names a number a sale of the register holds
+		if n := countOf(t, f.db, `SELECT count(*) FROM pos_offline_exceptions g JOIN pos_transactions p
+			ON p.register_id = g.register_id AND p.device_epoch = g.device_epoch AND p.device_seq BETWEEN g.gap_from_seq AND g.gap_to_seq
+			WHERE g.register_id = $1 AND g.reason_code = 'sequence_gap'`, b.register); n != 0 {
+			t.Errorf("round %d: a sequence_gap item names %d posted sales", round, n)
 		}
 		if moved := before - storedStock(t, f); moved != posted1+posted2 {
 			t.Errorf("round %d: stock moved %d for %d posted sales", round, moved, posted1+posted2)
