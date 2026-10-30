@@ -5,7 +5,9 @@ package pos_test
 
 import (
 	"context"
+	"fmt"
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/gablelbm/gable/internal/scale"
@@ -86,6 +88,13 @@ func TestWeighedLineKeepsItsWeightThroughAPriceOverride(t *testing.T) {
 		t.Fatalf("price override on the weighed line = %d: %s", r.status, r.raw)
 	}
 	f.requireWeightKept(t, saleID, lineID, ticket, "price override")
+	line := firstLineOf(t, f.getSale(t, saleID))
+	if got := fmt.Sprint(line["unit_price_ten_thousandths"]); got != "250000" {
+		t.Errorf("unit price after the override = %q, want 250000", got)
+	}
+	if got := str(t, line, "price_source"); got != "override" {
+		t.Errorf("price_source after the override = %q, want override", got)
+	}
 }
 
 // The quantity, unit and product of a weighed line are the scale's on the
@@ -101,9 +110,14 @@ func TestWeighedLineRefusesAReplaceOfItsQuantityUnitOrProduct(t *testing.T) {
 		"product":  {"product_id": other.String()},
 	} {
 		r := f.addLine(saleID, f.replaceOf(t, saleID, body))
-		if r.status != http.StatusBadRequest {
-			t.Errorf("replace of a weighed line's %s = %d, want 400: %s", name, r.status, r.raw)
+		if r.status != http.StatusBadRequest || !strings.Contains(string(r.raw), "is weighed") {
+			t.Errorf("replace of a weighed line's %s = %d, want the weighed refusal: %s", name, r.status, r.raw)
 		}
+	}
+	// A text line carries no product or quantity, so the type change is its own case.
+	textBody := map[string]any{"id": lineID, "line_type": "text", "description": "x"}
+	if r := f.addLine(saleID, textBody); r.status != http.StatusBadRequest || !strings.Contains(string(r.raw), "is weighed") {
+		t.Errorf("replace of a weighed line's type = %d, want the weighed refusal: %s", r.status, r.raw)
 	}
 	f.requireWeightKept(t, saleID, lineID, ticket, "refused replaces")
 }

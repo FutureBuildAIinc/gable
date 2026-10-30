@@ -1002,14 +1002,15 @@ func (s *Service) AddLine(ctx context.Context, saleID uuid.UUID, parsed []salesd
 }
 
 // refuseWeighedChange refuses a replace that moves a weighed line's product,
-// unit or quantity: those are the scale's, as they are on the plus button. A
+// unit, quantity or line type: those are the scale's, as they are on the plus button. A
 // request that restates what the line already holds (a price override sends
 // the whole line) passes.
 func refuseWeighedChange(old *salesdoc.Line, in salesdoc.ParsedLine) error {
 	if old.WeightSource == nil {
 		return nil
 	}
-	changed := (in.ProductID != nil && (old.ProductID == nil || *in.ProductID != *old.ProductID)) ||
+	changed := (in.LineType != "" && in.LineType != old.LineType) ||
+		(in.ProductID != nil && (old.ProductID == nil || *in.ProductID != *old.ProductID)) ||
 		(in.UOM != "" && (old.UOM == nil || in.UOM != *old.UOM)) ||
 		(in.HasQuantity && (old.Quantity == nil || in.Quantity != *old.Quantity))
 	if changed {
