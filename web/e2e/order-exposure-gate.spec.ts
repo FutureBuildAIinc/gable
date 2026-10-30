@@ -42,13 +42,15 @@ test.describe('the order exposure gate on the desk', () => {
     type Product = { id: string; sku: string; stock_uom: string };
     let stud: Product | undefined;
     let cursor = '';
+    const seen: string[] = [];
     for (let page = 0; page < 20 && !stud; page++) {
       const res = (await (await request.get(`/api/v1/products?limit=200${cursor}`)).json()) as { items: Product[]; next_cursor: string | null };
+      seen.push(...res.items.map((p) => p.sku));
       stud = res.items.find((p) => p.sku === 'DL_SPF_2X4_L08_S');
       if (!res.next_cursor) break;
-      cursor = `&cursor=${res.next_cursor}`;
+      cursor = `&cursor=${encodeURIComponent(res.next_cursor)}`;
     }
-    expect(stud, 'the seed frames 2x4x8 SPF as a commodity').toBeDefined();
+    expect(stud, `the seed frames 2x4x8 SPF as a commodity (scanned ${seen.length} products, first ${seen.slice(0, 5).join(', ')})`).toBeDefined();
     if (!stud) return;
     const quote = await (await request.post('/api/v1/quotes', {
       data: {
