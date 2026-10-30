@@ -594,9 +594,15 @@ func (s *Service) GenerateDocumentPDF(ctx context.Context, inv *invoice.Invoice,
 
 	// A Canadian invoice prints each frozen part as its own line, GST then
 	// PST (BC's PSTR s. 85(1), CP-14 A1); every other invoice its one line.
+	// The parts sit as close as the subtotal and the first part do; only the
+	// last keeps the US tax line's room above the total.
 	if lines := taxzone.Lines(inv.TaxRateParts); lines != nil {
-		for _, l := range lines {
-			m.AddRow(10, text.NewCol(12, b.taxLineText(l), props.Text{Align: align.Right, Size: 10}))
+		for i, l := range lines {
+			height := 5.0
+			if i == len(lines)-1 {
+				height = 10
+			}
+			m.AddRow(height, text.NewCol(12, b.taxLineText(l), props.Text{Align: align.Right, Size: 10}))
 		}
 	} else {
 		taxLabel := "TAX"
