@@ -28,7 +28,7 @@ type Branch = {
   id: string; path: string; code: string; description: string | null; name: string | null;
   address: string | null; city: string | null; state: string | null; zip: string | null;
   phone: string | null; tax_jurisdiction_code: string | null; default_tax_rate: number | null;
-  timezone: string | null; active: boolean; revision: number;
+  timezone: string | null; active: boolean; revision: number; country_code: string | null;
 };
 
 async function branchOf(request: APIRequestContext, code: string): Promise<Branch> {
@@ -44,7 +44,7 @@ function branchBody(b: Branch, over: Partial<Branch>): Record<string, unknown> {
     path: b.path, code: b.code, description: b.description, name: b.name, address: b.address,
     city: b.city, state: b.state, zip: b.zip, phone: b.phone,
     tax_jurisdiction_code: b.tax_jurisdiction_code, default_tax_rate: b.default_tax_rate,
-    timezone: b.timezone, active: b.active, ...over,
+    timezone: b.timezone, active: b.active, country_code: b.country_code, ...over,
   };
 }
 
@@ -69,6 +69,15 @@ test('a branch tax rate set on the admin screen prices the counter sale', async 
   await signIn(page, 'Playwright Admin');
   const branch = await branchOf(request, 'KEL-MAIN');
   const product = await stockedProduct(request);
+
+  // A branch's own default rate prices a US branch's sale; a Canadian branch
+  // takes its province's zone instead (CP-14 A1). The seeded yard is in BC,
+  // so it is placed in the US for this run and put back below.
+  const placed = await request.put(`/api/v1/branches/${branch.id}`, {
+    headers: { 'If-Match': `"${branch.revision}"` },
+    data: branchBody(branch, { country_code: 'US' }),
+  });
+  expect(placed.status(), await placed.text()).toBe(200);
 
   // The branch form shows the tax fields and saves them.
   await page.goto('/admin/branches');
@@ -104,7 +113,8 @@ test('a branch tax rate set on the admin screen prices the counter sale', async 
   expect(tax).toBeCloseTo(Math.round(subtotal * 10) / 100, 2);
   await page.screenshot({ path: path.join(SHOTS_DIR, 'admin-branch-tax-counter.png'), fullPage: true });
 
-  // The rate the branch held before is put back, so the seeded yards keep it.
+  // The rate and the country the branch held before are put back, so the
+  // seeded yards keep them.
   const fresh = (await (await request.get(`/api/v1/branches/${branch.id}`)).json()) as Branch;
   const put = await request.put(`/api/v1/branches/${branch.id}`, {
     headers: { 'If-Match': `"${fresh.revision}"` },

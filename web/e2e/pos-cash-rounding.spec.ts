@@ -36,6 +36,7 @@ interface BranchWire {
   tax_jurisdiction_code: string | null;
   default_tax_rate: number | null;
   cash_rounding_mode: 'OFF' | 'NEAREST_5_CENTS';
+  country_code: string | null;
   timezone: string | null;
   active: boolean;
   revision: number;
@@ -61,12 +62,17 @@ async function counterBranch(request: APIRequestContext): Promise<BranchWire> {
   return branch;
 }
 
-/** The branch's own settings: the rounding rule and the tax rate. */
+/**
+ * The branch's own settings: the rounding rule, the tax rate and the country.
+ * A Canadian branch charges its province's zone, not its own rate (CP-14 A1),
+ * so a run that takes the tax off places the branch in the US.
+ */
 async function setBranchRule(
   request: APIRequestContext,
   branch: BranchWire,
   mode: 'OFF' | 'NEAREST_5_CENTS',
   taxRate: number | null,
+  country: string | null = branch.country_code,
 ): Promise<BranchWire> {
   const res = await request.put(`/api/v1/branches/${branch.id}`, {
     headers: { 'If-Match': `"${branch.revision}"` },
@@ -83,6 +89,7 @@ async function setBranchRule(
       tax_jurisdiction_code: branch.tax_jurisdiction_code,
       default_tax_rate: taxRate,
       cash_rounding_mode: mode,
+      country_code: country,
       timezone: branch.timezone,
       active: branch.active,
     },
@@ -168,9 +175,9 @@ test('the counter: the branch rounds the cash, and the receipt says so', async (
   const before = branch;
   restore = async (req: APIRequestContext) => {
     const latest = await counterBranch(req);
-    await setBranchRule(req, latest, before.cash_rounding_mode, before.default_tax_rate);
+    await setBranchRule(req, latest, before.cash_rounding_mode, before.default_tax_rate, before.country_code);
   };
-  await setBranchRule(request, branch, 'OFF', 0);
+  await setBranchRule(request, branch, 'OFF', 0, 'US');
 
   const cents = await pricedProduct(request, branch.id, '1.03');
   const card = await pricedProduct(request, branch.id, '1.07');
