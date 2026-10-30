@@ -1275,12 +1275,18 @@ mod tests {
                 assert!(!words.contains(part), "{words}");
             }
         }
-        for (service, value) in custody.snapshot_pairs() {
+        for (service, account) in custody.snapshot_pairs() {
             for part in [PASSWORD, "pw-sentinel", "Kx9"] {
-                assert!(!service.contains(part) && !value.contains(part));
+                assert!(!service.contains(part) && !account.contains(part));
             }
         }
-        assert_eq!(custody.snapshot_len(), 2);
+        let mut values = custody.snapshot_values();
+        values.sort();
+        assert_eq!(
+            values,
+            ["fam.a", "gst_a"],
+            "custody holds the pair and nothing else"
+        );
     }
 
     /// The core refuses any Origin header on this route, and every browser
