@@ -19,4 +19,5 @@ pub mod custody;
 pub mod fence;
 pub mod profiles;
 pub mod shell;
+pub mod signin;
 pub mod tokens;
