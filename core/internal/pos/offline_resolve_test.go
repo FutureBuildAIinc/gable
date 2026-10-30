@@ -12,6 +12,7 @@ import (
 	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/gablelbm/gable/internal/pos"
 	"github.com/gablelbm/gable/internal/testutil"
+	"github.com/gablelbm/gable/pkg/branchctx"
 	"github.com/google/uuid"
 )
 
@@ -453,7 +454,7 @@ func TestOfflineResolve_WhoMayResolveAndWhat(t *testing.T) {
 	_, err := resolveAs(t, f, id, pos.ResolveAccept, offlineManager)
 	wantRefused(t, err, "resolution_not_allowed")
 	stale := rev - 1
-	_, err = f.service.ResolveOfflineException(context.Background(), id,
+	_, err = f.service.ResolveOfflineException(branchctx.WithSystem(context.Background()), id,
 		&pos.OfflineResolveIn{Action: pos.ResolveWriteOff, Reason: "stale", Revision: &stale}, "", offlineManager)
 	var hx *httpx.Error
 	if !errors.As(err, &hx) || (hx.Status != http.StatusPreconditionFailed && hx.Status != http.StatusConflict) {

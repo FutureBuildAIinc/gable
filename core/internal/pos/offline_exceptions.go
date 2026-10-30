@@ -211,8 +211,8 @@ func (s *Service) GetOfflineException(ctx context.Context, id uuid.UUID) (*Offli
 	return e, nil
 }
 
-// holdOfflineException refuses by name an exception of a branch outside the
-// caller's grants.
+// holdOfflineException refuses by name an exception of a branch the caller
+// may not target.
 func (s *Service) holdOfflineException(ctx context.Context, id uuid.UUID) (*offlineExceptionHead, error) {
 	h, err := s.repo.OfflineExceptionHead(ctx, id)
 	if err != nil {
@@ -221,8 +221,16 @@ func (s *Service) holdOfflineException(ctx context.Context, id uuid.UUID) (*offl
 	if h == nil {
 		return nil, httpx.NotFound("offline exception not found")
 	}
-	b := h.BranchID
-	return h, s.holdRecordBranch(ctx, "offline exception", &b, id)
+	// the row's own branch against the header and the grants both: a
+	// manager whose header names another branch, or who holds no grant of
+	// it, is refused by name
+	if err := s.grants.CheckPayloadBranch(ctx, h.BranchID); err != nil {
+		if errors.Is(err, middleware.ErrPayloadBranchRefused) {
+			return nil, httpx.Forbidden(fmt.Sprintf("offline exception %s belongs to a branch this caller may not target", id))
+		}
+		return nil, err
+	}
+	return h, nil
 }
 
 // ResolveOfflineException runs one manager's resolution (ADR 0011 3.4): lock
@@ -230,9 +238,6 @@ func (s *Service) holdOfflineException(ctx context.Context, id uuid.UUID) (*offl
 // audit row and the event, in one transaction. A posting the live checks
 // refuse again rolls back whole and the exception stays open.
 func (s *Service) ResolveOfflineException(ctx context.Context, id uuid.UUID, in *OfflineResolveIn, ifMatch, actor string) (*OfflineException, error) {
-	if s.ar == nil || s.invoices == nil || s.inventory == nil {
-		return nil, errNotConfigured
-	}
 	if actor == "" {
 		return nil, httpx.Forbidden("an offline exception is resolved by a signed in manager")
 	}
@@ -358,6 +363,9 @@ func (s *Service) resolveHeld(ctx context.Context, dev *registerDevice, e *Offli
 // on the earliest open date with no session, post as a separate sale with the
 // replaced cart's link cleared, or the stock figures restated.
 func (s *Service) postResolution(ctx context.Context, dev *registerDevice, e *OfflineException, in *OfflineResolveIn, actor string) (*Sale, error) {
+	if s.ar == nil || s.invoices == nil || s.inventory == nil {
+		return nil, errNotConfigured
+	}
 	it, err := parseOfflineItem(e.SignedSale)
 	if err != nil {
 		return nil, conflict("resolution_not_allowed", "the stored sale cannot be read: write it off")

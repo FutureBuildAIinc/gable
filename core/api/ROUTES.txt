@@ -411,6 +411,9 @@ POST	/api/v1/pos/end-of-day/{id}/reopen	internal/pos	h.ReopenBranchDay
 POST	/api/v1/pos/exchanges	internal/pos	h.CreateExchange
 POST	/api/v1/pos/exchanges/preview	internal/pos	h.PreviewExchange
 POST	/api/v1/pos/large-cash/preview	internal/largecash	h.Preview
+GET	/api/v1/pos/offline/exceptions	internal/pos	h.ListOfflineExceptions
+GET	/api/v1/pos/offline/exceptions/{id}	internal/pos	h.GetOfflineException
+POST	/api/v1/pos/offline/exceptions/{id}/resolve	internal/pos	h.ResolveOfflineException
 GET	/api/v1/pos/offline/policy	internal/pos	h.GetOfflinePolicy
 PUT	/api/v1/pos/offline/policy	internal/pos	h.PutOfflinePolicy
 GET	/api/v1/pos/products/search	internal/pos	h.SearchProducts

@@ -10,6 +10,7 @@ import (
 
 	"github.com/gablelbm/gable/internal/pos"
 	"github.com/gablelbm/gable/internal/testutil"
+	"github.com/gablelbm/gable/pkg/branchctx"
 	"github.com/google/uuid"
 )
 
@@ -40,7 +41,7 @@ func refusedForStock(t *testing.T, f *fixture, b *offlineBench) (uuid.UUID, *pos
 func resolveAs(t *testing.T, f *fixture, id uuid.UUID, action, actor string) (*pos.OfflineException, error) {
 	t.Helper()
 	rev := countOf(t, f.db, `SELECT revision FROM pos_offline_exceptions WHERE id = $1`, id)
-	return f.service.ResolveOfflineException(context.Background(), id,
+	return f.service.ResolveOfflineException(branchctx.WithSystem(context.Background()), id,
 		&pos.OfflineResolveIn{Action: action, Reason: "checked by the manager", Revision: &rev}, "", actor)
 }
 

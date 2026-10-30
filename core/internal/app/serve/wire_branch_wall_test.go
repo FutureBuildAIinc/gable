@@ -2000,6 +2000,74 @@ func TestOfflinePolicyRoutesUnderServeGuard(t *testing.T) {
 	}
 }
 
+// TestOfflineExceptionRoutesUnderServeGuard: the offline exception queue
+// (ADR 0011 3.4, CP-13 O4) is read by admin, owner and finance and resolved by
+// admin and owner, never a cashier; and the wall holds: a manager granted
+// only A lists, reads and resolves A's rows, and is refused B's list, B's row
+// and B's resolution.
+func TestOfflineExceptionRoutesUnderServeGuard(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	db := testutil.RequireDB(t)
+	f := newWallFixture(t, db, true)
+	A, B := f.branchA.String(), f.branchB.String()
+	ctx := context.Background()
+	regA, regB := "OXW-A-"+A[:6], "OXW-B-"+B[:6]
+	exA, exB := uuid.New(), uuid.New()
+	for _, r := range []struct {
+		reg         string
+		yard, br    uuid.UUID
+		exceptionID uuid.UUID
+	}{{regA, f.yardA, f.branchA, exA}, {regB, f.yardB, f.branchB, exB}} {
+		if _, err := db.Pool.Exec(ctx, `INSERT INTO pos_registers (id, location_id, name, branch_id) VALUES ($1, $2, 'wall', $3)`,
+			r.reg, r.yard, r.br); err != nil {
+			t.Fatalf("seed register: %v", err)
+		}
+		if _, err := db.Pool.Exec(ctx, `INSERT INTO pos_offline_exceptions (id, sale_id, register_id, branch_id, device_epoch,
+			device_seq, business_date, reason_code, status) VALUES ($1, gen_random_uuid(), $2, $3, 1, 1, CURRENT_DATE,
+			'insufficient_stock', 'open')`, r.exceptionID, r.reg, r.br); err != nil {
+			t.Fatalf("seed exception: %v", err)
+		}
+	}
+	t.Cleanup(func() {
+		ids := []uuid.UUID{exA, exB}
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM events_outbox WHERE entity_id = ANY($1)`, ids)
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM audit_log WHERE entity_id = ANY($1)`, ids)
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM pos_offline_exceptions WHERE id = ANY($1)`, ids)
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM pos_registers WHERE id IN ($1, $2)`, regA, regB)
+	})
+	list := func(b string) string { return "/api/v1/pos/offline/exceptions?branch_id=" + b }
+	item := func(id uuid.UUID) string { return "/api/v1/pos/offline/exceptions/" + id.String() }
+	resolve := `{"action":"write_off","reason":"counted as over","revision":1}`
+
+	for _, c := range []struct {
+		name, method, path, body, role, sub, header string
+		want                                        int
+	}{
+		{"cashier refused the list", "GET", list(A), "", "cashier", "u-a", A, http.StatusForbidden},
+		{"cashier refused the read", "GET", item(exA), "", "cashier", "u-a", A, http.StatusForbidden},
+		{"cashier refused the resolution", "POST", item(exA) + "/resolve", resolve, "cashier", "u-a", A, http.StatusForbidden},
+		{"finance refused the resolution", "POST", item(exA) + "/resolve", resolve, "finance", "u-a", A, http.StatusForbidden},
+		{"finance lists its own branch", "GET", list(A), "", "finance", "u-a", A, http.StatusOK},
+		{"admin reads its own branch's row", "GET", item(exA), "", "admin", "u-a", A, http.StatusOK},
+		{"a manager of A refused B's list", "GET", list(B), "", "admin", "u-a", A, http.StatusForbidden},
+		{"a manager of A refused B's list (no header)", "GET", list(B), "", "finance", "u-a", "", http.StatusForbidden},
+		{"a manager of A refused B's row (no header)", "GET", item(exB), "", "finance", "u-a", "", http.StatusForbidden},
+		{"a manager of A refused B's row", "GET", item(exB), "", "admin", "u-a", A, http.StatusForbidden},
+		{"a manager of A refused B's resolution", "POST", item(exB) + "/resolve", resolve, "owner", "u-a", A, http.StatusForbidden},
+		{"an owner of A resolves A's row", "POST", item(exA) + "/resolve", resolve, "owner", "u-a", A, http.StatusOK},
+		{"an owner with every branch resolves B's row", "POST", item(exB) + "/resolve", resolve, "owner", "boss", "", http.StatusOK},
+	} {
+		if got := f.call(t, c.method, c.path, c.body, c.role, c.sub, c.header); got != c.want {
+			t.Errorf("%s: got %d, want %d", c.name, got, c.want)
+		}
+	}
+	var open int
+	if err := db.Pool.QueryRow(ctx, `SELECT count(*) FROM pos_offline_exceptions WHERE id = ANY($1) AND status = 'open'`,
+		[]uuid.UUID{exA, exB}).Scan(&open); err != nil || open != 0 {
+		t.Errorf("%d rows still open after both resolutions (%v)", open, err)
+	}
+}
+
 // TestBranchWall_LargeCashPreviewHoldsTheSale: the preview reads a sale by id
 // from the body, so the wall holds that sale to the caller's branches. A
 // cashier granted only A previews A's sale and finds B's a missing one; a
