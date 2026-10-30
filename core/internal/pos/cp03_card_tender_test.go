@@ -152,7 +152,7 @@ func TestCP03_RacingCardCompletesChargeTheCardOnce(t *testing.T) {
 // does, so the sale completes and the card is not called over.
 func TestCP03_RoundedCoinsBesideAnUnderCardPass(t *testing.T) {
 	testutil.LockOutboxTables(t)
-	f := newFixture(t, testutil.RequireDB(t))
+	f := newFixture(t, testutil.RequireDB(t), withTerminal(payment.SimApprove, 0))
 	f.noTax()
 	f.setRounding("NEAREST_5_CENTS")
 	saleID, _ := f.saleAtPrice(103)

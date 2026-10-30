@@ -89,8 +89,6 @@ export async function installPortalMocks(page: Page, options: MockOptions = {}):
   const activeMe = options.me ?? meFixture
   const customerQuote = structuredClone(customerQuoteFixture)
   const publicView = structuredClone(options.publicState === 'signed' ? signedPublicQuoteFixture : publicQuoteFixture)
-  await page.route('https://fonts.googleapis.com/**', (route) => route.fulfill({ status: 200, contentType: 'text/css', body: '' }))
-  await page.route('https://fonts.gstatic.com/**', (route) => route.fulfill({ status: 200, contentType: 'font/woff2', body: '' }))
   await page.route('**/api/portal/v1/**', async (route) => {
     const request = route.request()
     const url = new URL(request.url())

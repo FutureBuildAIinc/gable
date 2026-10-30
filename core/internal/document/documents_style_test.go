@@ -292,8 +292,8 @@ func TestAMomentsDayIsTheYardsDay(t *testing.T) {
 
 type fakeInvoiceTenders struct{ legs []ThermalTender }
 
-func (f fakeInvoiceTenders) InvoiceTenders(context.Context, uuid.UUID) ([]ThermalTender, error) {
-	return f.legs, nil
+func (f fakeInvoiceTenders) InvoicePayment(context.Context, uuid.UUID) (SalePayment, error) {
+	return SalePayment{Tenders: f.legs}, nil
 }
 
 // The full page layout of a counter sale lists its tenders under the total:
@@ -303,7 +303,7 @@ func TestInvoiceListsTheCounterSalesTenders(t *testing.T) {
 		{Method: "CARD", Brand: "VISA", AmountCents: 50000, LastFour: "4242"},
 		{Method: "CASH", AmountCents: 60000, ChangeCents: 10000},
 	}
-	svc := styledService("en-CA").WithInvoiceTenders(fakeInvoiceTenders{legs: legs})
+	svc := styledService("en-CA").WithInvoicePayments(fakeInvoiceTenders{legs: legs})
 	doc, err := svc.GenerateInvoicePDF(context.Background(), mkInvoice(100000, nil), &customer.Customer{Name: "Acme"})
 	if err != nil {
 		t.Fatal(err)

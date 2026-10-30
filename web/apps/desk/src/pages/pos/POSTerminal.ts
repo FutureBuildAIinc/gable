@@ -18,7 +18,7 @@ import { CustomerService } from '../../services/CustomerService';
 import type { ShipTo } from '../../types/customer';
 import {
   chargeRefusal, standingOf, money, PO_REFUSAL, JOB_REFUSAL, verdictLine, waysForward, wayLabel, buyerRefusal, checkRefusal,
-  storeCreditOffer, tenderMethods, idRefusal, idRequired, idRequiredWords, holdStanding, type CheckIDRule,
+  storeCreditOffer, tenderMethods, idRefusal, idRequired, idRequiredWords, holdStanding, cardRefusal, cardRefundRefusal, cardSimulatorNote, type CheckIDRule,
 } from './standing';
 import { differenceOf, exchangeTotals, reasonLabel, returnRefusal } from './exchange';
 import { signatureRefusal, sealedWords } from './signatureLogic';
@@ -69,6 +69,8 @@ const REGISTER_STORAGE_PREFIX = 'gable.pos.register.';
 // The sale each register last opened, so a visit that left it empty reuses it.
 const SALE_STORAGE_PREFIX = 'gable.pos.sale.';
 const fmt = formatCents;
+/** An amount with its direction in front of the money: "+$0.02", "-$0.02". */
+const fmtSigned = (cents: number) => `${cents < 0 ? '-' : '+'}$${(Math.abs(cents) / 100).toFixed(2)}`;
 const tenderTitle = (m: TenderMethod) => (m === 'account' ? 'Charge to account' : m === 'store_credit' ? 'Store credit' : m);
 /** A line carries a quantity control when it has a quantity the route reprices. */
 const hasQuantityControl = (l: SaleLine) => l.parent_line_id === null && ['product', 'kit', 'charge'].includes(l.line_type);
@@ -277,6 +279,11 @@ export class POSTerminal extends LitElement {
   private _completing = false;
   private _reconnecting = false;
   @state() private _needsSignIn = false;
+  /** The strip's email and password form (CP-13). Only the email is state: the password lives in its field and one call. */
+  @state() private _pwForm = false;
+  @state() private _pwEmail = '';
+  @state() private _pwBusy = false;
+  @state() private _pwError: string | null = null;
 
   // The X report of the open drawer, and the register's stored Z reports (CP-08).
   @state() private _showXReport = false;
@@ -397,10 +404,16 @@ export class POSTerminal extends LitElement {
     return true;
   }
 
-  /** The strip's "Sign in this register": the shell's sign in, then the reconnect runs again. */
+  /** The strip's "Sign in this register": the dealer's first method opens the form or starts the shell's redirect sign in, then the reconnect runs again. */
   private async _signInRegister() {
     try {
-      await offlineCounter.signIn();
+      if ((await offlineCounter.signIn()) === 'form') {
+        this._pwError = null;
+        this._pwForm = true;
+        await this.updateComplete;
+        this._focusTestId('pos-offline-pw-email');
+        return;
+      }
     } catch (err) {
       this._offlineStrip = err instanceof Error ? err.message : null;
       return;
@@ -408,6 +421,80 @@ export class POSTerminal extends LitElement {
     this._offlineStrip = null;
     this._needsSignIn = false;
     await this._reconnect();
+  }
+
+  private _pwField(): HTMLInputElement | null {
+    return this.querySelector<HTMLInputElement>('[data-testid="pos-offline-pw-password"]');
+  }
+
+  private _focusTestId(id: string) {
+    this.querySelector<HTMLElement>(`[data-testid="${id}"]`)?.focus();
+  }
+
+  private _closePasswordForm() {
+    const field = this._pwField();
+    if (field) field.value = '';
+    this._pwForm = false;
+    this._pwEmail = '';
+    this._pwError = null;
+  }
+
+  /** Cancel: the form goes and focus goes to the ask button that comes back. */
+  private async _cancelPasswordForm() {
+    this._closePasswordForm();
+    await this.updateComplete;
+    this._focusTestId('pos-offline-sign-in');
+  }
+
+  /**
+   * The form's submit: the password goes from its field to the one shell call
+   * and the field is emptied at once, before any answer. It is never a state,
+   * a log line or an error word.
+   */
+  private async _submitPassword() {
+    const field = this._pwField();
+    if (this._pwBusy || !field) return;
+    const email = this._pwEmail.trim();
+    const attempt = offlineCounter.signInWithPassword(email, field.value);
+    field.value = '';
+    this._pwBusy = true;
+    this._pwError = null;
+    try {
+      await attempt;
+    } catch (err) {
+      this._pwError = err instanceof Error ? err.message : 'The register could not be signed in. Ask a manager.';
+      this._pwBusy = false;
+      await this.updateComplete;
+      this._focusTestId('pos-offline-pw-password');
+      return;
+    }
+    this._pwBusy = false;
+    this._closePasswordForm();
+    this._offlineStrip = null;
+    this._needsSignIn = false;
+    await this._reconnect();
+  }
+
+  private _renderPasswordForm() {
+    const input = 'w-full min-h-11 rounded border border-white/10 bg-deep-space px-3 py-2 text-sm text-white outline-none focus:border-gable-green';
+    const enter = (e: KeyboardEvent) => { if (e.key === 'Enter') void this._submitPassword(); };
+    return html`
+      <form class="flex flex-col gap-3 border-b border-blueprint-blue/30 bg-blueprint-blue/5 px-4 py-3 text-sm sm:flex-row sm:flex-wrap sm:items-end" data-testid="pos-offline-pw-form" @submit=${(e: Event) => e.preventDefault()}>
+        <label class="block w-full space-y-1.5 sm:w-auto sm:min-w-[12rem] sm:flex-1">
+          <span class="text-xs uppercase tracking-wider text-muted-foreground">Email</span>
+          <input type="email" data-testid="pos-offline-pw-email" aria-label="Email" autocomplete="username" class=${input}
+            .value=${this._pwEmail} @input=${(e: Event) => { this._pwEmail = (e.target as HTMLInputElement).value; }} @keydown=${enter} />
+        </label>
+        <label class="block w-full space-y-1.5 sm:w-auto sm:min-w-[12rem] sm:flex-1">
+          <span class="text-xs uppercase tracking-wider text-muted-foreground">Password</span>
+          <input type="password" data-testid="pos-offline-pw-password" aria-label="Password" autocomplete="current-password" class=${input} @keydown=${enter} />
+        </label>
+        <div class="flex gap-3" data-testid="pos-offline-pw-buttons">
+          <button type="button" data-testid="pos-offline-pw-submit" ?disabled=${this._pwBusy} class="min-h-11 rounded-lg bg-gable-green px-4 font-semibold text-deep-space disabled:opacity-60" @click=${() => void this._submitPassword()}>${this._pwBusy ? 'Signing in' : NO_SESSION_ASK}</button>
+          <button type="button" data-testid="pos-offline-pw-cancel" class="min-h-11 rounded-lg border border-white/20 px-4 font-semibold" @click=${() => void this._cancelPasswordForm()}>Cancel</button>
+        </div>
+        ${this._pwError ? html`<p class="basis-full text-sm text-amber-400" role="alert" data-testid="pos-offline-pw-error">${this._pwError}</p>` : nothing}
+      </form>`;
   }
 
   /**
@@ -655,7 +742,9 @@ export class POSTerminal extends LitElement {
     try {
       const enrolment = await offlineCounter.enrolment();
       const snapshot = await offlineCounter.snapshot();
-      this._registers = [{ id: enrolment.register_id, name: enrolment.register_id, branch_id: snapshot.branch_id, branch_code: '', branch_name: 'Offline' }];
+      // offline the register runs no card terminal: Card is refused in words, as
+      // the server refuses a card offline (CP-05 round 3 P1-B)
+      this._registers = [{ id: enrolment.register_id, name: enrolment.register_id, branch_id: snapshot.branch_id, branch_code: '', branch_name: 'Offline', card_terminal: 'none' }];
       this._register = this._registers[0];
       this._registersLoaded = true;
       this._registersFailed = false;
@@ -1124,6 +1213,21 @@ export class POSTerminal extends LitElement {
     } catch (err: unknown) {
       this._error = err instanceof Error ? err.message : 'Failed to save the purchase order';
     }
+  }
+
+  /** The words beside Card when the terminal is the simulator and no card is charged (CP-05 round 2). */
+  private get _cardSimulatorNote(): string | null {
+    return cardSimulatorNote(this._register);
+  }
+
+  /** Why Card is not offered, or null when it is: the register has no card terminal (CP-05 A1). */
+  private get _cardRefusal(): string | null {
+    return cardRefusal(this._register);
+  }
+
+  /** The same, in a refund's words, for the return dialog (CP-05 round 3 P3-C). */
+  private get _cardRefundRefusal(): string | null {
+    return cardRefundRefusal(this._register);
   }
 
   /** Why the charge to the account is not offered, or null when it is. */
@@ -1614,8 +1718,9 @@ export class POSTerminal extends LitElement {
         return open && (this._step === 'payment' || this._step === 'summary');
       case 'tender-cash':
       case 'tender-check':
-      case 'tender-card':
         return till && open && hasLines && this._changing.size === 0;
+      case 'tender-card':
+        return till && open && hasLines && this._changing.size === 0 && this._cardRefusal === null;
       case 'tender-account':
         return till && open && hasLines && this._changing.size === 0 && this._accountRefusal === null;
       case 'pay':
@@ -1945,9 +2050,17 @@ export class POSTerminal extends LitElement {
   }
 
   private _chooseMethod(method: TenderMethod) {
+    if (this._changing.size > 0) return;
     if (this._till === null) return;
     if (method === 'account') {
       const refusal = this._accountRefusal;
+      if (refusal) {
+        this._error = refusal;
+        return;
+      }
+    }
+    if (method === 'card') {
+      const refusal = this._cardRefusal;
       if (refusal) {
         this._error = refusal;
         return;
@@ -1970,6 +2083,7 @@ export class POSTerminal extends LitElement {
 
   /** Add the entered tender to the added list; a split names several. */
   private _addPendingTender() {
+    if (this._changing.size > 0) return;
     const entry = this._entry;
     if (!entry) {
       this._error = 'Invalid tender amount';
@@ -3030,7 +3144,9 @@ export class POSTerminal extends LitElement {
             <gable-select .value=${this._returnMethod}
               .options=${[
                 { value: 'cash', label: 'Cash (out of the drawer)' },
-                { value: 'card', label: 'Card (back on the card)' },
+                this._cardRefundRefusal !== null
+                  ? { value: 'card', label: `Card (${this._cardRefundRefusal})`, disabled: true }
+                  : { value: 'card', label: 'Card (back on the card)' },
                 { value: 'account', label: 'Account credit' },
               ]}
               @change=${(e: Event) => { this._returnMethod = (e.target as HTMLSelectElement).value as RefundMethod; }}
@@ -3110,7 +3226,7 @@ export class POSTerminal extends LitElement {
             <label style="font-size:13px;color:rgb(var(--gb-till-muted))">Customer pays by</label>
             <div style="flex:1">
               <gable-select data-testid="exchange-tender" .value=${this._exchangeTender}
-                .options=${[{ value: 'cash', label: 'Cash' }, { value: 'check', label: 'Check' }, { value: 'card', label: 'Card' }]}
+                .options=${[{ value: 'cash', label: 'Cash' }, { value: 'check', label: 'Check' }]}
                 @change=${(e: Event) => { this._exchangeTender = (e.target as HTMLSelectElement).value as ExchangeTenderMethod; }}
               ></gable-select>
             </div>
@@ -3385,13 +3501,14 @@ export class POSTerminal extends LitElement {
           <div class="mt-4 text-xs font-semibold uppercase tracking-wide text-slate-400">How is the customer paying?</div>
           <div class="mt-2 grid grid-cols-2 gap-2" role="group" aria-label="Tender">
             ${tenderMethods(this._standing).map((m) => {
-              const refused = m === 'account' ? this._accountRefusal : null;
+              const refused = m === 'account' ? this._accountRefusal : m === 'card' ? this._cardRefusal : null;
               const chosen = this._tenderMethod === m && this._till !== null;
               const noCredit = m === 'store_credit' && storeCreditOffer(this._standing, owed) <= 0;
               return html`
                 <button data-testid="tender-${m}" @click=${() => this._chooseMethod(m)}
-                  ?disabled=${this._till === null || !hasLines || !open || refused !== null || noCredit}
+                  ?disabled=${this._till === null || !hasLines || !open || refused !== null || noCredit || this._changing.size > 0}
                   title=${m === 'account' ? (refused ?? 'Charge the sale to the customer’s account')
+                    : m === 'card' ? (refused ?? '')
                     : m === 'store_credit' ? `The account holds ${money(this._standing?.open_credit_memo_cents ?? 0)} of store credit` : ''}
                   aria-pressed=${chosen ? 'true' : 'false'}
                   class="min-h-14 rounded-lg border px-3 py-3 text-base font-semibold ${m === 'store_credit' ? 'col-span-2 min-[768px]:col-span-1 ' : ''}${m === 'account' || m === 'store_credit' ? '' : 'capitalize'} disabled:cursor-not-allowed ${chosen ? 'border-gable-green text-gable-green' : 'border-white/10 text-white disabled:opacity-40'}">
@@ -3399,6 +3516,10 @@ export class POSTerminal extends LitElement {
                 </button>`;
             })}
           </div>
+          ${this._cardRefusal !== null && this._till !== null ? html`
+            <p class="mt-2 text-xs text-slate-400" data-testid="pos-card-refusal">${this._cardRefusal}</p>` : nothing}
+          ${this._cardSimulatorNote !== null && this._till !== null ? html`
+            <p class="mt-2 text-xs text-amber-400" data-testid="pos-card-simulated">${this._cardSimulatorNote}</p>` : nothing}
           ${accountWhy !== null ? html`
             <div class="mt-3 rounded-lg border border-amber-400/40 bg-amber-400/10 p-3 text-sm text-amber-400" data-testid="pos-account-refusal">
               <p>${accountWhy}</p>
@@ -3446,7 +3567,7 @@ export class POSTerminal extends LitElement {
             </div>` : nothing}
           <div class="mt-3 flex gap-2">
             <button data-testid="pos-add-tender" @click=${() => this._addPendingTender()}
-              ?disabled=${!hasLines || !open || this._tenderMethod === null || entry === null || owed <= 0}
+              ?disabled=${!hasLines || !open || this._tenderMethod === null || entry === null || owed <= 0 || this._changing.size > 0}
               class="min-h-11 flex-1 rounded border border-white/20 px-3 py-2 text-xs text-slate-200 disabled:opacity-40">Add as split tender</button>
             ${this._pendingTenders.length > 0 ? html`
               <button @click=${() => { this._resetTender(); }}
@@ -3774,6 +3895,9 @@ export class POSTerminal extends LitElement {
       ? 'border-white/10 text-slate-400 hover:bg-white/5 hover:text-white'
       : 'cursor-not-allowed border-white/10 text-slate-400 opacity-40';
     const how = sale.tenders.map((t) => `${methodLabel(t.method)} ${fmt(t.amount_cents)}`).join(', ');
+    // The cash the branch's rounding rule moved the cash leg by (CP-18): the
+    // same figure the receipt carries, so the counter and the paper agree.
+    const rounding = sale.rounding_cents ?? 0;
     const invoice = sale.invoice_id;
     const po = (sale.customer_po ?? '').trim();
     const jobName = this._jobName(sale.job_id || this._jobId);
@@ -3783,7 +3907,7 @@ export class POSTerminal extends LitElement {
           <span class="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-gable-green text-2xl font-bold text-deep-space" aria-hidden="true">✓</span>
           <div class="min-w-0">
             <h2 class="text-xl font-bold text-white">Sale complete</h2>
-            <p class="font-mono text-sm text-slate-300">${sale.number} &middot; ${fmt(sale.total_cents)}${how !== '' ? html` &middot; ${how}` : nothing}${sale.change_cents > 0 ? html`, change ${fmt(sale.change_cents)}` : nothing}</p>
+            <p class="font-mono text-sm text-slate-300">${sale.number} &middot; ${fmt(sale.total_cents)}${rounding !== 0 ? html` &middot; cash rounding ${fmtSigned(rounding)}` : nothing}${how !== '' ? html` &middot; ${how}` : nothing}${sale.change_cents > 0 ? html`, change ${fmt(sale.change_cents)}` : nothing}</p>
             ${po !== '' || jobName !== null ? html`
               <p class="mt-1 font-mono text-xs text-slate-400" data-testid="pos-complete-refs">
                 ${po !== '' ? html`PO ${po}` : nothing}${po !== '' && jobName !== null ? html` &middot; ` : nothing}${jobName !== null ? html`Job ${jobName}` : nothing}
@@ -3951,9 +4075,10 @@ export class POSTerminal extends LitElement {
       ${this._offlineStrip ? html`
         <div class="flex items-center justify-between gap-3 border-b border-blueprint-blue/30 bg-blueprint-blue/10 px-4 py-2 text-sm text-blueprint-blue" role="status" data-testid="pos-offline-strip">
           <span>${this._offlineStrip}</span>
-          ${this._needsSignIn ? html`<button type="button" data-testid="pos-offline-sign-in" class="min-h-11 rounded-lg bg-gable-green px-4 font-semibold text-deep-space" @click=${() => void this._signInRegister()}>${NO_SESSION_ASK}</button>` : nothing}
+          ${this._needsSignIn && !this._pwForm ? html`<button type="button" data-testid="pos-offline-sign-in" class="min-h-11 rounded-lg bg-gable-green px-4 font-semibold text-deep-space" @click=${() => void this._signInRegister()}>${NO_SESSION_ASK}</button>` : nothing}
           <button type="button" class="min-h-11 px-2 text-lg" aria-label="Dismiss" @click=${() => { this._offlineStrip = null; }}>×</button>
         </div>` : nothing}
+      ${this._pwForm ? this._renderPasswordForm() : nothing}
       ${this._sameGoods ? html`
         <div class="flex flex-wrap items-center gap-3 border-b border-white/10 bg-slate-steel px-4 py-3 text-sm" role="group" data-testid="pos-offline-same-goods">
           <span>Offline sale <span class="font-mono">${this._sameGoods.offlineRef}</span> replaced the sale whose result was unknown. ${SAME_GOODS_QUESTION}</span>

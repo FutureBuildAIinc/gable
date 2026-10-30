@@ -135,7 +135,7 @@ type RunTerminal struct {
 	logger          *slog.Logger
 
 	// guards holds the driver's own no double charge guard, one per order
-	// id: the check and the charge-card POST that may charge it happen
+	// id (a reversal's under its own prefixed name, see reverse): the check and the charge-card POST that may charge it happen
 	// under one lock, so four concurrent dispatches of one leg make one
 	// charge.
 	guardMu sync.Mutex
@@ -701,42 +701,13 @@ func lastFourOf(masked string) string {
 // synchronous Payments API call with no device. The answer is delivered off
 // the caller's goroutine, as a device's own answer would be.
 //
-// The reversal takes the same no double charge guard a sale takes: a retried
-// reversal is the same leg, so the customer is refunded once and the second
-// dispatch is refused.
+// The reversal takes its own no double refund guard, keyed apart from the
+// sale's (see reverse): a retried reversal is the same leg, so the customer
+// is refunded once and the second dispatch is refused.
 func (t *RunTerminal) dispatchReversal(ctx context.Context, d TerminalDispatch) (TerminalReceipt, error) {
-	cfg, err := t.resolve()
+	res, err := t.reverse(ctx, d.Kind, d.Reference, d.AmountCents, d.IdempotencyKey)
 	if err != nil {
 		return TerminalReceipt{}, err
-	}
-	if d.Reference == "" {
-		return TerminalReceipt{}, fmt.Errorf("the run %s leg names no trans_id to reverse", d.Kind)
-	}
-	guard := t.guardFor(d.IdempotencyKey)
-	guard.mu.Lock()
-	defer guard.mu.Unlock()
-	if guard.attempted {
-		return TerminalReceipt{}, fmt.Errorf("the Run terminal already took the %s of order %s in this process: the reversal is not sent again", d.Kind, d.IdempotencyKey)
-	}
-	var amount int64
-	if d.Kind == TerminalKindRefund {
-		amount = d.AmountCents // cents; a void is the full transaction by definition
-	}
-	body, _ := json.Marshal(runVoidOrRefundTerminalRequest{
-		TransID: d.Reference, MID: cfg.MID, Amount: amount, UserIdentifier: d.IdempotencyKey})
-	// marked under the guard before the POST: a lost answer may still have
-	// refunded, so the reversal is never sent twice.
-	guard.attempted = true
-	raw, status, err := t.authed(ctx, cfg, http.MethodPost, "/api/v1/void-or-refund", body, 0)
-	if err != nil {
-		return TerminalReceipt{}, fmt.Errorf("the run %s failed: %w", d.Kind, err)
-	}
-	if status >= 400 {
-		return TerminalReceipt{}, fmt.Errorf("run void-or-refund answered %d: %s", status, string(raw))
-	}
-	var res runChargeCardRes
-	if err := json.Unmarshal(raw, &res); err != nil {
-		return TerminalReceipt{}, fmt.Errorf("bad run void-or-refund response: %w", err)
 	}
 	ref := res.TransID
 	if ref == "" {
@@ -748,6 +719,57 @@ func (t *RunTerminal) dispatchReversal(ctx context.Context, d TerminalDispatch) 
 	}
 	t.deliver(d, answer)
 	return TerminalReceipt{ProviderRef: ref, DeviceID: d.DeviceID}, nil
+}
+
+// reversalGuardPrefix names a reversal's guard apart from the charge's.
+const reversalGuardPrefix = "reverse:"
+
+// reverse is the one Run void-or-refund call, shared by the ledger's
+// reversal legs (dispatchReversal) and the counter's way back
+// (RunTerminalGateway). kind is TerminalKindRefund or TerminalKindVoid; a
+// void sends no amount. The key goes as user_identifier and names the
+// no double refund guard: a key is reversed at most once per process.
+//
+// The reversal guard is keyed apart from the charge guard (CP-05 round 3
+// P2-B): a lost sale leg is reversed under that leg's own key, the key the
+// charge already marked attempted, and sharing the guard refused that
+// reversal before any POST. The prefix is the guard's name only; the wire
+// user_identifier is the key unchanged.
+func (t *RunTerminal) reverse(ctx context.Context, kind string, transID string, amountCents int64, key string) (*runChargeCardRes, error) {
+	cfg, err := t.resolve()
+	if err != nil {
+		return nil, err
+	}
+	if transID == "" {
+		return nil, fmt.Errorf("the run %s leg names no trans_id to reverse", kind)
+	}
+	guard := t.guardFor(reversalGuardPrefix + key)
+	guard.mu.Lock()
+	defer guard.mu.Unlock()
+	if guard.attempted {
+		return nil, fmt.Errorf("the Run terminal already took the %s of order %s in this process: the reversal is not sent again", kind, key)
+	}
+	var amount int64
+	if kind == TerminalKindRefund {
+		amount = amountCents // cents; a void is the full transaction by definition
+	}
+	body, _ := json.Marshal(runVoidOrRefundTerminalRequest{
+		TransID: transID, MID: cfg.MID, Amount: amount, UserIdentifier: key})
+	// marked under the guard before the POST: a lost answer may still have
+	// refunded, so the reversal is never sent twice.
+	guard.attempted = true
+	raw, status, err := t.authed(ctx, cfg, http.MethodPost, "/api/v1/void-or-refund", body, 0)
+	if err != nil {
+		return nil, fmt.Errorf("the run %s failed: %w", kind, err)
+	}
+	if status >= 400 {
+		return nil, fmt.Errorf("run void-or-refund answered %d: %s", status, string(raw))
+	}
+	var res runChargeCardRes
+	if err := json.Unmarshal(raw, &res); err != nil {
+		return nil, fmt.Errorf("bad run void-or-refund response: %w", err)
+	}
+	return &res, nil
 }
 
 // land delivers a final verdict, and lands nothing for a held one: the leg

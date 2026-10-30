@@ -107,13 +107,13 @@ const (
 	refundUnknown
 )
 
-// refundVerdictOf reads the terminal's answer to a refund call. Only the
-// explicit decline releases a claim: a PENDING answer means the refund is
+// refundVerdictOf reads the terminal's answer to a refund or void call. Only
+// the explicit decline releases a claim: a PENDING answer means the refund is
 // under way and an ERROR is the terminal's own retry mapping, and neither
 // proves the money did not move.
 func refundVerdictOf(res *payment.GatewayResult) refundVerdict {
 	switch res.Status {
-	case payment.GatewayStatusRefunded, payment.GatewayStatusApproved:
+	case payment.GatewayStatusRefunded, payment.GatewayStatusVoided, payment.GatewayStatusApproved:
 		return refundAccepted
 	case payment.GatewayStatusDeclined:
 		return refundDeclined
@@ -237,30 +237,78 @@ const (
 	chargeVoided   chargeOutcome = "voided"
 	chargeRefunded chargeOutcome = "refunded"
 	chargeFailed   chargeOutcome = "failed"
+	chargeUnknown  chargeOutcome = "unknown"
 )
+
+// fallbackRefundKey is the key of the refund sent when the void of the same
+// reversal was refused: a key of its own, so a gateway that answers a
+// retried key from its record (or a driver that sends a key once) never
+// answers the refund with the void's no (CP-05 round 3 P2-B).
+func fallbackRefundKey(key string) string {
+	if key == "" {
+		return ""
+	}
+	return key + "-refund"
+}
+
+// refundUnder sends one refund and reads its verdict, not only its error
+// (CP-05 round 3 P1-A): only an accepted answer is the money going back.
+func refundUnder(ctx context.Context, gw payment.PaymentGateway, gatewayTxID string, amountCents int64, key string) (chargeOutcome, error) {
+	res, err := payment.RefundUnderKey(ctx, gw, gatewayTxID, amountCents, key)
+	if err != nil {
+		return chargeFailed, err
+	}
+	switch refundVerdictOf(res) {
+	case refundAccepted:
+		return chargeRefunded, nil
+	case refundDeclined:
+		return chargeFailed, fmt.Errorf("the gateway declined the refund")
+	default:
+		return chargeUnknown, noVerdictOf(res)
+	}
+}
+
+// voidThenRefund puts a whole charge back: the void first, then the refund
+// under its own key when the void is refused (an error, as a settled capture
+// answers) or definitely declined. The void's verdict is read, not only its
+// error (CP-05 round 3 P1-A): a gateway may answer a decline with no error,
+// as the Run terminal answers a C. An answer that is neither the reversal
+// nor the terminal's own no proves nothing either way, so no refund is sent
+// on top of a void that may have gone through, and the outcome is unknown.
+func voidThenRefund(ctx context.Context, gw payment.PaymentGateway, gatewayTxID string, amountCents int64, key string) (chargeOutcome, error) {
+	res, voidErr := payment.VoidUnderKey(ctx, gw, gatewayTxID, key)
+	if voidErr == nil {
+		switch refundVerdictOf(res) {
+		case refundAccepted:
+			return chargeVoided, nil
+		case refundDeclined:
+			voidErr = fmt.Errorf("the gateway declined the void")
+		default:
+			return chargeUnknown, fmt.Errorf("void: %v", noVerdictOf(res))
+		}
+	}
+	outcome, refundErr := refundUnder(ctx, gw, gatewayTxID, amountCents, fallbackRefundKey(key))
+	if refundErr != nil {
+		return outcome, fmt.Errorf("void: %v; refund: %v", voidErr, refundErr)
+	}
+	return outcome, nil
+}
 
 // reverseCharge undoes an approved charge no document backs, the C2-4 card
 // route's way: the same day void first, the refund when the void is refused
 // (a settled capture). The outcome is logged and written to the audit log in
 // its own committed write; a failing audit write is logged and never hides
-// the outcome. On failure it answers the 502 the route returns instead of
-// the refusal that caused it: the un-returned money outranks the reason.
+// the outcome. On failure, or an outcome the gateway left unknown, it
+// answers the 502 the route returns instead of the refusal that caused it:
+// the un-returned money outranks the reason.
 func (s *Service) reverseCharge(ctx context.Context, gatewayTxID string, amountCents int64, entity uuid.UUID, actor string, cause error, key string) error {
 	rctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), reversalTimeout)
 	defer cancel()
-	outcome, reverseCause := chargeVoided, error(nil)
-	if _, voidErr := payment.VoidUnderKey(rctx, s.gateway, gatewayTxID, key); voidErr != nil {
-		s.logger.Info("gateway void refused, refunding instead",
-			"gateway_tx_id", gatewayTxID, "entity_id", entity, "error", voidErr)
-		if _, refundErr := payment.RefundUnderKey(rctx, s.gateway, gatewayTxID, amountCents, key); refundErr != nil {
-			outcome, reverseCause = chargeFailed, fmt.Errorf("void: %v; refund: %v", voidErr, refundErr)
-		} else {
-			outcome = chargeRefunded
-		}
-	}
+	outcome, reverseCause := voidThenRefund(rctx, s.gateway, gatewayTxID, amountCents, key)
 	switch outcome {
-	case chargeFailed:
-		s.logger.Error("CRITICAL: the gateway charged, the transaction refused, and the reversal failed",
+	case chargeFailed, chargeUnknown:
+		s.logger.Error("CRITICAL: the gateway charged, the transaction refused, and the reversal failed or is unknown",
+			"outcome", string(outcome),
 			"gateway_tx_id", gatewayTxID, "entity_id", entity, "amount_cents", amountCents, "error", reverseCause)
 	default:
 		s.logger.Warn("the gateway charge was reversed: the transaction refused the act",
@@ -278,7 +326,7 @@ func (s *Service) reverseCharge(ctx context.Context, gatewayTxID string, amountC
 				"gateway_tx_id", gatewayTxID, "entity_id", entity, "outcome", string(outcome), "error", err)
 		}
 	}
-	if outcome == chargeFailed {
+	if outcome == chargeFailed || outcome == chargeUnknown {
 		return &httpx.Error{Status: http.StatusBadGateway, Code: httpx.CodeChargeNotReversed, Operator: true,
 			Message: fmt.Sprintf("the card was charged and the charge could not be reversed; finance must reconcile gateway transaction %s", gatewayTxID)}
 	}

@@ -121,6 +121,30 @@ type decimalStringer interface{ DecimalString() string }
 // "$3,929.97", "-$2,487.63".
 func (style) Money(c decimalStringer) string { return groupAmount(c.DecimalString()) }
 
+// SignedMoney writes an amount with its direction in front of the money:
+// "+$0.02", "-$0.02". A zero amount writes "$0.00": there is no direction to
+// name.
+func (style) SignedMoney(c decimalStringer) string {
+	d := c.DecimalString()
+	if d == "" || d == "0" || d == "0.00" || strings.HasPrefix(d, "-") {
+		return groupAmount(d)
+	}
+	return "+" + groupAmount(d)
+}
+
+// tintChargeLine is the tint charge line of a painted line: the charge sits
+// inside the unit price, so the line says so ("includes tint charge $2.50")
+// instead of reading as a second charge to pay. A discounted line says the
+// charge is the undiscounted one, because the discount came off the very
+// price the charge sat in.
+func tintChargeLine(s style, charge httpx.Cents, discounted bool) string {
+	amount := s.Money(charge)
+	if discounted {
+		return "includes tint charge " + amount + " before discount"
+	}
+	return "includes tint charge " + amount
+}
+
 // UnitPrice writes a unit price (held in ten thousandths) with two places, and
 // a third or fourth only when the price truly has it: "$6.00", "$1.4025",
 // "$0.0525", "$1,234.5678". The figure is the one stored; only trailing zeros

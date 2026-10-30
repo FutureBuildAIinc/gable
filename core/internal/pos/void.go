@@ -104,7 +104,8 @@ func (s *Service) VoidSale(ctx context.Context, saleID uuid.UUID, ifMatch string
 			AmountCents: int64(t.AmountCents), FeeCents: int64(t.SurchargeCents), Act: "void"})
 	}
 	if len(intents) > 0 && s.gateway == nil {
-		return nil, conflict("card_terminal", "this register has no card terminal gateway to refund the card tender")
+		return nil, conflict(codeCardTerminalNotWired,
+			"This register has no card terminal to put the card back: return the sale to the drawer or the account instead")
 	}
 	// The claims, committed in one short transaction of their own before
 	// any terminal is reached. The sale row is locked and every guard

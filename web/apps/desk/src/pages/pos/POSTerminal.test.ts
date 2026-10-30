@@ -50,7 +50,7 @@ import { openAppDialog, answerAppDialog, chooseOption } from '../../test/dom';
 import type { CounterRegister, SaleSummary } from '../../types/pos';
 
 const reg = (id: string, branch: string, name = 'Front till'): CounterRegister => ({
-  id, name, branch_id: `b-${branch}`, branch_code: branch.toUpperCase(), branch_name: `${branch} yard`,
+  id, name, branch_id: `b-${branch}`, branch_code: branch.toUpperCase(), branch_name: `${branch} yard`, card_terminal: 'run',
 });
 const REG_01 = reg('REG-01', 'main');
 const OPEN_TILL = { id: 't', register_id: 'REG-01', cashier_id: 'c', status: 'open', opening_float_cents: 20000 };
@@ -71,7 +71,7 @@ function sale(over: Partial<Sale> = {}): Sale {
   return {
     id: 's1', number: 'S-1', revision: 3, branch_id: 'b', register_id: 'REG-01', cashier_id: 'c',
     customer_id: null, currency: 'USD', subtotal_cents: 8000, tax_cents: 650, total_cents: 8650,
-    change_cents: 0, till_session_id: 't', status: 'open', invoice_id: null, completed_at: null,
+    change_cents: 0, rounding_cents: 0, till_session_id: 't', status: 'open', invoice_id: null, completed_at: null,
     created_at: '', customer_po: null, job_id: null, tenders: [],
     lines: [line('a', 5000), line('b', 3000)], ...over,
   } as unknown as Sale;
@@ -579,6 +579,36 @@ describe('the counter as the Panels layout', () => {
       expect(q(el, 'pos-complete').textContent).toContain('POS-000002');
       expect(q(el, 'pos-complete').textContent).toContain('$138.10');
       expect(q(el, 'pos-complete').getAttribute('aria-live')).toBe('polite');
+    });
+
+    it('says the cash the branch rounding rule moved (CP-18), with its direction', async () => {
+      svc.completeSale.mockResolvedValue(
+        sale({ status: 'completed', number: 'POS-000003', total_cents: 103, change_cents: 0, rounding_cents: 2 }),
+      );
+      const el = await mount(sale({ subtotal_cents: 103, tax_cents: 0, total_cents: 103 }));
+      await chooseCash(el);
+      await typeInto(el, '1.05');
+      q(el, 'pos-pay').click();
+      await new Promise((r) => setTimeout(r, 0));
+      await el.updateComplete;
+      const card = q(el, 'pos-complete');
+      // the stored total is the sale's own, and the rounding says why the
+      // drawer kept two cents more
+      expect(card.textContent).toContain('$1.03');
+      expect(card.textContent).toContain('cash rounding +$0.02');
+    });
+
+    it('says nothing about a rounding the branch rule did not make', async () => {
+      svc.completeSale.mockResolvedValue(
+        sale({ status: 'completed', number: 'POS-000004', total_cents: 103, change_cents: 0, rounding_cents: 0 }),
+      );
+      const el = await mount(sale({ subtotal_cents: 103, tax_cents: 0, total_cents: 103 }));
+      await chooseCash(el);
+      await typeInto(el, '1.03');
+      q(el, 'pos-pay').click();
+      await new Promise((r) => setTimeout(r, 0));
+      await el.updateComplete;
+      expect(q(el, 'pos-complete').textContent).not.toContain('cash rounding');
     });
 
     it('gives the line remove control a 44 pixel touch target', async () => {
@@ -2432,6 +2462,12 @@ describe('PR 150 fix round 1: quantity edits, controls and the blind count', () 
     (byLabel(el, 'Increase quantity of Item a') as HTMLButtonElement).click();
     await el.updateComplete;
     expect((q(el, 'pos-pay') as HTMLButtonElement).disabled).toBe(true);
+    for (const id of ['tender-cash', 'tender-check', 'tender-card']) {
+      const button = el.querySelector(`[data-testid="${id}"]`) as HTMLButtonElement | null;
+      if (button) expect(button.disabled, id).toBe(true);
+    }
+    expect((q(el, 'tender-cash') as HTMLButtonElement).disabled).toBe(true);
+    expect((q(el, 'pos-add-tender') as HTMLButtonElement).disabled).toBe(true);
     (document.activeElement as HTMLElement | null)?.blur();
     await key(el, 'F12');
     await key(el, 'F6');

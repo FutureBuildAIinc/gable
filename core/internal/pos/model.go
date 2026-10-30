@@ -130,6 +130,12 @@ type Sale struct {
 	DeliveryType string     `json:"delivery_type"` // pickup or delivery
 	ShipToID     *uuid.UUID `json:"ship_to_id"`
 
+	// RoundingCents is the cash the branch's own rounding rule moved the
+	// cash leg by (CP-18): positive when the drawer kept more than the sale
+	// needed, negative when it kept less. The stored total does not move;
+	// this is what the counter and the documents explain the cash with.
+	RoundingCents httpx.Cents `json:"rounding_cents"`
+
 	// ReturnedQuantities sums, per sale line id, the quantity every earlier
 	// return brought back, so the counter's return dialog can show a line
 	// already fully returned as not returnable. Set on a completed sale's
@@ -459,4 +465,7 @@ type CounterRegister struct {
 	BranchID   uuid.UUID `json:"branch_id"`
 	BranchCode string    `json:"branch_code"`
 	BranchName string    `json:"branch_name"`
+	// CardTerminal is the card path of the register's counter (CP-05 A1):
+	// run, simulator or none. With none the Pay screen disables Card.
+	CardTerminal CardTerminalState `json:"card_terminal"`
 }

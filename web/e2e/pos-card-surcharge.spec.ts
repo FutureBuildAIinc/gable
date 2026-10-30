@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: LicenseRef-OpenLBM-Surface-1.0
 // SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
 
-import { test, expect, type APIRequestContext, type Page } from '@playwright/test';
+import { test, expect, type APIRequestContext, type Page } from './font-guard';
 import path from 'path';
 import fs from 'fs';
 
@@ -10,10 +10,13 @@ import fs from 'fs';
  * percent on the Counter rules screen (off by default), a rate above the
  * brands' cap is refused, and the Pay screen tells the clerk the expected fee
  * and the cash price before the card is presented. The notice is only a
- * notice: the processor's answer decides the fee. The CI stack wires no
- * terminal, so its card tender carries no answer and the sale stores no fee,
- * the total unchanged. What the answer's fee does is proved in the Go tests:
- * stored on the card tender (TestCP15_AnswerFeeIsStoredOnTheCardTender), booked
+ * notice: the processor's answer decides the fee. The CI stack runs the
+ * simulated terminal (a stack with no terminal refuses a card, CP-05 A1),
+ * whose answer stands in for a processor enrolled in surcharging: it charges
+ * the branch's rate, so the fee on the sale is the answer's, stored on the
+ * card tender beside the goods, the sale's total the one the clerk rang, and
+ * printed on the receipt. The rest of what the answer's fee does is proved in
+ * the Go tests: stored on the card tender (TestCP15_AnswerFeeIsStoredOnTheCardTender), booked
  * to its own income account (TestCP15_FeeBooksToItsOwnIncomeAccountNotRevenueOrTax),
  * "Card fee" on the 80mm receipt (TestThermalReceiptCardFeeLine), and given
  * back with a card return or void (TestCP15_ReturnRefundsTheFeeWithTheCard,
@@ -133,9 +136,10 @@ test('CP-15: the branch switches the card fee on, the counter states it before t
     const complete = page.getByTestId('pos-complete');
     await expect(complete).toContainText('Sale complete', { timeout: 15000 });
 
-    // No answer carried a fee, so none is on the sale: the notice never
-    // charges, and the total is the one the clerk rang.
-    await expect(page.getByTestId('summary-card-fee')).toHaveCount(0);
+    // The fee on the sale is the one the answer charged, beside the goods:
+    // the notice charged nothing itself, and the total is the one the clerk
+    // rang.
+    await expect(page.getByTestId('summary-card-fee')).toContainText(`$${(expectedFee / 100).toFixed(2)}`);
     await expect(page.getByTestId('summary-total')).toContainText(totalText.trim());
     await page.screenshot({ path: path.join(SHOTS_DIR, 'cp15-complete.png'), fullPage: true });
     const number = ((await complete.textContent()) ?? '').match(/POS-\d+/)?.[0] ?? '';
@@ -143,17 +147,18 @@ test('CP-15: the branch switches the card fee on, the counter states it before t
     const saleId = await saleIdByNumber(request, number);
     const sale = (await (await request.get(`/api/v1/pos/transactions/${saleId}`)).json()) as {
       total_cents: number;
-      tenders: { method: string; amount_cents: number; surcharge_cents: number }[];
+      tenders: { method: string; amount_cents: number; surcharge_cents: number; gateway_tx_id: string | null }[];
     };
     expect(sale.total_cents).toBe(totalCents);
     const cardTender = sale.tenders.find((t) => t.method === 'card');
     expect(cardTender?.amount_cents).toBe(totalCents);
-    expect(cardTender?.surcharge_cents).toBe(0);
+    expect(cardTender?.surcharge_cents).toBe(expectedFee);
+    expect(cardTender?.gateway_tx_id, 'the simulated terminal took the card leg').toMatch(/^simterm_/);
 
-    // The 80mm receipt prints no fee line for a sale that carries none.
+    // The 80mm receipt prints the fee the answer charged.
     const receipt = await request.get(`/api/v1/pos/transactions/${saleId}/receipt?layout=thermal80`);
     expect(receipt.status(), await receipt.text()).toBe(200);
-    expect((await receipt.body()).toString('latin1')).not.toContain('Card fee');
+    expect((await receipt.body()).toString('latin1')).toContain('Card fee');
   } finally {
     // The rules the walk found go back: the card fee off, as it was.
     const now = (await (await request.get('/api/v1/pos/settings')).json()) as { revision: number };

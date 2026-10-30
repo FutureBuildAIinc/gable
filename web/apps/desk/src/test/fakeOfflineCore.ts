@@ -53,7 +53,8 @@ export interface FakeCore {
     /** The core's price for a request; the default is the test's odd figure. */
     price: (req: OfflineSaleRequest) => OfflineCartPreview;
     sync: () => OfflineSyncReport;
-    refuse: Partial<Record<string, { code: string; message: string }>>;
+    /** A refusal object, or a bare code string as the shell's sign in commands answer. */
+    refuse: Partial<Record<string, { code: string; message: string } | string>>;
     invoke: (command: string, args?: Record<string, unknown>) => Promise<unknown>;
 }
 
@@ -125,6 +126,7 @@ export function fakeOfflineCore(): FakeCore {
                 case 'sync_offline_queue':
                     return core.sync();
                 case 'begin_sign_in':
+                case 'sign_in_with_password':
                     return null;
                 default:
                     throw { code: 'unknown_command', message: command };

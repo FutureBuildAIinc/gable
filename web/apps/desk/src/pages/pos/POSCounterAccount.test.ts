@@ -63,7 +63,7 @@ async function answerStepUp(el: HTMLElement, managerName = 'E2E Manager') {
 import { answerAppDialog, typeIntoAppDialog, chooseOption, flush } from '../../test/dom';
 import type { CounterRegister } from '../../types/pos';
 
-const REG_01: CounterRegister = { id: 'REG-01', name: 'Front till', branch_id: 'b-main', branch_code: 'MAIN', branch_name: 'main yard' };
+const REG_01: CounterRegister = { id: 'REG-01', name: 'Front till', branch_id: 'b-main', branch_code: 'MAIN', branch_name: 'main yard', card_terminal: 'run' };
 
 const line = (id: string, cents: number) => ({
   id, position: 1, line_type: 'product', parent_line_id: null, product_id: `p-${id}`,
@@ -501,6 +501,20 @@ describe('returns: the reason on each line, the note, the fee', () => {
     await el.updateComplete;
     return el;
   };
+  it('does not offer a refund back on the card at a register with no card terminal', async () => {
+    const el = await openReturn();
+    const selects = [...el.querySelectorAll('gable-select')] as unknown as Array<{ options: Array<{ value: string; label: string; disabled?: boolean }> }>;
+    const refund = () => selects.find((x) => x.options.some((o) => o.value === 'card'))!;
+    expect(refund().options.find((o) => o.value === 'card')?.disabled).toBeFalsy();
+    (el as unknown as { _register: CounterRegister })._register = { ...REG_01, card_terminal: 'none' };
+    await el.updateComplete;
+    const card = refund().options.find((o) => o.value === 'card')!;
+    expect(card.disabled).toBe(true);
+    // a refund's words, not the sale's (CP-05 round 3 P3-C)
+    expect(card.label).toBe('Card (This register has no card terminal: give it back in cash or as account credit)');
+    expect(refund().options.find((o) => o.value === 'cash')?.disabled).toBeFalsy();
+    el.remove();
+  });
   const setQty = async (el: POSTerminal, v: string) => {
     const input = q(el, 'return-qty') as HTMLInputElement;
     input.value = v;

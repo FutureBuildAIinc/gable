@@ -46,7 +46,7 @@ import { ApiError } from '../../services/apiError';
 import type { CounterRegister } from '../../types/pos';
 
 const REG_01: CounterRegister = {
-  id: 'REG-01', name: 'Front till', branch_id: 'b-main', branch_code: 'MAIN', branch_name: 'main yard',
+  id: 'REG-01', name: 'Front till', branch_id: 'b-main', branch_code: 'MAIN', branch_name: 'main yard', card_terminal: 'run',
 };
 
 const line = (id: string, cents: number) => ({

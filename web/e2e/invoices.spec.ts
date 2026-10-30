@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: LicenseRef-OpenLBM-Surface-1.0
 // SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
 
-import { test, expect, type APIRequestContext, type Page } from '@playwright/test';
+import { test, expect, type APIRequestContext, type Page } from './font-guard';
 import { pickOption } from './app-controls';
 import path from 'path';
 import fs from 'fs';
@@ -350,7 +350,13 @@ test.describe('Invoices and credit memos', () => {
     await page.screenshot({ path: path.join(SHOTS_DIR, 'invoice-list-overdue.png') });
   });
 
-  test('the portal lists the customer invoices with their numbers and the overdue badge', async ({ page }) => {
+  test('the portal lists the customer invoices with their numbers and the overdue badge', async ({ page, request }) => {
+    // The seeded portal user's customer. The seed bills only some of its orders, so this
+    // test bills one invoice of its own and never relies on the seed's draw.
+    const customers = (await (await request.get('/api/v1/customers?limit=200')).json()) as { items: { id: string; name: string }[] };
+    const tarnwick = customers.items.find((c) => c.name === 'Tarnwick Construction');
+    expect(tarnwick, 'the seeded portal customer').toBeTruthy();
+    const { invoice } = await billedInvoice(request, tarnwick!);
     // The seeded portal user (the repository seed documents the demo password).
     await page.goto('/portal/login');
     await page.locator('#email').fill('demo@tarnwick.example');
@@ -359,10 +365,10 @@ test.describe('Invoices and credit memos', () => {
     await expect(page).toHaveURL(/\/portal$/);
     await page.goto('/portal/invoices');
     await expect(page.getByRole('heading', { name: 'Invoices', level: 1 })).toBeVisible();
-    await expect(page.getByText(/IN-\d{6}/).first()).toBeVisible();
+    await expect(page.getByText(invoice.number, { exact: true })).toBeVisible();
     // the badge comes from is_overdue and nothing else: as many badges as flagged invoices
     const mine = (await (await page.request.get('/api/portal/v1/invoices')).json()) as { number: string; status: string; is_overdue: boolean }[];
-    expect(mine.length).toBeGreaterThan(0);
+    expect(mine.map((i) => i.number)).toContain(invoice.number);
     for (const inv of mine) expect(inv.number).toMatch(/^IN-\d{6,}$/);
     expect(mine.map((i) => i.status).filter((st) => st === 'OVERDUE')).toHaveLength(0);
     await expect(page.getByTestId('portal-overdue')).toHaveCount(mine.filter((i) => i.is_overdue).length);

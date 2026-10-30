@@ -170,6 +170,13 @@ services:
       SMTP_PORT: ${SMTP_PORT-}
       SMTP_FROM: ${SMTP_FROM-}
       SMTP_TLS: ${SMTP_TLS-}
+      # The simulated card terminal (CP-05): the demo variant sets
+      # DEMO_POS_TERMINAL_SIMULATOR=approve so the counter can take a card with
+      # no machine, and the counter says in words that no card is charged.
+      # Only the DEMO_ name reaches the core, so the customer variant, which
+      # never sets it, has no card terminal here and the counter refuses a
+      # card in words. deploy/check.sh asserts both.
+      POS_TERMINAL_SIMULATOR: ${DEMO_POS_TERMINAL_SIMULATOR-}
     expose:
       - "8080"
     depends_on:

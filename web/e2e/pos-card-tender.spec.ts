@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: LicenseRef-OpenLBM-Surface-1.0
 // SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
 
-import { test, expect, type APIRequestContext, type Page } from '@playwright/test';
+import { test, expect, type APIRequestContext, type Page } from './font-guard';
 
 /**
  * Card as a tender at the counter (CP-03), on the simulator stack: a card for
@@ -90,13 +90,19 @@ test('the counter: a card is held to the remainder and a split sale prints the c
   await page.getByTestId('pos-pay').click();
   await expect(page.getByTestId('pos-complete')).toContainText('Sale complete', { timeout: 30000 });
 
-  // Both receipt layouts render. The CI stack has no terminal simulator, so the card's brand and last four are
-  // proved by TestCP03_ReceiptNamesTheCardAndTheCashChange (Go), not here.
+  // Both receipt layouts render. The CI stack runs the simulated card terminal, so the card leg really ran: the
+  // card tender carries the terminal's reference. The card's brand and last four are proved by
+  // TestCP03_ReceiptNamesTheCardAndTheCashChange (Go), not here.
   const sales = (await (await request.get('/api/v1/pos/transactions?register_id=REG-01')).json()) as {
     items: { id: string; status: string }[];
   };
   const sale = sales.items.find((s) => s.status === 'completed');
   expect(sale, 'a completed sale is listed').toBeTruthy();
+  const full = (await (await request.get(`/api/v1/pos/transactions/${sale!.id}`)).json()) as {
+    tenders: { method: string; gateway_tx_id: string | null }[];
+  };
+  expect(full.tenders.find((t) => t.method === 'card')?.gateway_tx_id, 'the simulated terminal took the card leg')
+    .toMatch(/^simterm_/);
   for (const layout of ['thermal80', 'invoice']) {
     const pdf = await request.get(`/api/v1/pos/transactions/${sale!.id}/receipt?layout=${layout}`);
     expect(pdf.ok()).toBeTruthy();

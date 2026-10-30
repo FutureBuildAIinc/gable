@@ -169,3 +169,8 @@ SPDX-License-Identifier = "LicenseRef-OpenLBM-Docs-1.0"
 # the project is bound by, and — as LICENSE-MAP.md's "Also in LICENSES/"
 # section already states — it is referenced by the project without being
 # directory-scoped. The REUSE gate tolerates a license text that no file uses.
+#
+# LICENSES/OFL-1.1.txt is the same kind of text: the Outfit and JetBrains Mono
+# font files are bundled from the @fontsource npm packages at build time, so no
+# font file lives in this tree. The text travels with every web and Tauri
+# bundle (web/scripts/copy-ofl.mjs copies it to dist/OFL-1.1.txt).

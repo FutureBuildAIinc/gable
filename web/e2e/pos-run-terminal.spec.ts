@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: LicenseRef-OpenLBM-Surface-1.0
 // SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
 
-import { test, expect, type APIRequestContext, type Page } from '@playwright/test';
+import { test, expect, type APIRequestContext, type Page } from './font-guard';
 
 /**
  * The counter's card present flow over the terminal seam (CP-05): the Run
@@ -91,8 +91,9 @@ test('the counter: a card present sale over the terminal seam', async ({ page, r
   const completed = sales.items.find((s) => s.status === 'completed');
   expect(completed, 'a completed sale is listed').toBeTruthy();
   const full = (await (await request.get(`/api/v1/pos/transactions/${completed!.id}`)).json()) as {
-    tenders: { method: string; amount_cents: number }[];
+    tenders: { method: string; amount_cents: number; gateway_tx_id: string | null }[];
   };
   expect(full.tenders.map((t) => t.method)).toEqual(['card']);
+  expect(full.tenders[0].gateway_tx_id, 'the simulated terminal took the card leg').toMatch(/^simterm_/);
   expect(full.tenders[0].amount_cents).toBe(completed!.total_cents);
 });
