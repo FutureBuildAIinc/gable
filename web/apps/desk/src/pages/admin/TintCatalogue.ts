@@ -314,7 +314,7 @@ export class GableTintCatalogue extends LitElement {
                         this._systems.map((s) => ({ id: s.id, text: `${s.name} (${s.code})` })), (v) => this._pickSystem(v)) : html`
                         <p class="text-sm text-slate-400">No tint system yet. Add the dealer's first one below.</p>`}
                     <div class="grid gap-3 sm:grid-cols-4">
-                        ${this._input('Code', 'tint-new-system-code', n.code, (v) => { this._newSystem = { ...this._newSystem, code: v }; }, true, true, true)}
+                        ${this._input('Code', 'tint-new-system-code', n.code, (v) => { this._newSystem = { ...this._newSystem, code: v }; }, true, true)}
                         ${this._input('Name', 'tint-new-system-name', n.name, (v) => { this._newSystem = { ...this._newSystem, name: v }; }, false, true)}
                         ${this._input('Manufacturer', 'tint-new-system-maker', n.manufacturer, (v) => { this._newSystem = { ...this._newSystem, manufacturer: v }; })}
                         ${this._input('Dispense units per ounce', 'tint-new-system-denominator', n.denominator, (v) => { this._newSystem = { ...this._newSystem, denominator: v }; }, true)}
@@ -331,7 +331,7 @@ export class GableTintCatalogue extends LitElement {
                     ${this._bases.length === 0 ? html`<p class="text-sm text-slate-400">No bases yet.</p>` : html`
                         <ul class="divide-y divide-white/10">${this._bases.map((b) => this._baseRow(b))}</ul>`}
                     <div class="grid gap-3 sm:grid-cols-4">
-                        ${this._input('Code', 'tint-new-base-code', this._newBase.code, (v) => { this._newBase = { ...this._newBase, code: v }; }, true, true, true)}
+                        ${this._input('Code', 'tint-new-base-code', this._newBase.code, (v) => { this._newBase = { ...this._newBase, code: v }; }, true, true)}
                         ${this._input('Name', 'tint-new-base-name', this._newBase.name, (v) => { this._newBase = { ...this._newBase, name: v }; }, false, true)}
                         ${this._input('Fill (ounces)', 'tint-new-base-fill', this._newBase.fill, (v) => { this._newBase = { ...this._newBase, fill: v }; }, true)}
                         <label class="flex items-end gap-2 text-sm text-slate-200 pb-2">
@@ -352,7 +352,7 @@ export class GableTintCatalogue extends LitElement {
                     <p class="text-sm text-slate-300" data-testid="tint-colorant-list">
                         ${this._colorants.length === 0 ? 'None yet.' : this._colorants.map((c) => `${c.name} (${c.code})`).join(', ')}</p>
                     <div class="grid gap-3 sm:grid-cols-2">
-                        ${this._input('Code', 'tint-new-colorant-code', this._newColorant.code, (v) => { this._newColorant = { ...this._newColorant, code: v }; }, true, true, true)}
+                        ${this._input('Code', 'tint-new-colorant-code', this._newColorant.code, (v) => { this._newColorant = { ...this._newColorant, code: v }; }, true, true)}
                         ${this._input('Name', 'tint-new-colorant-name', this._newColorant.name, (v) => { this._newColorant = { ...this._newColorant, name: v }; }, false, true)}
                     </div>
                     <button class=${BUTTON_CLASS} data-testid="tint-add-colorant" aria-describedby="tint-add-colorant-needs"
