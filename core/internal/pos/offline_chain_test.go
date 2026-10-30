@@ -233,3 +233,24 @@ func TestOfflineSync_TheReplacedCart(t *testing.T) {
 		t.Errorf("a refused replacement posted")
 	}
 }
+
+// RULE (ADR 0011 3.4): a sale at the mark plus one whose link does not meet
+// the chain head, its signature valid, is held broken_chain and moves
+// nothing: the chain is strict, not only the sequence.
+func TestOfflineSync_ALinkThatMissesTheHeadIsHeld(t *testing.T) {
+	f := newFixture(t, testutil.RequireDB(t))
+	offlinePolicyOn(t, f)
+	b := newOfflineBench(t, f)
+	r1, s1 := b.build(t, saleSpec{lines: []offlineLine{line(f.productID, "1")}})
+	r2, s2 := b.build(t, saleSpec{lines: []offlineLine{line(f.productID, "1")}},
+		func(s *pos.SignedOfflineSale) { s.PrevDigest = "not-the-head" })
+	res := b.sync(t, r1, r2)
+	wantOutcome(t, res, s1, pos.OfflinePosted, "")
+	wantOutcome(t, res, s2, pos.OfflineHeld, "broken_chain")
+	if seq, _ := b.deviceMark(t); seq != 1 {
+		t.Errorf("mark = %d, want 1", seq)
+	}
+	if got := f.stock(); got != "99.0000/0.0000" {
+		t.Errorf("stock = %s, want 99", got)
+	}
+}
