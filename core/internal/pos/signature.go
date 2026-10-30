@@ -401,6 +401,8 @@ func receiptTenders(sale *Sale, tenders []Tender) []document.ThermalTender {
 			AmountCents: t.AmountCents,
 			LastFour:    derefString(t.CardLast4),
 			Brand:       derefString(t.CardBrand),
+			// the card fee (CP-15) is its own line under the tender
+			SurchargeCents: t.SurchargeCents,
 		}
 		if t.Method == TenderCash && changeLeft > 0 {
 			if t.PaymentID != nil {

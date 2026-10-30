@@ -54,6 +54,12 @@ type RecordPaymentIn struct {
 	// receipt all carry the same rounded figure, and the invoice settles in
 	// full as PAID.
 	RoundingCents int64
+
+	// SurchargeCents is the card fee the processor added on top of Amount
+	// (CP-15). The card was charged Amount plus this fee, so the receipt
+	// debits cash for both and credits the fee to the surcharge income
+	// account (4070): never sales revenue, never applied to an invoice.
+	SurchargeCents int64
 }
 
 // RecordPayment writes the payment (POSTED, the whole amount unapplied), posts
@@ -65,6 +71,9 @@ func (s *Service) RecordPayment(ctx context.Context, in RecordPaymentIn) (uuid.U
 	}
 	if in.AmountCents <= 0 {
 		return uuid.Nil, nil, invalidField("amount_cents", "must be greater than zero")
+	}
+	if in.SurchargeCents < 0 {
+		return uuid.Nil, nil, invalidField("surcharge_cents", "must not be negative")
 	}
 	if in.RoundingCents >= in.AmountCents {
 		return uuid.Nil, nil, invalidField("rounding_cents", "must be less than the amount")
@@ -146,8 +155,11 @@ func (s *Service) RecordPayment(ctx context.Context, in RecordPaymentIn) (uuid.U
 	// books the difference between it and the exact deposit to the branch's
 	// rounding income (4095) or rounding loss (5045) account.
 	legs := []gl.Leg{
-		{AccountCode: gl.AccountCodeCash, Description: "Cash", Debit: in.AmountCents},
+		{AccountCode: gl.AccountCodeCash, Description: "Cash", Debit: in.AmountCents + in.SurchargeCents},
 		{AccountCode: gl.AccountCodeCustomerDeposit, Description: "Customer Deposits", Credit: in.AmountCents - in.RoundingCents},
+	}
+	if in.SurchargeCents > 0 {
+		legs = append(legs, gl.Leg{AccountCode: gl.AccountCodeCardSurcharge, Description: "Card Surcharge Income", Credit: in.SurchargeCents})
 	}
 	if in.RoundingCents > 0 {
 		legs = append(legs, gl.Leg{AccountCode: gl.AccountCodeRoundingIncome, Description: "Cash Rounding Income", Credit: in.RoundingCents})
