@@ -162,6 +162,14 @@ async function openExchange(el: POSTerminal) {
 describe('the exchange and the large cash rule of the branch country', () => {
     beforeEach(() => { vi.clearAllMocks(); localStorage.clear(); });
 
+    it('offers cash and check for the difference, never card (the exchange runs no card leg)', async () => {
+        svc.previewExchange.mockResolvedValue(figures({ large_cash: ASKS }));
+        const el = await mountTerminal();
+        await openExchange(el);
+        const options = (q(el, 'exchange-tender') as unknown as { options: { value: string }[] }).options;
+        expect(options.map((o) => o.value)).toEqual(['cash', 'check']);
+    });
+
     it("asks the payer's details before the exchange is rung, and the capture rides the exchange body", async () => {
         svc.previewExchange.mockResolvedValue(figures({ large_cash: ASKS }));
         svc.createExchange.mockResolvedValue({

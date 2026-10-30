@@ -201,3 +201,49 @@ func TestCP05B_TheCardRefundWords(t *testing.T) {
 	wantCardBlocker(t, "a card return of a cash sale", returnToCard(cashID), "card_tender",
 		"the sale was not paid by card")
 }
+
+// RULE (Opus read P1-1): an exchange takes no card leg, so it may not book
+// one. A card tender is refused 409 exchange_card_tender in every
+// configuration (no terminal, or the simulator wired), and nothing is booked:
+// no sale, memo, return, payment, ledger entry or stock move.
+func TestCP05_AnExchangeBooksNoCardTender(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	for name, opts := range map[string][]func(*fixture){
+		"no terminal":        nil,
+		"simulated terminal": {withTerminal(payment.SimApprove, 0)},
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := newFixture(t, testutil.RequireDB(t), opts...)
+			f.openTill(0)
+			sale, line, _ := f.cashSaleLine(t, "2")
+			sales, memos, returns := f.counterSales(t), f.counterMemos(t), f.counterReturns(t)
+			payments, entries := f.counterPayments(t), f.counterEntries(t)
+			stock := f.stock()
+			r := f.exchange("", map[string]any{
+				"original_sale_id": sale, "reason": "wrong size",
+				"returned_lines": []map[string]any{lineOf(line, "1", "wrong_item")},
+				"sale_lines":     f.replaceWith("2"),
+				"tenders":        []map[string]any{tender("card", 599)},
+			})
+			wantCardBlocker(t, "a card exchange", r, "exchange_card_tender", "ring the replacement")
+			if got := f.counterSales(t); got != sales {
+				t.Errorf("sales = %d, want %d", got, sales)
+			}
+			if got := f.counterMemos(t); got != memos {
+				t.Errorf("memos = %d, want %d", got, memos)
+			}
+			if got := f.counterReturns(t); got != returns {
+				t.Errorf("returns = %d, want %d", got, returns)
+			}
+			if got := f.counterPayments(t); got != payments {
+				t.Errorf("payments = %d, want %d", got, payments)
+			}
+			if got := f.counterEntries(t); got != entries {
+				t.Errorf("ledger entries = %d, want %d", got, entries)
+			}
+			if got := f.stock(); got != stock {
+				t.Errorf("stock = %s, want %s", got, stock)
+			}
+		})
+	}
+}

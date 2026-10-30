@@ -3123,7 +3123,7 @@ export class POSTerminal extends LitElement {
             <label style="font-size:13px;color:rgb(var(--gb-till-muted))">Customer pays by</label>
             <div style="flex:1">
               <gable-select data-testid="exchange-tender" .value=${this._exchangeTender}
-                .options=${[{ value: 'cash', label: 'Cash' }, { value: 'check', label: 'Check' }, { value: 'card', label: 'Card' }]}
+                .options=${[{ value: 'cash', label: 'Cash' }, { value: 'check', label: 'Check' }]}
                 @change=${(e: Event) => { this._exchangeTender = (e.target as HTMLSelectElement).value as ExchangeTenderMethod; }}
               ></gable-select>
             </div>

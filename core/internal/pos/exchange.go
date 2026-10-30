@@ -119,6 +119,13 @@ func (s *Service) Exchange(ctx context.Context, cashierID uuid.UUID, in *Exchang
 			return nil, conflict("exchange_card_token",
 				"the card terminal charge of an exchange's difference is taken as its own sale: record the card tender without a token")
 		}
+		// The exchange dispatches no card leg, so a card tender here would be
+		// booked paid with no terminal and no charge (CP-05 P1-1): refused in
+		// every configuration, terminal or none.
+		if t.Method == TenderCard {
+			return nil, conflict("exchange_card_tender",
+				"an exchange's difference by card is rung as its own sale: take the return, then ring the replacement and tender the card")
+		}
 	}
 	if len(in.Items) == 0 {
 		return nil, invalid("sale_lines", "name at least one replacement line")

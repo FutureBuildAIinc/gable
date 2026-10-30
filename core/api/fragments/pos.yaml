@@ -3293,6 +3293,7 @@ paths:
         Refused with 409 and a blocker: insufficient_tender,
         exchange_card_refund (a card refund of the surplus is a card return
         through POST /pos/returns, today's refund path), exchange_card_token,
+        exchange_card_tender (any card tender: the exchange runs no card leg),
         tax_quote_stale, tax_rate_not_configured, exceeds_sold,
         insufficient_stock, no_open_session, walk_in_account, no_tender_due,
         alert_unacknowledged.
