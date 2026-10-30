@@ -120,6 +120,26 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux, roleGuard ...func(http.Hand
 		return guard(handler)
 	}
 
+	// The offline policy (CP-13 O1, ADR 0011 section 4): writing it is an
+	// admin act, so the write mounts on admin and owner; the read adds
+	// finance. Fourth and fifth guards, else the roles' own check stands.
+	policyWrite := func(handler http.HandlerFunc) http.HandlerFunc {
+		if len(roleGuard) > 3 && roleGuard[3] != nil {
+			return func(w http.ResponseWriter, r *http.Request) {
+				roleGuard[3](handler).ServeHTTP(w, r)
+			}
+		}
+		return middleware.RequireRole("admin", "owner")(handler).ServeHTTP
+	}
+	policyRead := func(handler http.HandlerFunc) http.HandlerFunc {
+		if len(roleGuard) > 4 && roleGuard[4] != nil {
+			return func(w http.ResponseWriter, r *http.Request) {
+				roleGuard[4](handler).ServeHTTP(w, r)
+			}
+		}
+		return middleware.RequireRole("admin", "owner", "finance")(handler).ServeHTTP
+	}
+
 	// The sale lifecycle
 	mux.HandleFunc("POST /api/v1/pos/transactions", guard(h.StartTransaction))
 	mux.HandleFunc("GET /api/v1/pos/transactions", guard(h.ListTransactions))
@@ -169,8 +189,8 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux, roleGuard ...func(http.Hand
 	mux.HandleFunc("POST /api/v1/pos/till/{id}/signoff", signoffMount(h.SignOffTill))
 	mux.HandleFunc("GET /api/v1/pos/till/policy", resolveMount(h.GetVariancePolicy))
 	mux.HandleFunc("PUT /api/v1/pos/till/policy", resolveMount(h.PutVariancePolicy))
-	mux.HandleFunc("GET /api/v1/pos/offline/policy", resolveMount(h.GetOfflinePolicy))
-	mux.HandleFunc("PUT /api/v1/pos/offline/policy", resolveMount(h.PutOfflinePolicy))
+	mux.HandleFunc("GET /api/v1/pos/offline/policy", policyRead(h.GetOfflinePolicy))
+	mux.HandleFunc("PUT /api/v1/pos/offline/policy", policyWrite(h.PutOfflinePolicy))
 
 	// The manager step up (CP-04 slice 3): the roster the picker shows, and
 	// the PIN verified approval one act spends. Any person at the counter may

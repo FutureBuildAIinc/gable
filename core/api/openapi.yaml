@@ -15309,7 +15309,7 @@ paths:
       tags: [pos]
       summary: A branch's offline counter policy
       description: >-
-        The branch's resolved offline selling policy (ADR 0011 section 4): the branch's own row in pos_offline_policy when set (source branch), else the database wide defaults in system_settings (source default), else off (source none). Includes enrolled_register_count and max_account_exposure_cents (account_cap_cents times the branch's enrolled registers). Finance and owner only; a branch the caller may not target is 403, and an unknown branch is 404.
+        The branch's resolved offline selling policy (ADR 0011 section 4): the branch's own row in pos_offline_policy when set (source branch), else the database wide defaults in system_settings (source default), else off (source none). Includes enrolled_register_count and max_account_exposure_cents (account_cap_cents times the branch's enrolled registers). Admin, owner and finance; a branch the caller may not target is 403, and an unknown branch is 404.
       parameters:
         - name: branch_id
           in: query
@@ -15338,7 +15338,7 @@ paths:
       tags: [pos]
       summary: Set or clear a branch's offline counter policy
       description: >-
-        Sets the branch's own offline counter policy in pos_offline_policy, or clears it with clear true so the database wide defaults (or none) apply again. Only cash, check and account tenders may be allowed offline. Finance and owner only, never a machine key; a branch the caller may not target is 403, and an unknown branch is 404. Audited as pos.offline.policy in the same transaction.
+        Sets the branch's own offline counter policy in pos_offline_policy, or clears it with clear true so the database wide defaults (or none) apply again. Only cash, check and account tenders may be allowed offline. Admin and owner only (finance may read, not write), never a machine key; a branch the caller may not target is 403, and an unknown branch is 404. Audited as pos.offline.policy in the same transaction.
       parameters:
         - $ref: "#/components/parameters/XBranchId"
         - $ref: "#/components/parameters/IdempotencyKey"

@@ -27,7 +27,9 @@ func TestOfflinePolicy_BranchDefaultNoneAndExposure(t *testing.T) {
 	mustExec(t, f.db, `DELETE FROM pos_offline_policy WHERE branch_id = $1`, f.branchID)
 	mustExec(t, f.db, `DELETE FROM pos_register_devices WHERE branch_id = $1`, f.branchID)
 	mustExec(t, f.db, `DELETE FROM system_settings WHERE key LIKE 'pos.offline.%'`)
+	mustExec(t, f.db, `DELETE FROM audit_log WHERE action = 'pos.offline.policy' AND entity_id = $1::uuid`, f.branchID.String())
 	t.Cleanup(func() {
+		mustExec(t, f.db, `DELETE FROM audit_log WHERE action = 'pos.offline.policy' AND entity_id = $1::uuid`, f.branchID.String())
 		mustExec(t, f.db, `DELETE FROM pos_offline_policy WHERE branch_id = $1`, f.branchID)
 		mustExec(t, f.db, `DELETE FROM pos_register_devices WHERE branch_id = $1`, f.branchID)
 		mustExec(t, f.db, `DELETE FROM system_settings WHERE key LIKE 'pos.offline.%'`)
@@ -35,6 +37,7 @@ func TestOfflinePolicy_BranchDefaultNoneAndExposure(t *testing.T) {
 
 	fin := mustUUID(t)
 	finHdr := []string{"X-Test-Role", "finance", "X-Test-Sub", fin}
+	admHdr := []string{"X-Test-Role", "admin", "X-Test-Sub", fin}
 
 	// 1. Neither branch row nor system_settings set: source "none", enabled false.
 	r := f.do("GET", "/api/v1/pos/offline/policy?branch_id="+f.branchID.String(), nil, finHdr...)
@@ -104,7 +107,7 @@ func TestOfflinePolicy_BranchDefaultNoneAndExposure(t *testing.T) {
 		"queue_total_cap_cents": 900000,
 		"max_queued":            20,
 	}
-	r = f.do("PUT", "/api/v1/pos/offline/policy", putBody, finHdr...)
+	r = f.do("PUT", "/api/v1/pos/offline/policy", putBody, admHdr...)
 	if r.status != http.StatusOK {
 		t.Fatalf("PUT branch policy = %d: %s", r.status, r.raw)
 	}
@@ -118,7 +121,7 @@ func TestOfflinePolicy_BranchDefaultNoneAndExposure(t *testing.T) {
 	}
 
 	putBody["account_cap_cents"] = int64(350000)
-	r = f.do("PUT", "/api/v1/pos/offline/policy", putBody, finHdr...)
+	r = f.do("PUT", "/api/v1/pos/offline/policy", putBody, admHdr...)
 	if r.status != http.StatusOK || num(t, r.body, "revision") != 2 || num(t, r.body, "max_account_exposure_cents") != 700000 {
 		t.Errorf("second PUT branch policy = %d: %s", r.status, r.raw)
 	}
@@ -127,7 +130,7 @@ func TestOfflinePolicy_BranchDefaultNoneAndExposure(t *testing.T) {
 	r = f.do("PUT", "/api/v1/pos/offline/policy", map[string]any{
 		"branch_id": f.branchID.String(),
 		"clear":     true,
-	}, finHdr...)
+	}, admHdr...)
 	if r.status != http.StatusOK || str(t, r.body, "source") != "default" || num(t, r.body, "account_cap_cents") != 200000 {
 		t.Errorf("clear branch policy = %d: %s", r.status, r.raw)
 	}
@@ -152,7 +155,7 @@ func TestOfflinePolicy_BranchDefaultNoneAndExposure(t *testing.T) {
 		map[string]any{"branch_id": f.branchID.String(), "enabled": true, "tenders": []string{"cash"}, "max_queued": -1},
 		map[string]any{"branch_id": f.branchID.String(), "clear": false},
 	} {
-		if r := f.do("PUT", "/api/v1/pos/offline/policy", bad, finHdr...); r.status != http.StatusBadRequest {
+		if r := f.do("PUT", "/api/v1/pos/offline/policy", bad, admHdr...); r.status != http.StatusBadRequest {
 			t.Errorf("bad PUT %v = %d, want 400: %s", bad, r.status, r.raw)
 		}
 	}
@@ -163,11 +166,27 @@ func TestOfflinePolicy_BranchDefaultNoneAndExposure(t *testing.T) {
 	if r := f.do("GET", "/api/v1/pos/offline/policy?branch_id="+ghost, nil, finHdr...); r.status != http.StatusNotFound {
 		t.Errorf("GET unknown branch = %d, want 404: %s", r.status, r.raw)
 	}
-	if r := f.do("PUT", "/api/v1/pos/offline/policy", map[string]any{"branch_id": ghost, "enabled": false, "tenders": []string{}}, finHdr...); r.status != http.StatusNotFound {
+	if r := f.do("PUT", "/api/v1/pos/offline/policy", map[string]any{"branch_id": ghost, "enabled": false, "tenders": []string{}}, admHdr...); r.status != http.StatusNotFound {
 		t.Errorf("PUT unknown branch = %d, want 404: %s", r.status, r.raw)
 	}
 	if r := f.do("PUT", "/api/v1/pos/offline/policy", putBody, "X-Test-Role", "cashier", "X-Test-Sub", mustUUID(t)); r.status != http.StatusForbidden {
 		t.Errorf("cashier PUT = %d, want 403", r.status)
+	}
+	// The write is an admin act (ADR 0011 section 4): finance may read it
+	// but not write it; admin and owner write; a cashier does neither.
+	if r := f.do("PUT", "/api/v1/pos/offline/policy", putBody, finHdr...); r.status != http.StatusForbidden {
+		t.Errorf("finance PUT = %d, want 403: %s", r.status, r.raw)
+	}
+	if r := f.do("PUT", "/api/v1/pos/offline/policy", putBody, "X-Test-Role", "owner", "X-Test-Sub", mustUUID(t)); r.status != http.StatusOK {
+		t.Errorf("owner PUT = %d, want 200: %s", r.status, r.raw)
+	}
+	for _, role := range []string{"admin", "owner", "finance"} {
+		if r := f.do("GET", "/api/v1/pos/offline/policy?branch_id="+f.branchID.String(), nil, "X-Test-Role", role, "X-Test-Sub", mustUUID(t)); r.status != http.StatusOK {
+			t.Errorf("%s GET = %d, want 200: %s", role, r.status, r.raw)
+		}
+	}
+	if r := f.do("GET", "/api/v1/pos/offline/policy?branch_id="+f.branchID.String(), nil, "X-Test-Role", "cashier", "X-Test-Sub", mustUUID(t)); r.status != http.StatusForbidden {
+		t.Errorf("cashier GET = %d, want 403: %s", r.status, r.raw)
 	}
 	keyed := keyedServer(f, uuid.NewString())
 	keyReq, err := http.NewRequest(http.MethodPut, keyed.URL+"/api/v1/pos/offline/policy",
@@ -189,7 +208,7 @@ func TestOfflinePolicy_BranchDefaultNoneAndExposure(t *testing.T) {
 func TestOfflinePolicy_CarriesTheBranchWall(t *testing.T) {
 	w := newWallFixture(t)
 	scoped := append([]string{}, w.scoped...)
-	scoped[1] = "finance"
+	scoped[1] = "admin"
 
 	if r := w.do("GET", "/api/v1/pos/offline/policy?branch_id="+w.branchID.String(), nil, scoped...); r.status != http.StatusForbidden {
 		t.Errorf("branch A offline policy read by branch B caller = %d, want 403: %s", r.status, r.raw)
@@ -236,7 +255,7 @@ func TestRacingOfflinePolicyWritesProduceMonotonicRevisionsAndMatchingAuditRows(
 				"account_cap_cents":     0,
 				"queue_total_cap_cents": 500000,
 				"max_queued":            10 + idx,
-			}, "X-Test-Role", "finance", "X-Test-Sub", sub)
+			}, "X-Test-Role", "admin", "X-Test-Sub", sub)
 			statuses[idx] = r.status
 		}(i)
 	}

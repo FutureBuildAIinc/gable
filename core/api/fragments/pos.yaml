@@ -1439,7 +1439,7 @@ paths:
         the database wide defaults in system_settings (source default), else
         off (source none). Includes enrolled_register_count and
         max_account_exposure_cents (account_cap_cents times the branch's
-        enrolled registers). Finance and owner only; a branch the caller may
+        enrolled registers). Admin, owner and finance; a branch the caller may
         not target is 403, and an unknown branch is 404.
       parameters:
         - name: branch_id
@@ -1472,7 +1472,7 @@ paths:
         Sets the branch's own offline counter policy in pos_offline_policy, or
         clears it with clear true so the database wide defaults (or none) apply
         again. Only cash, check and account tenders may be allowed offline.
-        Finance and owner only, never a machine key; a branch the caller may
+        Admin and owner only (finance may read, not write), never a machine key; a branch the caller may
         not target is 403, and an unknown branch is 404. Audited as
         pos.offline.policy in the same transaction.
       parameters:
