@@ -3,9 +3,8 @@
 
 /**
  * Session custody: a staff session is display data only (the cookie is the
- * credential and no script holds it), the only persistence is the
- * sessionStorage handoff (so the front door can hand a session to the desk
- * across a full page navigation), a bearer token is memory only, and every
+ * credential and no script holds it) held in memory only, the one thing in
+ * sessionStorage is the dev handoff, a bearer token is memory only, and every
  * record is validated field by field on adoption and dropped when it does
  * not parse.
  */
@@ -118,14 +117,15 @@ describe('custody — in-memory rule', () => {
 })
 
 describe('custody — the sessionStorage handoff', () => {
-  it('writes display data only at a staff sign in, never a credential and never localStorage', () => {
+  it('writes nothing at a staff sign in: display data lives in memory only', () => {
     const store = memoryStorage()
     const c = new AuthCustody(store)
     c.signInStaff({ sub: 'sub-1', roles: ['owner'], name: 'dev@gable.test' })
 
-    const rec = JSON.parse(store.written.get(SESSION_HANDOFF_KEY) as string)
-    expect(rec).toEqual({ v: 1, kind: 'staff', sub: 'sub-1', roles: ['owner'], name: 'dev@gable.test' })
+    expect(store.written.size).toBe(0)
+    expect(sessionStorage.length).toBe(0)
     expect(localStorage.length).toBe(0)
+    expect(c.session?.kind).toBe('staff')
   })
 
   it('a bearer token is held in memory and written to no storage', () => {
@@ -137,28 +137,20 @@ describe('custody — the sessionStorage handoff', () => {
     expect(sessionStorage.length).toBe(0)
   })
 
-  it('a fresh custody (the desk booting after the door navigated) adopts the staff handoff', () => {
+  it('a fresh custody holds no staff session until the core is asked', () => {
     const store = memoryStorage()
     new AuthCustody(store).signInStaff({ sub: 'sub-1', roles: ['admin', 'sales'], name: 'dev@gable.test' })
 
     const desk = new AuthCustody(store)
-    expect(desk.session?.kind).toBe('staff')
-    expect(desk.subject).toBe('sub-1')
-    expect(desk.displayName).toBe('dev@gable.test')
-    expect(desk.roles).toEqual(['admin', 'sales'])
-    expect(desk.token).toBeNull()
+    expect(desk.session).toBeNull()
   })
 
-  it('drops a staff handoff with no subject or roles that are not strings', () => {
-    for (const rec of [
-      { v: 1, kind: 'staff', roles: ['owner'] },
-      { v: 1, kind: 'staff', sub: 'sub-1', roles: 'owner' },
-      { v: 1, kind: 'staff', sub: 'sub-1', roles: [1] },
-    ]) {
-      const store = memoryStorage({ [SESSION_HANDOFF_KEY]: JSON.stringify(rec) })
-      expect(new AuthCustody(store).session).toBeNull()
-      expect(store.written.has(SESSION_HANDOFF_KEY)).toBe(false)
-    }
+  it('drops a staff record an older build left in storage', () => {
+    const store = memoryStorage({
+      [SESSION_HANDOFF_KEY]: JSON.stringify({ v: 1, kind: 'staff', sub: 'sub-1', roles: ['owner'] }),
+    })
+    expect(new AuthCustody(store).session).toBeNull()
+    expect(store.written.has(SESSION_HANDOFF_KEY)).toBe(false)
   })
 
   it('drops a handoff that does not parse, leaving nothing adopted', () => {
@@ -229,8 +221,9 @@ describe('custody — the handoff value is removed', () => {
     const store = memoryStorage()
     const c = new AuthCustody(store)
     c.signInStaff({ sub: 'sub-1', roles: ['owner'] })
-    expect(store.written.has(SESSION_HANDOFF_KEY)).toBe(true)
+    expect(c.session).not.toBeNull()
     c.signOut()
+    expect(c.session).toBeNull()
     expect(store.written.has(SESSION_HANDOFF_KEY)).toBe(false)
   })
 
@@ -247,10 +240,12 @@ describe('custody — the handoff value is removed', () => {
     const { fetchWithAuth } = await import('./fetchClient')
     const { authCustody } = await import('./custody')
     authCustody.signInStaff({ sub: 'sub-1', roles: ['owner'] })
-    expect(sessionStorage.getItem(SESSION_HANDOFF_KEY)).not.toBeNull()
+    expect(authCustody.session).not.toBeNull()
+    expect(sessionStorage.getItem(SESSION_HANDOFF_KEY)).toBeNull()
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('', { status: 401 })))
     await expect(fetchWithAuth('/api/v1/quotes')).rejects.toThrow()
     vi.unstubAllGlobals()
+    expect(authCustody.session).toBeNull()
     expect(sessionStorage.getItem(SESSION_HANDOFF_KEY)).toBeNull()
   })
 

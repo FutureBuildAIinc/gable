@@ -48,7 +48,8 @@ up)
   if [ -n "${APPWRITE_SEED_JSON:-}" ]; then
     command -v jq >/dev/null || { echo "e2e-stack.sh: jq not found" >&2; exit 69; }
     PROBE_PATH=/
-    APPWRITE_ENDPOINT="$(jq -r .endpoint "$APPWRITE_SEED_JSON")" \
+    env -u AUTH_MODE \
+      APPWRITE_ENDPOINT="$(jq -r .endpoint "$APPWRITE_SEED_JSON")" \
       APPWRITE_PROJECT_ID="$(jq -r .projectId "$APPWRITE_SEED_JSON")" \
       APPWRITE_TEAM_ID="$(jq -r .teamId "$APPWRITE_SEED_JSON")" \
       APPWRITE_API_KEY="$(jq -r .apiKey "$APPWRITE_SEED_JSON")" \

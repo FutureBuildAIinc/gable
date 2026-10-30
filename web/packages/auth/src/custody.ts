@@ -7,12 +7,12 @@
  * THE RULE (ADR 0012 section 3): a staff session is the HttpOnly cookie the
  * core sets at sign in; no script here ever holds, reads or writes a
  * credential for it. What this module keeps for a staff session is display
- * data only (the subject, the roles and the name the person typed), written
- * to sessionStorage (the handoff key below) so the front door can hand it to
- * the desk across a full page navigation. A script that reads it learns who
- * is signed in and nothing it could replay: the cookie decides every
- * request, and the core answers 401 when the session is gone. The record is
- * removed on sign out and on any 401.
+ * data only (the subject, the roles and the name the person typed), held in
+ * memory and never written to any storage: each document boot asks the core
+ * who the cookie belongs to (`restoreStaffSession`). A staff record found in
+ * sessionStorage (an older build wrote one) is dropped on adoption. The
+ * cookie decides every request, and the core answers 401 when the session is
+ * gone.
  *
  * A bearer token (the out of band JWKS path, retired in ADR 0012 slice 8) is
  * held in memory only and is never written to any storage.
@@ -21,8 +21,9 @@
  * when it does not parse: a hostile or stale payload buys nothing.
  *
  * Dev mode (AUTH_MODE=dev on the core) has no credential to hold at all;
- * the door's dev sign-in stores a display name under the same handoff
- * discipline, and only when the build was made with VITE_AUTH_DEV_MODE.
+ * the door's dev sign-in stores a display name in the handoff record (the
+ * only kind it carries), and only when the build was made with
+ * VITE_AUTH_DEV_MODE.
  */
 
 import { authConfig } from './config.ts';
@@ -53,7 +54,7 @@ function probeSessionStorage(): StorageLike {
   }
 }
 
-/** The handoff key: the door writes it at sign-in, every bundle adopts it at boot. */
+/** The dev handoff key: the door writes it at a dev sign-in, every bundle adopts it at boot. */
 export const SESSION_HANDOFF_KEY = 'gable.auth.session.v1';
 
 /** A signed-in session, in the shape the frontends render. */
@@ -65,9 +66,7 @@ export type AuthSession =
 /** The handoff record's on-the-wire shape. The v tags the payload shape. */
 interface HandoffRecord {
   v: 1;
-  kind: 'staff' | 'dev';
-  sub?: string;
-  roles?: string[];
+  kind: 'dev';
   name?: string;
   role?: string;
   homeYardCode?: string;
@@ -139,12 +138,6 @@ export class AuthCustody {
     const rec = parsed as HandoffRecord;
     if (rec.v !== 1) return null;
 
-    if (rec.kind === 'staff') {
-      if (typeof rec.sub !== 'string' || rec.sub.length === 0) return null;
-      if (!Array.isArray(rec.roles) || rec.roles.some((r) => typeof r !== 'string')) return null;
-      const name = typeof rec.name === 'string' && rec.name.length > 0 ? rec.name : null;
-      return { kind: 'staff', sub: rec.sub, roles: [...rec.roles], name };
-    }
     if (rec.kind === 'dev') {
       if (!authConfig.devMode) return null;
       if (typeof rec.name !== 'string' || rec.name.length === 0) return null;
@@ -231,8 +224,9 @@ export class AuthCustody {
 
   /**
    * Hold a staff session the core just opened. The cookie is already set by
-   * the sign in answer; what is held here is display data only. `name` is
-   * what the person typed at the door (a staff session carries no email).
+   * the sign in answer; what is held here is display data only, in memory.
+   * `name` is what the person typed at the door (a staff session carries no
+   * email).
    */
   signInStaff(identity: { sub: string; roles: string[]; name?: string | null }): AuthSession {
     if (identity.sub.length === 0) throw new InvalidTokenError('Empty subject');
@@ -242,7 +236,6 @@ export class AuthCustody {
     const session: AuthSession = { kind: 'staff', sub: identity.sub, roles: [...identity.roles], name };
     this._session = session;
     this._adopted = true;
-    this._writeHandoff({ v: 1, kind: 'staff', sub: identity.sub, roles: [...identity.roles], name: name ?? undefined });
     return session;
   }
 

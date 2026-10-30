@@ -9,17 +9,24 @@
 
 import './index.css';
 import { initTheme, orphanedFrame } from '@gable/design-system';
-import { authCustody } from '@gable/auth';
+import { authCustody, bootStaffSession } from '@gable/auth';
 import './host-element.ts';
 
-initTheme(authCustody.subject);
+// Custody holds a staff session in memory only, so the core is asked who the
+// cookie belongs to before the first render.
+async function boot(): Promise<void> {
+  await bootStaffSession();
+  initTheme(authCustody.subject);
 
-// Mount the host into #root. A shell that finds itself inside a frame without
-// the framed flag is an orphaned frame (an app navigated to the shell's
-// address inside a frame): it asks the host to switch role and mounts nothing.
-const root = document.getElementById('root');
-if (root) {
-  root.innerHTML = orphanedFrame(window)
-    ? '<div style="display:flex;min-height:100vh;align-items:center;justify-content:center;color:rgb(var(--gb-zinc-400, 161 161 170));font-family:Outfit,sans-serif">Switching role...</div>'
-    : '<gable-field-shell></gable-field-shell>';
+  // Mount the host into #root. A shell that finds itself inside a frame without
+  // the framed flag is an orphaned frame (an app navigated to the shell's
+  // address inside a frame): it asks the host to switch role and mounts nothing.
+  const root = document.getElementById('root');
+  if (root) {
+    root.innerHTML = orphanedFrame(window)
+      ? '<div style="display:flex;min-height:100vh;align-items:center;justify-content:center;color:rgb(var(--gb-zinc-400, 161 161 170));font-family:Outfit,sans-serif">Switching role...</div>'
+      : '<gable-field-shell></gable-field-shell>';
+  }
 }
+
+void boot();

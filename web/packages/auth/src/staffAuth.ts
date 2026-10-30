@@ -11,6 +11,7 @@
  */
 
 import { authCustody } from './custody.ts';
+import { authConfig } from './config.ts';
 
 /** The custom header the core requires on a cookie authenticated write. */
 export const CSRF_HEADER = 'X-Gable-CSRF';
@@ -125,4 +126,15 @@ export async function restoreStaffSession(): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+/**
+ * Every document boot (the desk and both shells; the door does the same in
+ * its own element) asks the core who the cookie belongs to before it mounts,
+ * because custody holds a staff session in memory only. A dev build has no
+ * cookie to ask about. Never throws: a failure leaves custody signed out.
+ */
+export async function bootStaffSession(): Promise<void> {
+  if (authConfig.devMode) return;
+  await restoreStaffSession();
 }

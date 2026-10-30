@@ -51,6 +51,7 @@ export {
 } from './identity-tap.ts';
 export {
   CSRF_HEADER,
+  bootStaffSession,
   restoreStaffSession,
   signInStaff,
   signOutStaff,

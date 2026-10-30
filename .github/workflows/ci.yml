@@ -604,7 +604,7 @@ jobs:
           fi
           changed="$(git diff --name-only "$base" HEAD)"
           proof='^(scripts/appwrite/|core/internal/appwrite/|core/internal/config/|core/internal/app/serve/)'
-          signin='^(core/internal/staffauth/|web/packages/auth/|web/apps/front-door/|web/e2e/staff-sign-in\.spec\.ts$|web/scripts/e2e-stack\.sh$)'
+          signin='^(core/internal/staffauth/|web/packages/auth/|web/apps/front-door/|web/e2e/staff-sign-in\.spec\.ts$|web/scripts/e2e-stack\.sh$|core/pkg/middleware/|web/apps/desk/src/components/ui/session-expired\.ts$|web/apps/desk/src/components/layout/app-shell\.ts$|web/apps/work-shell/|web/apps/field-shell/|\.github/workflows/ci\.yml$)'
           if echo "$changed" | grep -qE "$proof"; then
             echo "run=true" >> "$GITHUB_OUTPUT"
           else
