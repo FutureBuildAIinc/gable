@@ -185,7 +185,7 @@ func (l *TerminalLedger) UnspentAuthorizedLegs(ctx context.Context, transactionI
 const intentColumns = `
 SELECT i.id, i.transaction_id, i.leg_key, i.register_id, i.branch_id, i.amount_cents, i.kind, i.state,
        i.device_id, i.provider_ref, i.idempotency_key, i.lease_until, i.claimed_at, i.dispatched_at, i.answered_at,
-       i.answer_brand, i.answer_last4, i.answer_auth_code, i.answer_provider_ref, i.answer_verdict, i.spent_at
+       i.answer_brand, i.answer_last4, i.answer_auth_code, i.answer_provider_ref, i.answer_verdict, i.spent_at, i.answer_fee_cents
 FROM payment_terminal_intents i`
 
 func (l *TerminalLedger) scanIntent(row interface {
@@ -196,7 +196,7 @@ func (l *TerminalLedger) scanIntent(row interface {
 	if err := row.Scan(&in.ID, &in.TransactionID, &in.LegKey, &in.RegisterID, &in.BranchID, &in.AmountCents,
 		&in.Kind, &state, &in.DeviceID, &in.ProviderRef, &in.IdempotencyKey, &in.LeaseUntil, &in.ClaimedAt,
 		&in.DispatchedAt, &in.AnsweredAt, &in.AnswerBrand, &in.AnswerLast4, &in.AnswerAuthCode,
-		&in.AnswerProviderRef, &in.AnswerVerdict, &in.SpentAt); err != nil {
+		&in.AnswerProviderRef, &in.AnswerVerdict, &in.SpentAt, &in.AnswerFeeCents); err != nil {
 		return nil, ErrTerminalIntentNotFound
 	}
 	in.State = TerminalIntentState(state)
@@ -331,6 +331,21 @@ func (l *TerminalLedger) DeclineUnspentAuthorized(ctx context.Context, id uuid.U
 	return err == nil, err
 }
 
+// HoldDeviceAnswer keeps what a held approval charged above the leg as the
+// leg's fee (CP-15), on a leg no answer has landed on: the leg stays where it
+// is for the sweep and the manager item, and an answer that lands later
+// writes its own fee over it.
+func (l *TerminalLedger) HoldDeviceAnswer(ctx context.Context, intentID uuid.UUID, feeCents int64) error {
+	if feeCents < 0 {
+		return fmt.Errorf("a held fee of %d cents is negative", feeCents)
+	}
+	_, err := l.db.GetExecutor(ctx).Exec(ctx, `
+		UPDATE payment_terminal_intents SET answer_fee_cents = $2, updated_at = NOW()
+		WHERE id = $1 AND answered_at IS NULL AND state IN ('claimed', 'pending_at_device', 'lost')`,
+		intentID, feeCents)
+	return err
+}
+
 // ApplyDeviceAnswer lands one asynchronous verdict, idempotent by provider
 // reference: the same verdict twice is a no-op; a conflicting verdict is
 // audited and queued for a manager; an answer on an intent the sweep already
@@ -352,11 +367,11 @@ func (l *TerminalLedger) ApplyDeviceAnswer(ctx context.Context, a TerminalAnswer
 	err := l.db.GetExecutor(ctx).QueryRow(ctx, `
 		UPDATE payment_terminal_intents
 		SET state = $2, answered_at = NOW(), answer_verdict = $3, answer_brand = $4,
-		    answer_last4 = $5, answer_auth_code = $6, answer_provider_ref = $7,
+		    answer_last4 = $5, answer_auth_code = $6, answer_provider_ref = $7, answer_fee_cents = $8,
 		    provider_ref = COALESCE(NULLIF(provider_ref, ''), NULLIF($7, '')), updated_at = NOW()
 		WHERE id = $1 AND state = 'pending_at_device'
 		RETURNING id`,
-		a.IntentID, string(verdictState), a.Verdict, a.Brand, a.Last4, a.AuthCode, a.ProviderRef).Scan(&moved)
+		a.IntentID, string(verdictState), a.Verdict, a.Brand, a.Last4, a.AuthCode, a.ProviderRef, a.FeeCents).Scan(&moved)
 	if err == nil {
 		return AnswerApplied, nil
 	}
@@ -374,6 +389,15 @@ func (l *TerminalLedger) ApplyDeviceAnswer(ctx context.Context, a TerminalAnswer
 		}
 		return l.queueAnswer(ctx, in, a, "conflicting")
 	case TerminalLost:
+		// the late approval's fee stays on the leg (CP-15), so the manager's
+		// authorized resolution books or puts back what the card was charged
+		if a.Verdict == "authorized" {
+			if _, err := l.db.GetExecutor(ctx).Exec(ctx, `
+				UPDATE payment_terminal_intents SET answer_fee_cents = $2, updated_at = NOW()
+				WHERE id = $1 AND state = 'lost'`, a.IntentID, a.FeeCents); err != nil {
+				return "", err
+			}
+		}
 		return l.queueAnswer(ctx, in, a, "late")
 	case TerminalClaimed:
 		return "", ErrAnswerForClaimedIntent

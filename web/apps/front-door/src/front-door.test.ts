@@ -361,18 +361,18 @@ describe('front door runtime sign in methods (S8)', () => {
       auth_mode: 'production',
       methods: [
         { method: 'email_password', kind: 'form', label: 'Email and password', start_url: '/api/v1/auth/signin', issuer_url: null, client_id: null },
-        { method: 'google', kind: 'redirect', label: 'Google', start_url: '/api/v1/auth/start/google', issuer_url: null, client_id: null },
+        { method: 'passkey', kind: 'passkey', label: 'Passkey', start_url: '/api/v1/auth/start/passkey', issuer_url: null, client_id: null },
         { method: 'microsoft', kind: 'redirect', label: 'Microsoft', start_url: '/api/v1/auth/start/microsoft', issuer_url: null, client_id: null },
       ],
     });
     const el = await mount();
     await settle(el);
 
-    // 1. Form error renders inside the form block, above the Google button.
+    // 1. Form error renders inside the form block, above the Passkey button.
     const signInBtn = [...el.querySelectorAll<HTMLButtonElement>('button')].find(
       (b) => b.textContent?.trim() === 'Sign in',
     )!;
-    const googleBtn = el.querySelector<HTMLButtonElement>('button[aria-label="Sign in with Google"]')!;
+    const passkeyBtn = el.querySelector<HTMLButtonElement>('button[aria-label="Sign in with Passkey"]')!;
     const microsoftBtn = el.querySelector<HTMLButtonElement>('button[aria-label="Sign in with Microsoft"]')!;
 
     signInBtn.click();
@@ -382,20 +382,20 @@ describe('front door runtime sign in methods (S8)', () => {
     expect(alertEl).not.toBeNull();
     expect(alertEl.textContent).toContain('Enter your email and password.');
     expect(signInBtn.compareDocumentPosition(alertEl) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(alertEl.compareDocumentPosition(googleBtn) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(alertEl.compareDocumentPosition(passkeyBtn) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 
-    // 2. Method start error renders directly under the clicked Google button, above Microsoft.
+    // 2. Method start error renders directly under the clicked Passkey button, above Microsoft.
     vi.stubGlobal('fetch', vi.fn(async () => new Response(
-      JSON.stringify({ error: { code: 'not_implemented', message: 'sign in by google is not available on this server yet' } }),
+      JSON.stringify({ error: { code: 'not_implemented', message: 'sign in by passkey is not available on this server yet' } }),
       { status: 501 },
     )));
-    googleBtn.click();
+    passkeyBtn.click();
     await settle(el);
 
     alertEl = el.querySelector<HTMLElement>('[role="alert"]')!;
     expect(alertEl).not.toBeNull();
     expect(alertEl.textContent).toContain('not available on this server yet');
-    expect(googleBtn.compareDocumentPosition(alertEl) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(passkeyBtn.compareDocumentPosition(alertEl) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(alertEl.compareDocumentPosition(microsoftBtn) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 
     // 3. A refused staff sign in shows the core's plain refusal under the form.
@@ -474,9 +474,73 @@ describe('front door runtime sign in methods (S8)', () => {
     expect(continueBtn!.textContent).not.toContain('OWNER');
     expect(continueBtn!.textContent).not.toContain('KEL-MAIN');
 
+    const nav = vi.fn();
+    el.navigateTo = nav;
     continueBtn!.click();
     await settle(el);
-    expect(calls.some((u) => u.includes('/api/v1/auth/start/google'))).toBe(true);
+    // A redirect method is a GET navigation, never a fetch.
+    expect(nav).toHaveBeenCalledWith('/api/v1/auth/start/google');
+    expect(calls.some((u) => u.includes('/api/v1/auth/start/google'))).toBe(false);
+  });
+
+  it('a provider button navigates to the start route, and a magic link posts {email} with the CSRF header', async () => {
+    authConfig.devMode = false;
+    const calls: Array<{ url: string; init?: RequestInit }> = [];
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      calls.push({ url: String(url), init });
+      if (String(url).includes('/api/v1/auth/config')) {
+        return new Response(JSON.stringify({
+          auth_mode: 'production',
+          methods: [
+            { method: 'google', kind: 'redirect', label: 'Google', start_url: '/api/v1/auth/start/google', issuer_url: null, client_id: null },
+            { method: 'magic_link', kind: 'link', label: 'Email a sign in link', start_url: '/api/v1/auth/start/magic_link', issuer_url: null, client_id: null },
+          ],
+        }), { status: 200 });
+      }
+      return new Response(JSON.stringify({ message: 'x' }), { status: 200 });
+    }));
+    const el = await mount();
+    const nav = vi.fn();
+    el.navigateTo = nav;
+    await settle(el);
+
+    el.querySelector<HTMLButtonElement>('button[aria-label="Sign in with Google"]')!.click();
+    await settle(el);
+    expect(nav).toHaveBeenCalledWith('/api/v1/auth/start/google');
+
+    const linkBtn = el.querySelector<HTMLButtonElement>('button[aria-label="Sign in with Email a sign in link"]')!;
+    linkBtn.click();
+    await settle(el);
+    expect(el.querySelector('[role="alert"]')?.textContent).toContain('Enter your email address.');
+
+    const input = el.querySelector<HTMLInputElement>('input[aria-label="Email for sign in link"]')!;
+    input.value = 'member@example.com';
+    input.dispatchEvent(new Event('input'));
+    linkBtn.click();
+    await settle(el);
+    const post = calls.find((c) => c.url.includes('/auth/start/magic_link'))!;
+    expect(post.init?.method).toBe('POST');
+    expect((post.init?.headers as Record<string, string>)['X-Gable-CSRF']).toBeTruthy();
+    expect(JSON.parse(post.init?.body as string)).toEqual({ email: 'member@example.com' });
+    expect(el.querySelector('[role="status"]')?.textContent).toContain('a sign in link is on its way');
+  });
+
+  it('shows the one fixed refusal when the callback sends the browser back with sign_in=failed', async () => {
+    authConfig.devMode = false;
+    window.history.replaceState({}, '', '/?sign_in=failed');
+    try {
+      stubConfig({
+        auth_mode: 'production',
+        methods: [
+          { method: 'google', kind: 'redirect', label: 'Google', start_url: '/api/v1/auth/start/google', issuer_url: null, client_id: null },
+        ],
+      });
+      const el = await mount();
+      await settle(el);
+      expect(el.querySelector('[role="alert"]')?.textContent).toContain('That sign in did not work');
+    } finally {
+      window.history.replaceState({}, '', '/');
+    }
   });
 
   it('focuses the first allowed method when the Continue as method is no longer allowed', async () => {

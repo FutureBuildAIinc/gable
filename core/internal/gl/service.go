@@ -56,6 +56,10 @@ const (
 	AccountCodeRoundingIncome = "4095" // Cash Rounding Income (revenue, credit)
 	AccountCodeRoundingLoss   = "5045" // Cash Rounding Loss (expense, debit)
 
+	// AccountCodeCardSurcharge is where the card fee the processor added on top
+	// of a sale books (CP-15): its own income, never sales revenue, never taxed.
+	AccountCodeCardSurcharge = "4070" // Card Surcharge Income (revenue, credit)
+
 	// SourceReversal marks a net-zero reversing entry.
 	SourceReversal = "REVERSAL"
 	// SourceReturn marks a POS return/refund (sale reversal at the till).

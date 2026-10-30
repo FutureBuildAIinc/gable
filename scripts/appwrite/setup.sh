@@ -139,6 +139,13 @@ code="$(req PATCH /v1/project/auth-methods/email-password '{"enabled":false}' "$
 code="$(req PATCH /v1/project/oauth2/google '{"enabled":true,"clientId":"s9proof-client-id","clientSecret":"s9proof-client-placeholder"}' "${PROJECT[@]}")"
 [[ "$code" == 200 ]] || die "oauth2 provider enable failed" "$code"
 
+# 5c. An OIDC provider pointing at the proof's test only issuer, which the
+# integration test serves from the host (core/internal/appwrite, redirects
+# proof). The values are invented; nothing real is ever contacted.
+code="$(req PATCH /v1/project/oauth2/oidc "$(jq -nc --arg wk "http://host.docker.internal:8582/.well-known/openid-configuration" \
+  '{enabled:true,clientId:"s9proof-oidc-client",clientSecret:"s9proof-oidc-placeholder",wellKnownURL:$wk}')" "${PROJECT[@]}")"
+[[ "$code" == 200 ]] || die "oidc provider enable failed" "$code"
+
 # 6. Staff team (server key; an API-created team has no owner membership).
 code="$(req GET "/v1/teams/$STAFF_TEAM_ID" "" "${KEY[@]}")"
 if [[ "$code" == 404 ]]; then

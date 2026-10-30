@@ -1745,7 +1745,8 @@
             "method": "cash",
             "payment_id": "<id-54>",
             "reference": null,
-            "sale_id": "<id-9>"
+            "sale_id": "<id-9>",
+            "surcharge_cents": 0
           }
         ],
         "till_session_id": "<id-3>",
@@ -2185,7 +2186,8 @@
             "method": "cash",
             "payment_id": "<id-64>",
             "reference": null,
-            "sale_id": "<id-11>"
+            "sale_id": "<id-11>",
+            "surcharge_cents": 0
           },
           {
             "amount_cents": 200,
@@ -2200,7 +2202,8 @@
             "method": "check",
             "payment_id": "<id-66>",
             "reference": "ch-1042",
-            "sale_id": "<id-11>"
+            "sale_id": "<id-11>",
+            "surcharge_cents": 0
           }
         ],
         "till_session_id": "<id-3>",
@@ -2309,7 +2312,8 @@
             "method": "cash",
             "payment_id": "<id-64>",
             "reference": null,
-            "sale_id": "<id-11>"
+            "sale_id": "<id-11>",
+            "surcharge_cents": 0
           },
           {
             "amount_cents": 200,
@@ -2324,7 +2328,8 @@
             "method": "check",
             "payment_id": "<id-66>",
             "reference": "ch-1042",
-            "sale_id": "<id-11>"
+            "sale_id": "<id-11>",
+            "surcharge_cents": 0
           }
         ],
         "till_session_id": "<id-3>",
@@ -2430,7 +2435,8 @@
             "method": "cash",
             "payment_id": "<id-54>",
             "reference": null,
-            "sale_id": "<id-9>"
+            "sale_id": "<id-9>",
+            "surcharge_cents": 0
           }
         ],
         "till_session_id": "<id-3>",

@@ -580,16 +580,19 @@ type runVerdict struct {
 	end runEnd
 	// held says why an approval is not booked, with both figures.
 	held string
+	// heldFee is what a held approval charged above the leg (CP-15), kept
+	// on the leg for the manager's resolution.
+	heldFee int64
 }
 
 // answerOfInteraction maps one interaction status. A succeeded interaction
 // is the workflow's end, not the card's: result A authorized, C declined, B
 // declined too (no money moved; the cashier starts a new leg), unless the
 // result names a charge stage error, which is uncertain; an empty or unknown
-// result code is uncertain too. An approval is
-// booked only when the card was charged exactly the leg's amount with no
-// fee: a surcharge (the card charged the subtotal plus a fee) or a partial
-// approval is held for a person until surcharge booking is built. A failed or
+// result code is uncertain too. An approval is booked when the card was
+// charged exactly the leg's amount plus the fee the answer names (stored on
+// the answer as cents, CP-15); any other figure, a partial approval among
+// them, is held for a person. A failed or
 // cancelled interaction whose error is at the card read ran no charge and
 // declines. Any other failed or cancelled interaction, or a succeeded one
 // that carries no result object, is uncertain: a gateway fault is not a
@@ -624,15 +627,30 @@ func answerOfInteraction(d TerminalDispatch, interaction string, st *runChargeCa
 		}
 		v.end = runEndFinal
 		v.Verdict = "authorized"
+		// The processor decides the surcharge (CP-15): the card is charged the
+		// leg's amount plus the fee its answer names. The fee is kept as cents
+		// from the dollars string; the figure charged must equal the two, or
+		// the answer is held for a person.
+		var fee int64
 		if st.Result.FeeAmount != "" {
-			if fee, ok := st.Result.FeeAmount.cents(); !ok || fee != 0 {
-				v.end, v.held = runEndHeld, fmt.Sprintf("the card was surcharged %q on a leg of %d cents", st.Result.FeeAmount, d.AmountCents)
+			f, ok := st.Result.FeeAmount.cents()
+			if !ok {
+				v.end, v.held = runEndHeld, fmt.Sprintf("the card was surcharged %q, a figure the driver cannot read, on a leg of %d cents", st.Result.FeeAmount, d.AmountCents)
+				if charged, ok := st.Result.Amount.cents(); ok && charged > d.AmountCents {
+					v.heldFee = charged - d.AmountCents
+				}
 				return v
 			}
+			fee = f
 		}
-		if charged, ok := st.Result.Amount.cents(); !ok || charged != d.AmountCents {
-			v.end, v.held = runEndHeld, fmt.Sprintf("the card was charged %q on a leg of %d cents", st.Result.Amount, d.AmountCents)
+		if charged, ok := st.Result.Amount.cents(); !ok || charged != d.AmountCents+fee {
+			v.end, v.held = runEndHeld, fmt.Sprintf("the card was charged %q on a leg of %d cents with a fee of %d cents", st.Result.Amount, d.AmountCents, fee)
+			if ok && charged > d.AmountCents {
+				v.heldFee = charged - d.AmountCents
+			}
+			return v
 		}
+		v.FeeCents = fee
 		return v
 	case "failed", "cancelled":
 		if st.Result != nil && st.Result.stageFailed("read") && !st.Result.stageFailed("charge") {
@@ -657,6 +675,9 @@ func answerOfTransaction(d TerminalDispatch, tx *runReportingTransaction) runVer
 		v.Verdict = "authorized"
 		if tx.Amount != float64(d.AmountCents) {
 			v.end, v.held = runEndHeld, fmt.Sprintf("the report shows %v cents charged on a leg of %d cents", tx.Amount, d.AmountCents)
+			if charged := int64(tx.Amount); float64(charged) == tx.Amount && charged > d.AmountCents {
+				v.heldFee = charged - d.AmountCents
+			}
 		}
 	}
 	return v
@@ -736,9 +757,27 @@ func (t *RunTerminal) land(d TerminalDispatch, v runVerdict) {
 	if v.end == runEndHeld {
 		t.logger.Warn("the Run approval is not booked: "+v.held+"; the sweep files the manager item",
 			"order_id", d.IdempotencyKey, "trans_id", v.ProviderRef)
+		t.holdFee(d, v.heldFee)
 		return
 	}
 	t.deliver(d, v.TerminalAnswer)
+}
+
+// holdFee keeps a held approval's figure above the leg on the leg, on the
+// driver's own time as deliver does (the dispatch move commits first).
+func (t *RunTerminal) holdFee(d TerminalDispatch, fee int64) {
+	sink, ok := t.answers.(HeldAnswerSink)
+	if !ok || fee <= 0 {
+		return
+	}
+	time.AfterFunc(20*time.Millisecond, func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := sink.HoldDeviceAnswer(ctx, d.IntentID, fee); err != nil {
+			t.logger.Error("the Run terminal's held fee did not land",
+				"intent_id", d.IntentID, "fee_cents", fee, "error", err)
+		}
+	})
 }
 
 // deliver lands one answer in the sink on the driver's own time: never

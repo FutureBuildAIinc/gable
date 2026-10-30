@@ -125,12 +125,6 @@ func viewOf(r Row) MethodView {
 		v.StartURL = &start
 	}
 	if r.Method == MethodOIDC {
-		if r.OIDCIssuerURL != "" {
-			v.IssuerURL = &r.OIDCIssuerURL
-		}
-		if r.OIDCClientID != "" {
-			v.ClientID = &r.OIDCClientID
-		}
 		if r.OIDCLabel != "" {
 			v.Label = r.OIDCLabel
 		}

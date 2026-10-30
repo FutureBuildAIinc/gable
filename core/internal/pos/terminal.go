@@ -116,7 +116,7 @@ func firstNonEmpty(values ...string) string {
 // resultOfLeg reads an authorized leg as the charge the completion records.
 func resultOfLeg(in *payment.TerminalIntent) *chargeResult {
 	return &chargeResult{GatewayTxID: firstNonEmpty(in.AnswerProviderRef, in.ProviderRef), AuthCode: in.AnswerAuthCode,
-		Last4: in.AnswerLast4, Brand: in.AnswerBrand, IntentID: in.ID}
+		Last4: in.AnswerLast4, Brand: in.AnswerBrand, IntentID: in.ID, FeeCents: in.AnswerFeeCents}
 }
 
 // attemptOf reads the attempt number of a leg key (card-0 is attempt 0,
@@ -435,7 +435,7 @@ func (s *Service) reverseTerminalLeg(ctx context.Context, c chargeMade, saleID u
 		return err
 	}
 	comp := s.terminalCompensationLeg(ctx, leg)
-	rerr := s.reverseCharge(ctx, c.result.GatewayTxID, c.amountCents, saleID, actor, cause, terminalRefundKey(comp))
+	rerr := s.reverseCharge(ctx, c.result.GatewayTxID, c.amountCents+c.result.FeeCents, saleID, actor, cause, terminalRefundKey(comp))
 	if rerr != nil {
 		// the reversal's outcome is unknown or failed: the compensation
 		// intent stays pending_at_device, so the sweep files its manager item

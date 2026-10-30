@@ -20,8 +20,8 @@ paths:
         dealer's allowed sign in methods in the stored order, each with what
         the front door needs to render it: the kind (form, passkey, link or
         redirect), the label, the start URL (the staff sign in for the form
-        method, the start route for the others) and, for oidc, the issuer URL
-        and client id. A strict allowlist response type: it never carries a
+        method, the start route for the others). The oidc issuer is configured in
+        Appwrite, so its issuer URL and client id are always null here. A strict allowlist response type: it never carries a
         secret, an internal host or another tenant's data. The dealer is the
         install's single tenant.
       security: []
@@ -40,11 +40,13 @@ paths:
       tags: [auth]
       summary: Start a sign in by one method
       description: >-
-        Public. The route a non form method starts from. A method outside the
+        Public. The POST a non form method is asked at. A method outside the
         six is a 404; a method the dealer's allowlist does not hold is a 403;
-        the form method has no start route (a 400); and a method that is
-        allowed but not built on this server yet answers a plain 501
-        not_implemented, never a crash.
+        the form method has no start route (a 400); the provider redirect
+        methods (google, microsoft, oidc) start by navigating (GET) and answer
+        a POST with a 405; the magic link's POST is its own route; and a
+        method that is allowed but not served here (passkey, deferred)
+        answers a plain 501 not_implemented, never a crash.
       security: []
       parameters:
         - name: method
@@ -61,6 +63,12 @@ paths:
           $ref: "#/components/responses/WireNotFound"
         "403":
           $ref: "#/components/responses/Forbidden"
+        "405":
+          description: A provider redirect method starts by navigation (GET), not by POST.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WireError"
         "501":
           description: >-
             The method is in the dealer's allowlist but not implemented on
@@ -70,6 +78,54 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/WireError"
+    get:
+      operationId: authStartRedirect
+      tags: [auth]
+      summary: Start a provider sign in by navigation
+      description: >-
+        Public. For google, microsoft and oidc the browser navigates here. The
+        core files a pending sign in, sets the single use state cookie
+        (HttpOnly, Secure, SameSite=Lax, Path=/api, no Domain, short lived)
+        and redirects (302) to Appwrite's provider redirect, whose success and
+        failure addresses are Gable's callback and nothing else. A method
+        outside the three is a 404, one the dealer's allowlist does not hold
+        a 403, and the provider methods are closed with a 503 until a
+        supported Appwrite version has been read. Limited per client address.
+      security: []
+      parameters:
+        - name: method
+          in: path
+          required: true
+          schema:
+            type: string
+            enum: [google, microsoft, oidc]
+      responses:
+        "302":
+          description: To Appwrite's provider redirect; the state cookie is set.
+          headers:
+            Set-Cookie:
+              description: The gable_signin_state cookie (HttpOnly, Secure, SameSite=Lax, Path=/api, no Domain).
+              schema:
+                type: string
+            Location:
+              schema:
+                type: string
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "429":
+          description: Too many attempts; retry after the Retry-After seconds.
+          headers:
+            Retry-After:
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WireError"
+        "503":
+          $ref: "#/components/responses/WireUnavailable"
   /api/v1/auth/methods:
     get:
       operationId: authMethodsGet
@@ -101,9 +157,10 @@ paths:
       description: >-
         Replaces the whole allowlist. The order of the request's methods is
         the order the door renders them. The list must hold at least one
-        method, every code one of the six, no code twice, and the oidc fields
-        (issuer URL, client id, display label) belong to the oidc method
-        alone and are required on it; the table never stores a client secret.
+        method, every code one of the six, no code twice, and the oidc display
+        label belongs to the oidc method alone. The issuer URL and client id
+        are retired (the issuer is configured in Appwrite) and refused on every
+        method; the table never stores a client secret.
         The write is audited with the before and after in one transaction.
         Role gated admin and owner.
       security:
@@ -155,10 +212,10 @@ components:
             the start route for every other.
         issuer_url:
           type: [string, "null"]
-          description: The oidc issuer URL, null for every other method.
+          description: Retired (the issuer is configured in Appwrite); always null.
         client_id:
           type: [string, "null"]
-          description: The oidc client id, null for every other method.
+          description: Retired (the issuer is configured in Appwrite); always null.
     AuthConfig:
       type: object
       required: [auth_mode, dealer_name, dealer_mark_url, methods]
@@ -209,10 +266,10 @@ components:
                 enum: [email_password, passkey, magic_link, google, microsoft, oidc]
               oidc_issuer_url:
                 type: string
-                description: The https issuer URL; required on the oidc method, refused on any other.
+                description: Retired; refused on every method (the issuer is configured in Appwrite).
               oidc_client_id:
                 type: string
-                description: The client id; required on the oidc method, refused on any other.
+                description: Retired; refused on every method.
               oidc_label:
                 type: string
                 description: The display label; optional on the oidc method, refused on any other.

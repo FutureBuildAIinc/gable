@@ -249,7 +249,7 @@ func TestConfigBeforeSignIn(t *testing.T) {
 	// An admin replacement sets the order the door renders; the config
 	// answers in that order, exactly.
 	put := f.do("PUT", "/api/v1/auth/methods",
-		`{"methods":[{"method":"google"},{"method":"email_password"},{"method":"oidc","oidc_issuer_url":"https://id.example.com","oidc_client_id":"gable","oidc_label":"Dealer SSO"}]}`)
+		`{"methods":[{"method":"google"},{"method":"email_password"},{"method":"oidc","oidc_label":"Dealer SSO"}]}`)
 	if put.status != http.StatusOK {
 		t.Fatalf("the replacement answered %d: %v", put.status, put.body)
 	}
@@ -263,8 +263,8 @@ func TestConfigBeforeSignIn(t *testing.T) {
 		t.Fatalf("the config order = %v, want the stored order", order)
 	}
 	oidc := methods[2].(map[string]any)
-	if oidc["issuer_url"] != "https://id.example.com" || oidc["client_id"] != "gable" || oidc["label"] != "Dealer SSO" {
-		t.Errorf("the oidc view = %v, want the issuer, client id and label carried", oidc)
+	if oidc["issuer_url"] != nil || oidc["client_id"] != nil || oidc["label"] != "Dealer SSO" {
+		t.Errorf("the oidc view = %v, want the label alone (the issuer is configured in Appwrite)", oidc)
 	}
 
 	// A tenant created before the allowlist existed signs in by its current
@@ -303,8 +303,8 @@ func TestPutValidation(t *testing.T) {
 	if got := f.do("PUT", "/api/v1/auth/methods", `{"methods":[]}`); got.status != http.StatusBadRequest {
 		t.Errorf("an empty list answered %d, want 400", got.status)
 	}
-	if got := f.do("PUT", "/api/v1/auth/methods", `{"methods":[{"method":"oidc","oidc_issuer_url":"http://insecure.example.com","oidc_client_id":"g"}]}`); got.status != http.StatusBadRequest {
-		t.Errorf("a non https issuer answered %d, want 400", got.status)
+	if got := f.do("PUT", "/api/v1/auth/methods", `{"methods":[{"method":"oidc","oidc_issuer_url":"https://id.example.com","oidc_client_id":"g"}]}`); got.status != http.StatusBadRequest {
+		t.Errorf("a stored issuer answered %d, want 400 (retired: Appwrite holds it)", got.status)
 	}
 	if got := f.do("PUT", "/api/v1/auth/methods", `{"methods":[{"method":"google","oidc_client_id":"g"}]}`); got.status != http.StatusBadRequest {
 		t.Errorf("oidc fields on another method answered %d, want 400", got.status)
@@ -319,7 +319,7 @@ func TestPutValidation(t *testing.T) {
 // says not available yet for an allowed one the server has not built.
 func TestStartRoute(t *testing.T) {
 	f := newFixture(t, 0)
-	put := f.do("PUT", "/api/v1/auth/methods", `{"methods":[{"method":"email_password"},{"method":"google"}]}`)
+	put := f.do("PUT", "/api/v1/auth/methods", `{"methods":[{"method":"email_password"},{"method":"google"},{"method":"magic_link"}]}`)
 	if put.status != http.StatusOK {
 		t.Fatalf("the replacement answered %d", put.status)
 	}
@@ -327,9 +327,14 @@ func TestStartRoute(t *testing.T) {
 	if got := f.do("POST", "/api/v1/auth/start/passkey", ""); got.status != http.StatusForbidden {
 		t.Errorf("a disallowed method answered %d, want 403", got.status)
 	}
-	got := f.do("POST", "/api/v1/auth/start/google", "")
+	if got := f.do("POST", "/api/v1/auth/start/google", ""); got.status != http.StatusMethodNotAllowed {
+		t.Errorf("a provider redirect method posted to answered %d, want 405 (it starts by GET)", got.status)
+	}
+	// With no staff session layer behind it, the magic link's POST reaches
+	// the plain refusal.
+	got := f.do("POST", "/api/v1/auth/start/magic_link", "")
 	if got.status != http.StatusNotImplemented {
-		t.Errorf("an allowed but unbuilt method answered %d, want 501", got.status)
+		t.Errorf("an allowed but unserved method answered %d, want 501", got.status)
 	}
 	errVal := got.body["error"].(map[string]any)
 	if errVal["code"] != "not_implemented" || !strings.Contains(errVal["message"].(string), "not available on this server yet") {
@@ -494,7 +499,7 @@ func TestReplaceConcurrency(t *testing.T) {
 		{{Method: "google"}},
 		{{Method: "microsoft"}},
 		{{Method: "magic_link"}, {Method: "passkey"}},
-		{{Method: "email_password"}, {Method: "oidc", OIDCIssuerURL: "https://id.example.com", OIDCClientID: "gable", OIDCLabel: "Dealer SSO"}},
+		{{Method: "email_password"}, {Method: "oidc", OIDCLabel: "Dealer SSO"}},
 	}
 	wantOneOf := [][]string{
 		{"google"},

@@ -109,6 +109,8 @@ var publicAPIPaths = []string{
 	"/api/v1/a2a/",
 	"/api/v1/auth/config",
 	"/api/v1/auth/start/",
+	// The callback every redirect method ends at (ADR 0012 section 4).
+	"/api/v1/auth/callback",
 	// The staff session routes read the cookie themselves (ADR 0012).
 	"/api/v1/auth/signin",
 	"/api/v1/auth/refresh",
@@ -257,7 +259,7 @@ func Run() {
 			ProjectID: cfg.AppwriteProjectID, TeamID: cfg.AppwriteTeamID,
 			IdleLimit: cfg.StaffSessionIdle, AbsoluteLimit: cfg.StaffSessionAbsolute,
 			RefreshAfter: cfg.StaffSessionRefresh, SnapshotMaxAge: cfg.StaffSessionSnapshot,
-		}, logger).WithFloorWatch(awClient, time.Minute)
+		}, logger).WithFloorWatch(awClient, time.Minute).WithRedirects(awClient, cfg.PublicURL)
 		staffLinks = staffauth.NewLinks(db, awClient, auditLog)
 		go staffSvc.RunSweeper(sweepCtx, time.Hour)
 		staffHandler = staffauth.NewHandler(staffSvc, staffauth.HandlerConfig{Origin: cfg.PublicURL, Trusted: cfg.TrustedProxies})
@@ -752,6 +754,7 @@ func Run() {
 	}
 	if staffHandler != nil {
 		staffHandler.WithEmailPasswordGuard(func(ctx context.Context) bool { return signinSvc.Allowed(ctx, signinmethods.MethodEmailPassword) })
+		staffHandler.WithAllowed(signinSvc.Allowed)
 		staffHandler.RegisterRoutes(mux)
 		staffLinks.RegisterRoutes(mux, middleware.RequireRole("admin", "owner"))
 	}
@@ -863,7 +866,7 @@ func Run() {
 	// configuration (an unset value wires no device, so production runs no
 	// simulator). A real terminal provider wires here beside it.
 	terminalLedger := payment.NewTerminalLedger(db).WithAuditLog(auditLog)
-	if sim := payment.NewSimulatedTerminalFromEnv(cfg.POSTerminalSimulator, terminalLedger); sim != nil {
+	if sim := payment.NewSimulatedTerminalFromEnv(cfg.POSTerminalSimulator, payment.NewSimulatedSurchargeSink(terminalLedger)); sim != nil {
 		posSvc.WithTerminal(sim, terminalLedger)
 		logger.Warn("the simulated card terminal is wired: a demo stack only, never a production configuration",
 			"script", cfg.POSTerminalSimulator)

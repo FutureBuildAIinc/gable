@@ -195,8 +195,10 @@ type salePlan struct {
 	invoice *uuid.UUID
 }
 
-// planSaleLeg reads the sale under its lock and settles the plan.
-func (s *Service) planSaleLeg(ctx context.Context, sale *Sale, amountCents int64) (salePlan, error) {
+// planSaleLeg reads the sale under its lock and settles the plan. The card
+// fee the leg carries (CP-15) goes with the money: booked with the applied
+// part, or back to the card with a whole reversal.
+func (s *Service) planSaleLeg(ctx context.Context, sale *Sale, amountCents, feeCents int64) (salePlan, error) {
 	switch sale.Status {
 	case StatusOpen, StatusHeld:
 		return salePlan{record: true}, nil
@@ -214,10 +216,13 @@ func (s *Service) planSaleLeg(ctx context.Context, sale *Sale, amountCents int64
 			if apply > open {
 				apply = open
 			}
+			if apply == 0 {
+				return salePlan{reverse: amountCents + feeCents}, nil
+			}
 			return salePlan{applyC: apply, reverse: amountCents - apply, invoice: sale.InvoiceID}, nil
 		}
 	}
-	return salePlan{reverse: amountCents}, nil
+	return salePlan{reverse: amountCents + feeCents}, nil
 }
 
 // resolveSaleAuthorized settles an authorized sale leg:
@@ -280,7 +285,7 @@ func (s *Service) resolveSaleAuthorized(ctx context.Context, item *payment.Termi
 		if err != nil {
 			return err
 		}
-		plan, err = s.planSaleLeg(ctx, sale, intent.AmountCents)
+		plan, err = s.planSaleLeg(ctx, sale, intent.AmountCents, intent.AnswerFeeCents)
 		if err != nil {
 			return err
 		}
@@ -444,7 +449,8 @@ func (s *Service) settleSaleLeg(ctx context.Context, sale *Sale, intent *payment
 			Method: "CARD", AmountCents: plan.applyC, Reference: ref, ReceivedOn: date,
 			Actor: entry.UserID, Card: &account.CardFacts{GatewayTxID: ref, GatewayStatus: "SETTLED",
 				Last4: intent.AnswerLast4, Brand: intent.AnswerBrand, AuthCode: intent.AnswerAuthCode},
-			Applications: applications,
+			SurchargeCents: intent.AnswerFeeCents,
+			Applications:   applications,
 		})
 		if err != nil {
 			return err
@@ -453,6 +459,10 @@ func (s *Service) settleSaleLeg(ctx context.Context, sale *Sale, intent *payment
 		tender := &Tender{SaleID: sale.ID, Method: TenderCard, AmountCents: httpx.Cents(plan.applyC), PaymentID: &payID}
 		g, a, l, b := ref, intent.AnswerAuthCode, intent.AnswerLast4, intent.AnswerBrand
 		tender.GatewayTxID, tender.AuthCode, tender.CardLast4, tender.CardBrand = &g, &a, &l, &b
+		tender.SurchargeCents = httpx.Cents(intent.AnswerFeeCents)
+		if err := s.flagUnexpectedSurcharge(ctx, sale.BranchID, sale.ID, intent.AnswerFeeCents, entry.UserID); err != nil {
+			return err
+		}
 		if err := s.repo.AddTender(ctx, tender); err != nil {
 			return err
 		}

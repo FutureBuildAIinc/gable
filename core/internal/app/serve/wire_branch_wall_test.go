@@ -2000,6 +2000,40 @@ func TestOfflinePolicyRoutesUnderServeGuard(t *testing.T) {
 	}
 }
 
+// TestOfflineDeviceAndSnapshotRoutesUnderServeGuard: the device enrolment
+// and revocation mount on the policy write's guard (admin and owner), the
+// device read on the policy read's (adding finance), and the snapshot on the
+// counter's (admin, owner and cashier), through the real wall wiring (CP-13
+// O2). A role the guard admits reaches the handler (a body or register it
+// refuses on its own, 400 or 404); one it does not is 403 before it.
+func TestOfflineDeviceAndSnapshotRoutesUnderServeGuard(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	db := testutil.RequireDB(t)
+	f := newWallFixture(t, db, true)
+	A := f.branchA.String()
+	dev := "/api/v1/pos/offline/registers/REG-NO-SUCH/device"
+	snap := "/api/v1/pos/offline/snapshot?register_id=REG-NO-SUCH&high_seq=0"
+	for _, c := range []struct {
+		name, method, path, body, role, sub, header string
+		want                                        int
+	}{
+		{"admin reaches the enrolment", "POST", dev, `{}`, "admin", "boss", "", http.StatusBadRequest},
+		{"owner reaches the revocation", "POST", dev + "/revoke", `{}`, "owner", "boss", "", http.StatusBadRequest},
+		{"finance refused the enrolment", "POST", dev, `{}`, "finance", "u-a", A, http.StatusForbidden},
+		{"cashier refused the enrolment", "POST", dev, `{}`, "cashier", "u-a", A, http.StatusForbidden},
+		{"cashier refused the revocation", "POST", dev + "/revoke", `{}`, "cashier", "u-a", A, http.StatusForbidden},
+		{"admin reads the device", "GET", dev, "", "admin", "boss", "", http.StatusNotFound},
+		{"finance reads the device", "GET", dev, "", "finance", "u-a", A, http.StatusNotFound},
+		{"cashier refused the device read", "GET", dev, "", "cashier", "u-a", A, http.StatusForbidden},
+		{"cashier reaches the snapshot", "GET", snap, "", "cashier", "u-a", A, http.StatusNotFound},
+		{"finance refused the snapshot", "GET", snap, "", "finance", "u-a", A, http.StatusForbidden},
+	} {
+		if got := f.call(t, c.method, c.path, c.body, c.role, c.sub, c.header); got != c.want {
+			t.Errorf("%s: got %d, want %d", c.name, got, c.want)
+		}
+	}
+}
+
 // TestBranchWall_LargeCashPreviewHoldsTheSale: the preview reads a sale by id
 // from the body, so the wall holds that sale to the caller's branches. A
 // cashier granted only A previews A's sale and finds B's a missing one; a

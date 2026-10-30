@@ -8,6 +8,7 @@ import { ShieldCheck } from 'lucide';
 import { apiErrorMessage, fieldErrorMap } from '../../services/apiError';
 import { posService, dollarsToCents } from '../../services/POSService';
 import type { PosSettings, ReturnReason } from '../../types/pos.ts';
+import { CARD_FEE_DISCLOSURE } from '../pos/cardFee.ts';
 import '../../components/ui/gable-select.ts';
 
 interface DraftTier {
@@ -34,7 +35,16 @@ interface Draft {
     tintTiers: DraftTier[];
     /** The tinted no return policy: a tinted can is not taken back. */
     tintedNoReturn: boolean;
+    /** True when the settings name a branch whose card fee this form sets (CP-15). */
+    cardFeeKnown: boolean;
+    /** Charge a card fee: the branch's switch, off by default. */
+    cardFeeOn: boolean;
+    /** The card fee rate in percent text, 0 to 3. */
+    cardFeeRate: string;
 }
+
+/** The card brands' cap on a surcharge, in basis points. */
+const MAX_CARD_FEE_BPS = 300;
 
 const FIELD_CLASS =
     'w-full bg-deep-space border border-white/10 rounded px-3 py-2 text-white text-sm placeholder-slate-500 focus:outline-none focus:border-gable-green';
@@ -65,7 +75,7 @@ export function percentToBps(text: string): number | null {
 }
 
 /** The draft as rules on the wire, or a field error. */
-function draftRules(d: Draft, reasons: ReturnReason[]): { ok: true; rules: PosSettings['rules'] } | { ok: false; message: string } {
+function draftRules(d: Draft, reasons: ReturnReason[], cardFeeBranch: string): { ok: true; rules: PosSettings['rules'] } | { ok: false; message: string } {
     let check_limit_cents: number | null = null;
     if (d.limit.trim() !== '') {
         const cents = dollarsToCents(d.limit.trim());
@@ -106,6 +116,16 @@ function draftRules(d: Draft, reasons: ReturnReason[]): { ok: true; rules: PosSe
         }
         tiers.push({ base_tier: t.baseTier, min_colorant_oz: floor, charge_cents: cents });
     }
+    // The card fee (CP-15) of the branch the settings name: omitted when none
+    // is known, so a write never invents a branch's rule.
+    let card_surcharge: PosSettings['rules']['card_surcharge'];
+    if (d.cardFeeKnown) {
+        const bps = percentToBps(d.cardFeeRate);
+        if (bps === null || bps > MAX_CARD_FEE_BPS) {
+            return { ok: false, message: 'The card fee must be a percent from 0 to 3, like 3 or 2.5: the card brands cap it at 3 percent' };
+        }
+        card_surcharge = { branch_id: cardFeeBranch, enabled: d.cardFeeOn, rate_bps: bps };
+    }
     return {
         ok: true,
         rules: {
@@ -114,6 +134,7 @@ function draftRules(d: Draft, reasons: ReturnReason[]): { ok: true; rules: PosSe
             restocking_fees,
             tint_charge: { flat_cents: flat, tiers },
             tinted_no_return: d.tintedNoReturn,
+            ...(card_surcharge ? { card_surcharge } : {}),
         },
     };
 }
@@ -157,6 +178,9 @@ export class GableCounterRules extends LitElement {
                 charge: dollarsText(t.charge_cents),
             })),
             tintedNoReturn: s.rules.tinted_no_return ?? false,
+            cardFeeKnown: Boolean(s.rules.card_surcharge),
+            cardFeeOn: s.rules.card_surcharge?.enabled ?? false,
+            cardFeeRate: bpsToPercent(s.rules.card_surcharge?.rate_bps ?? 0),
         };
     }
 
@@ -206,7 +230,7 @@ export class GableCounterRules extends LitElement {
         this._error = null;
         this._success = null;
         this._fieldErrors = {};
-        const rules = draftRules(d, this._reasons);
+        const rules = draftRules(d, this._reasons, this._settings.rules.card_surcharge?.branch_id ?? '');
         if (!rules.ok) {
             this._error = rules.message;
             return;
@@ -377,6 +401,30 @@ export class GableCounterRules extends LitElement {
                             never back on the shelf. A mis tint (the store mixed the wrong colour) is always returned.
                         </span>
                     </fieldset>
+
+                    ${d.cardFeeKnown ? html`
+                    <fieldset class="space-y-3" data-testid="counter-rules-card-fee">
+                        <legend class="text-xs uppercase tracking-wider text-slate-400">Card fee (this branch)</legend>
+                        <label class="flex items-center gap-2 text-sm text-slate-200" data-testid="counter-rules-card-fee-switch">
+                            <input type="checkbox" name="card-fee-on" .checked=${d.cardFeeOn}
+                                @change=${(e: Event) => { this._draft = { ...d, cardFeeOn: (e.target as HTMLInputElement).checked }; }} />
+                            Charge a card fee
+                        </label>
+                        <label class="block space-y-1">
+                            <span class="text-xs uppercase tracking-wider text-slate-400">Rate (percent, 0 to 3)</span>
+                            <input type="text" inputmode="decimal" name="card-fee-rate" data-testid="counter-rules-card-fee-rate"
+                                placeholder="0" .value=${d.cardFeeRate} ?disabled=${!d.cardFeeOn}
+                                @input=${(e: Event) => { this._draft = { ...d, cardFeeRate: (e.target as HTMLInputElement).value }; }}
+                                class="${FIELD_CLASS} font-mono max-w-28 disabled:opacity-50" />
+                            ${this._fieldErrors['rules.card_surcharge.rate_bps']
+                                ? html`<span class="text-xs text-red-400">${this._fieldErrors['rules.card_surcharge.rate_bps']}</span>` : nothing}
+                        </label>
+                        <p class="text-xs text-slate-500" data-testid="counter-rules-card-fee-disclosure">${CARD_FEE_DISCLOSURE}</p>
+                        <p class="text-xs text-slate-500">
+                            This records your intent and shows the clerk and the customer the notice. The card processor's enrolment
+                            decides the charge; Gable books the fee the card machine reports. Off until you turn it on.
+                        </p>
+                    </fieldset>` : nothing}
 
                     <div class="flex justify-end">
                         <button type="button" data-testid="counter-rules-save" @click=${() => void this._save()} ?disabled=${this._saving}
