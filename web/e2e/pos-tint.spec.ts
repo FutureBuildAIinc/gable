@@ -4,7 +4,7 @@
 import { test, expect, type APIRequestContext, type Page } from './font-guard';
 import path from 'path';
 import fs from 'fs';
-import { pickOptionByValue } from './app-controls';
+import { pickOption, pickOptionByValue } from './app-controls';
 import { openCounter } from './pos-till';
 
 /**
@@ -220,8 +220,8 @@ test('the tint catalogue screen links a base and a tinted sale rings', async ({ 
   // Before the link the base answers no product, and the screen says so.
   await page.goto('/admin/tint-catalogue');
   await expect(page.getByRole('heading', { name: 'Tint catalogue' })).toBeVisible();
-  await page.getByTestId('tint-system-pick').getByRole('button').first().click();
-  await page.getByRole('option', { name: new RegExp(`CAT-${run}`) }).click();
+  await pickOption(page.getByTestId('tint-system-pick'), `Catalogue walk ${run} (CAT-${run})`);
+  await expect(page.getByTestId('tint-system-pick')).toContainText(`CAT-${run}`);
   await page.getByTestId('tint-new-base-code').fill('DEEP');
   await page.getByTestId('tint-new-base-name').fill('Deep base');
   await page.getByTestId('tint-add-base').click();
@@ -238,13 +238,10 @@ test('the tint catalogue screen links a base and a tinted sale rings', async ({ 
   await expect(page.getByTestId('tint-color-list')).toContainText('Essex Green');
 
   // The formula: Essex Green on the deep base, one colorant.
-  await page.getByTestId('tint-formula-color').getByRole('button').first().click();
-  await page.getByRole('option', { name: /Essex Green/ }).click();
-  await page.getByTestId('tint-formula-base').getByRole('button').first().click();
-  await page.getByRole('option', { name: /Deep base/ }).click();
+  await pickOption(page.getByTestId('tint-formula-color'), 'Essex Green');
+  await pickOption(page.getByTestId('tint-formula-base'), 'Deep base (DEEP)');
   await page.getByTestId('tint-formula-add-colorant').click();
-  await page.getByTestId('tint-formula-colorant-0').getByRole('button').first().click();
-  await page.getByRole('option', { name: /Lamp Black/ }).click();
+  await pickOption(page.getByTestId('tint-formula-colorant-0'), 'Lamp Black');
   await page.getByTestId('tint-formula-whole-0').fill('1');
   await page.getByTestId('tint-formula-coarse-0').fill('12');
   await page.getByTestId('tint-add-formula').click();

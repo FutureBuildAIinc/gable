@@ -128,7 +128,7 @@ describe('Tint catalogue screen', () => {
     await click(el, '[data-testid="tint-add-formula"]')
     const post = calls.find((c) => c.method === 'POST' && c.url.endsWith('/formulas'))
     expect(post?.body).toMatchObject({
-      color_id: 'c1', base_id: 'b1', container_size_code: 'GAL', container_volume_oz: 128,
+      color_id: 'c1', base_id: 'b1', container_size_code: 'GAL', container_volume_oz: 128, source: 'manual',
       components: [{ colorant_id: 'k1', whole_oz: 1, increments_coarse: 12, increments_fine: 0, unit_denominator: 384 }],
     })
   })

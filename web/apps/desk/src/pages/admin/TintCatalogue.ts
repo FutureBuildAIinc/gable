@@ -203,7 +203,7 @@ export class GableTintCatalogue extends LitElement {
         await this._run('Formula added', async () => {
             await tintService.createFormula({
                 color_id: f.colorId, base_id: f.baseId, container_size_code: f.size.trim().toUpperCase(),
-                container_volume_oz: Number(f.volume), source: 'dealer',
+                container_volume_oz: Number(f.volume), source: 'manual',
                 components: f.components.map((c) => ({
                     colorant_id: c.colorantId, whole_oz: Number(c.whole), increments_coarse: Number(c.coarse),
                     increments_fine: Number(c.fine), unit_denominator: denominator,
@@ -251,7 +251,7 @@ export class GableTintCatalogue extends LitElement {
                             ?disabled=${this._busy} @click=${() => this._link(b, null)}>Unlink</button>` : nothing}
                 </div>
                 <div class="space-y-1">
-                    <input type="text" placeholder="Find the base paint product by SKU or name" data-testid="tint-base-find-${b.code}"
+                    <input type="text" placeholder="Find the product by SKU or name" data-testid="tint-base-find-${b.code}"
                         .value=${s.text} @input=${(e: Event) => this._find(b, (e.target as HTMLInputElement).value)}
                         class=${FIELD_CLASS} />
                     ${s.found.length > 0 ? html`
