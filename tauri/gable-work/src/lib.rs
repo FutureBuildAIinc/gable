@@ -661,4 +661,40 @@ mod tests {
             assert!(!production.contains(banned), "lib.rs contains {banned}");
         }
     }
+
+    #[test]
+    fn run_builds_its_token_state_only_through_token_state() {
+        // A state built straight from TokenState::build names no server, so
+        // the shell could neither sign in nor rotate its token (PR 247's read,
+        // P3). Only token_state() may build one, and run() must call it.
+        let src = include_str!("lib.rs");
+        let production = src.split("#[cfg(test)]").next().unwrap();
+        let helper_start = production
+            .find("fn token_state(")
+            .expect("lib.rs defines token_state()");
+        let helper_end = helper_start
+            + production[helper_start..]
+                .find("\n}\n")
+                .expect("token_state() closes");
+        let builds: Vec<usize> = production
+            .match_indices("TokenState::build(")
+            .map(|(at, _)| at)
+            .collect();
+        assert!(!builds.is_empty(), "token_state() builds the state");
+        for at in builds {
+            assert!(
+                (helper_start..helper_end).contains(&at),
+                "TokenState::build( outside token_state() in lib.rs"
+            );
+        }
+
+        let run_start = production
+            .find("pub fn run()")
+            .expect("lib.rs defines run()");
+        let run_end = run_start + production[run_start..].find("\n}\n").expect("run() closes");
+        assert!(
+            production[run_start..run_end].contains("token_state("),
+            "run() builds its state through token_state()"
+        );
+    }
 }
