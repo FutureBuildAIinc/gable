@@ -28,6 +28,7 @@ use tauri::webview::PageLoadEvent;
 use tauri::{AppHandle, Manager, Url, WebviewUrl, WebviewWindowBuilder};
 use tauri_plugin_deep_link::DeepLinkExt;
 
+use gable_shell_core::fence::BadOrigin;
 use gable_shell_core::profiles;
 use gable_shell_core::shell::{self, TokenState};
 use gable_shell_core::signin::DeepLinkSignIn;
@@ -241,11 +242,17 @@ fn open_deep_link(app: &AppHandle, raw: &str) {
     let _ = window.set_focus();
 }
 
+/// The desk shell's token state: the platform keychain, and the Gable server
+/// when a URL is set.
+fn token_state(override_url: Option<&Url>) -> Result<TokenState, BadOrigin> {
+    TokenState::for_profile(profiles::desk(), override_url)
+}
+
 pub fn run() {
     let smoke = smoke_mode();
     let override_url = configured_url();
-    let token_state = TokenState::for_profile(profiles::desk(), override_url.as_ref())
-        .expect("the app's own origins build a fence");
+    let token_state =
+        token_state(override_url.as_ref()).expect("the app's own origins build a fence");
 
     tauri::Builder::default()
         .manage(token_state)
@@ -333,6 +340,18 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // RULE (PR 246 read, finding P1): with a Gable URL set, the shell's token
+    // state holds a sign in client; a shell that drops the server cannot put
+    // a token in its keychain or rotate the one it holds.
+    #[test]
+    fn the_state_has_a_client_when_a_url_is_set() {
+        let url = Url::parse("https://gable.yard.internal:8443/").unwrap();
+        let state = token_state(Some(&url)).expect("a fence over the bundled origins and the url");
+        assert!(state.client().is_some(), "a url names the server");
+        let bare = token_state(None).expect("a fence over the bundled origins");
+        assert!(bare.client().is_none(), "no url, no server");
+    }
 
     #[test]
     fn a_record_link_opens_its_route() {

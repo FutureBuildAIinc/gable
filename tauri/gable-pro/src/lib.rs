@@ -21,9 +21,10 @@
 //! needs for the API's Authorization header, and the refresh token never
 //! crosses the IPC at all. Nothing here logs or prints.
 
+use gable_shell_core::fence::BadOrigin;
 use gable_shell_core::profiles;
 use gable_shell_core::shell::{self, TokenState};
-use tauri::{WebviewUrl, WebviewWindowBuilder};
+use tauri::{Url, WebviewUrl, WebviewWindowBuilder};
 
 /// Environment variable naming the Gable to load instead of the bundle.
 pub const URL_VAR: &str = "GABLE_PRO_URL";
@@ -116,11 +117,16 @@ pub mod commands {
     }
 }
 
+/// The pro shell's token state: the platform keychain, and the Gable server
+/// when a URL is set.
+fn token_state(override_url: Option<&Url>) -> Result<TokenState, BadOrigin> {
+    TokenState::for_profile(profiles::pro(), override_url)
+}
+
 pub fn run() {
     let profile = profiles::pro();
     let override_url = shell::configured_url(URL_VAR);
-    let state = TokenState::for_profile(profile, override_url.as_ref())
-        .expect("the app's own origins build a fence");
+    let state = token_state(override_url.as_ref()).expect("the app's own origins build a fence");
 
     tauri::Builder::default()
         .manage(state)
@@ -161,6 +167,19 @@ mod tests {
     const REFRESH: &str = "refresh-sentinel";
     const OWN: &str = "http://tauri.localhost/index.html";
     const FOREIGN: &str = "http://evil.example/index.html";
+
+    // RULE (PR 246 read, finding P1): with a Gable URL set, the shell's token
+    // state holds a sign in client; a shell that drops the server cannot put
+    // a token in its keychain or rotate the one it holds.
+    #[test]
+    fn the_state_has_a_client_when_a_url_is_set() {
+        let url = super::Url::parse("https://gable.yard.internal:8443/").unwrap();
+        let state =
+            super::token_state(Some(&url)).expect("a fence over the bundled origins and the url");
+        assert!(state.client().is_some(), "a url names the server");
+        let bare = super::token_state(None).expect("a fence over the bundled origins");
+        assert!(bare.client().is_none(), "no url, no server");
+    }
 
     fn pair() -> TokenSet {
         TokenSet::new(ACCESS.to_string(), REFRESH.to_string()).expect("a valid pair")

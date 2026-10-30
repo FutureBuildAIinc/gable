@@ -126,6 +126,7 @@ const staticZones: AppZone[] = [
     { label: 'Apps', path: '/admin/apps' },
     { label: 'Market Indices', path: '/admin/market-indices' },
     { label: 'Counter Rules', path: '/admin/counter-rules' },
+    { label: 'Offline Selling', path: '/admin/offline-counter' },
   ] },
   { prefix: '/sales', key: 'quote', label: 'Quotes', icon: FileText },
 ];

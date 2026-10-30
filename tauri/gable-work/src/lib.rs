@@ -24,12 +24,13 @@
 use std::sync::Arc;
 
 use gable_shell_core::custody;
-use gable_shell_core::fence::OriginFence;
+use gable_shell_core::fence::{BadOrigin, OriginFence};
 use gable_shell_core::offline::OfflineCounter;
 use gable_shell_core::profiles;
 use gable_shell_core::shell::{self, TokenState};
+use gable_shell_core::signin::UreqTransport;
 use gable_shell_core::tokens::TokenStore;
-use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
+use tauri::{Manager, Url, WebviewUrl, WebviewWindowBuilder};
 
 /// Fallback environment variable naming the Gable to load before the register
 /// is enrolled; once enrolled, the keychain's enrolled `gable_url` replaces it
@@ -251,16 +252,27 @@ pub mod commands {
     }
 }
 
+/// The work shell's token state over the shared `custody` (the offline
+/// counter reads the same keychain entry). Names the Gable server when a URL
+/// is set, so the shell can sign in and rotate the token it holds.
+fn token_state(
+    custody: Arc<dyn custody::Custody>,
+    profile: &'static profiles::Profile,
+    override_url: Option<&Url>,
+) -> Result<TokenState, BadOrigin> {
+    let state = TokenState::build(TokenStore::new(custody), profile, override_url)?;
+    Ok(match override_url {
+        Some(url) => state.with_server(url, Arc::new(UreqTransport::new())),
+        None => state,
+    })
+}
+
 pub fn run() {
     let profile = profiles::work();
     let custody: Arc<dyn custody::Custody> = Arc::from(custody::platform_custody());
     let override_url = shell::enrolled_or_configured_url(&*custody, profile, URL_VAR);
-    let state = TokenState::build(
-        TokenStore::new(custody.clone()),
-        profile,
-        override_url.as_ref(),
-    )
-    .expect("the app's own origins build a fence");
+    let state = token_state(custody.clone(), profile, override_url.as_ref())
+        .expect("the app's own origins build a fence");
 
     tauri::Builder::default()
         .manage(state)
@@ -341,6 +353,21 @@ mod tests {
         let state = TokenState::build(store.clone(), profiles::work(), None)
             .expect("a fence over the bundled origins");
         (state, store, custody)
+    }
+
+    // RULE (PR 246 read, finding P1): the work shell's state holds a sign in
+    // client whenever a Gable URL is set, so the token it holds can be
+    // rotated and the page can start the shell's sign in; with no URL there is
+    // no server to name and no client.
+    #[test]
+    fn the_work_shell_state_has_a_client_exactly_when_a_url_is_set() {
+        let url = super::Url::parse("https://gable.yard.internal:8443/").unwrap();
+        let with = super::token_state(Arc::new(MemoryCustody::new()), profiles::work(), Some(&url))
+            .expect("a fence over the bundled origins and the url");
+        assert!(with.client().is_some(), "a url names the server");
+        let without = super::token_state(Arc::new(MemoryCustody::new()), profiles::work(), None)
+            .expect("a fence over the bundled origins");
+        assert!(without.client().is_none(), "no url, no server");
     }
 
     fn profile_id() -> &'static str {
@@ -533,6 +560,25 @@ mod tests {
             "core:default",
         ] {
             assert!(!cap_json.contains(banned), "{banned} must not be granted");
+        }
+    }
+
+    // RULE (PR 246 read, finding P1): the page the window loads from the
+    // enrolled Gable can start the shell's sign in and rotate its token, so
+    // the runtime capability grants those two commands by name.
+    #[test]
+    fn the_runtime_capability_grants_begin_sign_in_and_refresh_tokens() {
+        let url = super::Url::parse("https://gable.yard.internal:8443/").unwrap();
+        let cap: serde_json::Value =
+            serde_json::from_str(&shell::work_remote_capability_json(&url)).unwrap();
+        let perms: Vec<&str> = cap["permissions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_str().unwrap())
+            .collect();
+        for wanted in ["allow-begin-sign-in", "allow-refresh-tokens"] {
+            assert!(perms.contains(&wanted), "{wanted} must be granted");
         }
     }
 
