@@ -20,7 +20,9 @@
 #      every service runs a prebuilt image ref (compose.images.yml);
 #   6. the customer variant (AUTH_MODE unset) passes JWKS_URL and AUTH_ISSUER
 #      to the core service;
-#   7. the recipe has no dev sign in: neither core nor worker takes AUTH_MODE,
+#   7. core receives the four Appwrite settings from the environment (each
+#      one required, so the Appwrite variant cannot start without them);
+#   8. the recipe has no dev sign in: neither core nor worker takes AUTH_MODE,
 #      the web build takes no VITE_AUTH_DEV_MODE, and the web image is the
 #      customer image (no `demo-` tag).
 #
@@ -51,10 +53,12 @@ ok() {
 # The values both recipes require, and the placeholder each one gets while the
 # check runs. The placeholders are obviously not secrets: they are the same
 # word, so nothing here can be mistaken for a credential.
-REQUIRED=(POSTGRES_PASSWORD PAYMENT_VAULT_KEY PORTAL_JWT_SECRET GABLE_PUBLIC_URL CORS_ORIGINS TRUSTED_PROXIES)
+REQUIRED=(POSTGRES_PASSWORD PAYMENT_VAULT_KEY PORTAL_JWT_SECRET GABLE_PUBLIC_URL CORS_ORIGINS TRUSTED_PROXIES
+	APPWRITE_ENDPOINT APPWRITE_PROJECT_ID APPWRITE_TEAM_ID APPWRITE_API_KEY)
 PH_SECRET="placeholder-not-a-real-secret"
 PH_URL="https://demo.example.invalid"
 PH_PROXY="10.0.0.0/8,172.16.0.0/12"
+PH_APPWRITE="https://appwrite.example.invalid/v1"
 PH_JWKS="https://idp.example.invalid/.well-known/jwks.json"
 PH_ISSUER="https://idp.example.invalid"
 # The images file only: the commit sha the images were built for.
@@ -81,7 +85,9 @@ write_env_file() {
 	: >"$out"
 	for pair in "POSTGRES_PASSWORD=$PH_SECRET" "PAYMENT_VAULT_KEY=$PH_SECRET" \
 		"PORTAL_JWT_SECRET=$PH_SECRET" "GABLE_PUBLIC_URL=$PH_URL" \
-		"CORS_ORIGINS=$PH_URL" "TRUSTED_PROXIES=$PH_PROXY" "$@"; do
+		"CORS_ORIGINS=$PH_URL" "TRUSTED_PROXIES=$PH_PROXY" \
+		"APPWRITE_ENDPOINT=$PH_APPWRITE" "APPWRITE_PROJECT_ID=placeholder-project" \
+		"APPWRITE_TEAM_ID=placeholder-team" "APPWRITE_API_KEY=$PH_SECRET" "$@"; do
 		[ "${pair%%=*}" = "$omit" ] && continue
 		printf '%s\n' "$pair" >>"$out"
 	done
@@ -140,12 +146,12 @@ check_recipe() {
 	printf 'JWKS_URL=%s\nAUTH_ISSUER=%s\n' "$PH_JWKS" "$PH_ISSUER" >>"$TMPDIR_CHECK/customer.env"
 	(unset AUTH_MODE; docker compose --env-file "$TMPDIR_CHECK/customer.env" -f "$file" config --format json >"$TMPDIR_CHECK/customer.json")
 
-	python3 - "$TMPDIR_CHECK/config.json" "$TMPDIR_CHECK/customer.json" "$mode" "$PH_JWKS" "$PH_ISSUER" "$PH_TAG" <<'PY'
+	python3 - "$TMPDIR_CHECK/config.json" "$TMPDIR_CHECK/customer.json" "$mode" "$PH_JWKS" "$PH_ISSUER" "$PH_TAG" "$PH_APPWRITE" <<'PY'
 import json
 import os
 import sys
 
-config_path, customer_path, mode, expected_jwks, expected_issuer, expected_tag = sys.argv[1:7]
+config_path, customer_path, mode, expected_jwks, expected_issuer, expected_tag, expected_appwrite_endpoint = sys.argv[1:8]
 with open(config_path, encoding="utf-8") as handle:
     config = json.load(handle)
 with open(customer_path, encoding="utf-8") as handle:
@@ -214,6 +220,19 @@ else:
     if web_tag != expected_tag:
         problems.append("the web tag %s is not the required tag; the demo runs the customer web image" % web_tag)
 
+# The four Appwrite settings reach core, and only core (item 345).
+expected_appwrite = {
+    "APPWRITE_ENDPOINT": expected_appwrite_endpoint,
+    "APPWRITE_PROJECT_ID": "placeholder-project",
+    "APPWRITE_TEAM_ID": "placeholder-team",
+}
+core_env = services.get("core", {}).get("environment", {})
+for key, want in expected_appwrite.items():
+    if core_env.get(key) != want:
+        problems.append("service core does not receive %s" % key)
+if not core_env.get("APPWRITE_API_KEY"):
+    problems.append("service core does not receive APPWRITE_API_KEY")
+
 # No dev sign in in the recipe (item 345): the demo signs in through Appwrite,
 # so nothing takes AUTH_MODE and the web build takes no persona sign in arg.
 for name in ("core", "worker"):
@@ -249,6 +268,7 @@ if mode == "build":
 else:
     print("check-deploy: ok: every made service runs a prebuilt image ref pinned to the required tag")
 print("check-deploy: ok: the customer variant passes JWKS_URL and AUTH_ISSUER to core")
+print("check-deploy: ok: core receives the four Appwrite settings from the environment")
 print("check-deploy: ok: the recipe has no dev sign in (no AUTH_MODE, no persona sign in build, customer web image)")
 PY
 }

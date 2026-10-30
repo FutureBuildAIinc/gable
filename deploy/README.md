@@ -60,7 +60,7 @@ set `GABLE_REPO_ROOT` to `.` only when the platform passes
 
 ### 3. Set the environment values
 
-Six values have no default. The recipe refuses to start without them, and
+Ten values have no default. The recipe refuses to start without them, and
 says which one is missing.
 
 | Value | What it is | How to make it | A secret |
@@ -70,6 +70,10 @@ says which one is missing.
 | `PORTAL_JWT_SECRET` | Signs the portal's session tokens. | `openssl rand -hex 32` | yes |
 | `GABLE_PUBLIC_URL` | The deployment's public address. The core writes it into the links it hands out. | `https://demo.gablelbm.com` | no |
 | `CORS_ORIGINS` | The origins allowed to call the API. The same address on a single domain deployment. | `https://demo.gablelbm.com` | no |
+| `APPWRITE_ENDPOINT` | The Appwrite API address the core signs staff in through (ADR 0012). | `https://<the Appwrite host>/v1` | no |
+| `APPWRITE_PROJECT_ID` | The Appwrite project id. | from the Appwrite console | no |
+| `APPWRITE_TEAM_ID` | The Appwrite staff team id. | from the Appwrite console | no |
+| `APPWRITE_API_KEY` | The Appwrite server key. It goes in the platform's environment from the vault, never into a file. | made in the Appwrite console | yes |
 | `TRUSTED_PROXIES` | The platform's proxy network (and the compose network where `web` fronts `core`), as CIDRs or addresses separated by commas, so each visitor gets their own rate limit budget instead of sharing one budget on the proxy's address. | For example `10.0.0.0/8,172.16.0.0/12` (confirm from the `core` boot log on the first deploy) | no |
 
 The demo adds two more, and both are data, not authentication:
@@ -154,7 +158,8 @@ sign in settings.
 
 | Value | Required in customer variant | What it is |
 |---|---|---|
-| `JWKS_URL` | until the Appwrite settings are set | The identity provider's JWKS endpoint URL, used by the core to verify bearer tokens. |
+| `APPWRITE_ENDPOINT`, `APPWRITE_PROJECT_ID`, `APPWRITE_TEAM_ID`, `APPWRITE_API_KEY` | yes | The Appwrite project and its staff team (see the table above). The recipe refuses to start without them. |
+| `JWKS_URL` | no | Optional: an identity provider's JWKS endpoint URL, used by the core to verify bearer tokens. |
 | `AUTH_ISSUER` | no | When set, the core also checks that each token's `iss` claim matches this issuer string. |
 
 The web image is the customer image, built without the persona sign in. The
@@ -216,7 +221,7 @@ workstation), run the same recipe from images that were built elsewhere: the
 repository's `publish-images` workflow builds them on GitHub and pushes them
 to GHCR under the organization, and `deploy/compose.images.yml` runs them. It
 is the same recipe: the same services, the same environment values (every one
-of the six above, with the same refusals), the same health checks, the same
+of the ten above, with the same refusals), the same health checks, the same
 seed once guard. Only the source of the images changes.
 
 ### 1. Build the images
@@ -281,7 +286,7 @@ bash deploy/check.sh
 ```
 
 It proves that each compose file parses, that it refuses to start when one of
-the six required values is missing (the images file also refuses without
+the ten required values is missing (the images file also refuses without
 `GABLE_IMAGE_TAG`), that no service publishes a host port,
 that every long running service has a health check, that `deploy/compose.yml`
 builds from this repository's own Dockerfiles while `deploy/compose.images.yml`

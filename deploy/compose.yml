@@ -29,7 +29,7 @@
 #
 # THE VALUES THE OPERATOR SETS
 #
-# Six values have no default and the file refuses to start without them:
+# Ten values have no default and the file refuses to start without them:
 #
 #   POSTGRES_PASSWORD   the database password
 #   PAYMENT_VAULT_KEY   64 hex characters, `openssl rand -hex 32`
@@ -37,6 +37,10 @@
 #   GABLE_PUBLIC_URL    the deployment's public address
 #   CORS_ORIGINS        the same address
 #   TRUSTED_PROXIES     the platform's proxy network (CIDRs or addresses)
+#   APPWRITE_ENDPOINT   the Appwrite API address staff sign in through
+#   APPWRITE_PROJECT_ID the Appwrite project id
+#   APPWRITE_TEAM_ID    the Appwrite staff team id
+#   APPWRITE_API_KEY    the Appwrite server key (a secret; from the vault)
 #
 # deploy/README.md says how to make each one and which are secrets.
 #
@@ -130,9 +134,16 @@ services:
     environment:
       # Staff sign in is Appwrite (ADR 0012). The core is fail-closed: with
       # AUTH_MODE unset, which is the only mode this recipe offers, it
-      # requires its Appwrite settings or JWKS_URL (AUTH_ISSUER is optional
-      # and checks the token's iss claim when set). See the note at the top of
+      # requires its Appwrite settings below (JWKS_URL and AUTH_ISSUER are
+      # optional extras; AUTH_ISSUER checks the token's iss claim when set). See the note at the top of
       # this file.
+      # Staff sign in: the Appwrite project the core signs staff in through
+      # (ADR 0012). From the environment only; the key is a secret and comes
+      # from the vault, never from a file.
+      APPWRITE_ENDPOINT: ${APPWRITE_ENDPOINT:?set APPWRITE_ENDPOINT to the Appwrite API address}
+      APPWRITE_PROJECT_ID: ${APPWRITE_PROJECT_ID:?set APPWRITE_PROJECT_ID to the Appwrite project id}
+      APPWRITE_TEAM_ID: ${APPWRITE_TEAM_ID:?set APPWRITE_TEAM_ID to the Appwrite staff team id}
+      APPWRITE_API_KEY: ${APPWRITE_API_KEY:?set APPWRITE_API_KEY to the Appwrite server key}
       JWKS_URL: ${JWKS_URL-}
       AUTH_ISSUER: ${AUTH_ISSUER-}
       PORT: "8080"

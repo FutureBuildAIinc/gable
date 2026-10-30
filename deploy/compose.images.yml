@@ -79,9 +79,16 @@ services:
     environment:
       # Staff sign in is Appwrite (ADR 0012). The core is fail-closed: with
       # AUTH_MODE unset, which is the only mode this recipe offers, it
-      # requires its Appwrite settings or JWKS_URL (AUTH_ISSUER is optional
-      # and checks the token's iss claim when set). See the note at the top of
+      # requires its Appwrite settings below (JWKS_URL and AUTH_ISSUER are
+      # optional extras; AUTH_ISSUER checks the token's iss claim when set). See the note at the top of
       # deploy/compose.yml.
+      # Staff sign in: the Appwrite project the core signs staff in through
+      # (ADR 0012). From the environment only; the key is a secret and comes
+      # from the vault, never from a file.
+      APPWRITE_ENDPOINT: ${APPWRITE_ENDPOINT:?set APPWRITE_ENDPOINT to the Appwrite API address}
+      APPWRITE_PROJECT_ID: ${APPWRITE_PROJECT_ID:?set APPWRITE_PROJECT_ID to the Appwrite project id}
+      APPWRITE_TEAM_ID: ${APPWRITE_TEAM_ID:?set APPWRITE_TEAM_ID to the Appwrite staff team id}
+      APPWRITE_API_KEY: ${APPWRITE_API_KEY:?set APPWRITE_API_KEY to the Appwrite server key}
       JWKS_URL: ${JWKS_URL-}
       AUTH_ISSUER: ${AUTH_ISSUER-}
       PORT: "8080"
