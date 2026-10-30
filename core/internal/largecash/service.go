@@ -181,8 +181,9 @@ var ErrWalkInIdentityRequired = &httpx.Error{Status: http.StatusConflict, Code: 
 // a sale carries the payer's identity and the server has no valid vault key
 // (PAYMENT_VAULT_KEY missing or malformed): the taxpayer identification
 // number and the ID number are never stored in clear, and the payer's key is
-// never an unkeyed digest, so the capture fails closed.
-var ErrVaultUnavailable = &httpx.Error{Status: http.StatusServiceUnavailable, Code: httpx.CodeUnavailable,
+// never an unkeyed digest, so the capture fails closed. Operator: the counter
+// shows the message and the blocker, so the clerk can say why.
+var ErrVaultUnavailable = &httpx.Error{Status: http.StatusServiceUnavailable, Code: httpx.CodeUnavailable, Operator: true,
 	Message: "the payer's details cannot be recorded: this server has no vault key to seal them; set PAYMENT_VAULT_KEY and restart",
 	Details: []httpx.FieldError{httpx.Blocker("large_cash_vault_unavailable",
 		"the payer's details cannot be recorded: this server has no vault key to seal them; set PAYMENT_VAULT_KEY and restart")}}
