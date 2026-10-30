@@ -69,11 +69,7 @@ export class GableQuoteDetail extends LitElement {
         try {
             const data = await QuoteService.get(quoteId);
             this.quote = data;
-            // The revision history rides along: a quote that was never sent has none,
-            // and a failed read leaves the panel hidden, never the page broken.
-            void QuoteService.revisionsOldestFirst(data.id).then(revs => {
-                if (this.quote?.id === data.id) this.revisions = revs;
-            }).catch(() => { /* the history stays hidden */ });
+            void this.loadRevisions(data.id);
             // The Original Upload tab can already be open (a route change): load this quote's text now.
             if (this.activeTab === 'original') void this.loadOriginalText(data);
         } catch (error) {
@@ -81,6 +77,16 @@ export class GableQuoteDetail extends LitElement {
             ToastService.show(`Failed to load quote: ${quoteErrorMessage(error, 'Unknown error')}`, 'error');
         } finally {
             this.loading = false;
+        }
+    }
+
+    /** The quote's sent versions, oldest first; a failed read leaves the panel as it was, never the page broken. */
+    private async loadRevisions(quoteId: string) {
+        try {
+            const revs = await QuoteService.revisionsOldestFirst(quoteId);
+            if (this.quote?.id === quoteId) this.revisions = revs;
+        } catch {
+            // the history stays hidden
         }
     }
 
@@ -192,6 +198,8 @@ export class GableQuoteDetail extends LitElement {
         try {
             const updated = await QuoteService.transition(this.quote.id, to, this.quote.revision);
             this.quote = updated;
+            // A send writes its version's snapshot: the history follows the state.
+            void this.loadRevisions(updated.id);
             ToastService.show(`Quote marked as ${to}`, 'success');
         } catch (error) {
             if (await this.handleStale(error)) return;
