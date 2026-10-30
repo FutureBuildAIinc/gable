@@ -1887,6 +1887,70 @@ mod tests {
         assert_eq!(gone.code, "server_unreachable");
     }
 
+    // C2 (ADR 0011 5.4, the shared snapshot fixture, lead entry 692): the
+    // snapshot the Go route issued (core/internal/pos/testdata/offline-snapshot.json,
+    // pinned to the route's shape by TestOfflineSnapshot_TheSharedFixtureIsWhatTheRouteIssues)
+    // reads into the core with nothing lost, goes through the core's own
+    // refresh, and prices a walk-in line at its sheet row.
+    #[test]
+    fn the_core_reads_the_snapshot_the_go_route_issued() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../core/internal/pos/testdata/offline-snapshot.json");
+        let raw = std::fs::read_to_string(&path).expect("the shared snapshot fixture");
+        let issued: serde_json::Value = serde_json::from_str(&raw).unwrap();
+        let snap: OfflineSnapshot =
+            serde_json::from_str(&raw).expect("the core reads the route's snapshot");
+        // the core's only fields the route does not issue: no override and no
+        // discount offline (ADR 0011 section 4), so both default to false
+        let mut read = serde_json::to_value(&snap).unwrap();
+        for extra in ["allow_price_override", "allow_discount"] {
+            assert_eq!(read["policy"][extra], serde_json::json!(false), "{extra}");
+            read["policy"].as_object_mut().unwrap().remove(extra);
+        }
+        assert_eq!(
+            read, issued,
+            "the core dropped or reshaped a field the route issues"
+        );
+        assert!(!snap.accounts[0].jobs.is_empty() && !snap.accounts[0].buyers.is_empty());
+
+        // the same document through the core's refresh, as this register's copy
+        let (counter, db_path) = enrolled_counter("c2-go-snapshot");
+        let mut served = issued.clone();
+        served["register_id"] = "REG-01".into();
+        served["device_epoch"] = 3.into();
+        let server = FakeServer::new().answering_snapshot(200, served.to_string());
+        let refreshed = counter.refresh_snapshot(Some(GABLE_ORIGIN), &server);
+        let product = snap
+            .products
+            .iter()
+            .find(|p| p.category == "Boards")
+            .expect("the fixture's board product");
+        let row = snap
+            .price_sheet
+            .iter()
+            .find(|r| r.product_id == product.id && r.price_key == "walkin")
+            .expect("its walk-in row");
+        let mut req = walk_in_sale_request("77777777-7777-7777-7777-7777777777f1", "2", 0);
+        req.tenders.clear();
+        req.snapshot_id = snap.snapshot_id.clone();
+        req.till_session_id = snap.till_session.id.clone();
+        req.cashier_id = snap.till_session.cashier_id.clone();
+        req.business_date = snap.till_session.business_date.clone();
+        req.sold_at = snap.issued_at.clone();
+        req.lines[0].product_id = product.id.clone();
+        req.lines[0].uom = product.sale_uom.clone();
+        let preview = counter.price_cart(Some(GABLE_ORIGIN), req);
+        let _ = std::fs::remove_file(&db_path);
+        assert_eq!(refreshed.unwrap().status, "updated");
+        let preview = preview.unwrap();
+        assert_eq!(preview.snapshot_id, snap.snapshot_id);
+        assert_eq!(
+            preview.lines[0].unit_price_ten_thousandths,
+            row.unit_price_ten_thousandths
+        );
+        assert_eq!(preview.lines[0].price_key, "walkin");
+    }
+
     // C2 (ADR 0011 6.1, the shared signing vector O3 asked for): a sale the
     // core signs with a fixed seed has a fixed signature, and the Go sync
     // verifies the same file (core/internal/pos/testdata/offline-signed-sale.json).
