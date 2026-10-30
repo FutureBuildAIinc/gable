@@ -886,16 +886,21 @@ func Run() {
 	// Without it the lookup cannot run, and the driver's own per order
 	// guard is what keeps a re dispatch from charging twice.
 	var runTerm payment.TerminalProvider
+	// runBack is the counter's way back to a Run card: the driver's own
+	// void-or-refund under the leg's key (CP-05 P2-1), not the keyed online
+	// gateway that drops the key. Nil unless the Run driver is selected.
+	var runBack payment.PaymentGateway
 	if cfg.POSTerminal == "run" && cfg.POSTerminalSimulator == "" {
-		runTerm = payment.NewRunTerminal(paymentKeys.Resolve, terminalLedger, logger).
+		runDriver := payment.NewRunTerminal(paymentKeys.Resolve, terminalLedger, logger).
 			OnKeyRotated(func(apiKey, refreshToken string) {
 				if err := paymentKeys.PersistRotatedKey(apiKey, refreshToken); err != nil {
 					logger.Error("failed to persist rotated Run Payments api_key", "error", err)
 				}
 			}).
 			WithReporting(cfg.RunReportingBaseURL, cfg.RunReportingClientID, cfg.RunReportingClientSecret)
+		runTerm, runBack = runDriver, payment.NewRunTerminalGateway(runDriver)
 	}
-	switch wirePOSCardPath(posSvc, terminalLedger, cfg.POSTerminalSimulator, runTerm, rpGateway) {
+	switch wirePOSCardPath(posSvc, terminalLedger, cfg.POSTerminalSimulator, runTerm, runBack) {
 	case pos.CardTerminalSimulator:
 		logger.Warn("the simulated card terminal is wired: a demo stack only, never a production configuration",
 			"script", cfg.POSTerminalSimulator)
