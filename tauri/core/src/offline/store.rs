@@ -25,11 +25,13 @@ use crate::offline::arithmetic::{
     resolve_line_pair, settle_tenders, tax_at, OfflineTenderCalc, Pair, TallyRowCalc, ONE_QTY,
 };
 use crate::offline::model::{
-    EnrolmentPublic, EnrolmentRecord, HighWaterMark, OfflineError, OfflineSnapshot, PriorEpochMark,
-    QueueItemState, QueueStatusView, QueuedSaleEntry, SignSaleRequest, SignedOfflineSale,
-    SignedSaleLine, SignedSaleTender, SignedTally, SignedTallyRow, SnapshotPriceRow,
-    SnapshotProduct, StoreMeta, SyncBatchOutcome,
+    CartPreview, EnrolmentPublic, EnrolmentRecord, HighWaterMark, OfflineError, OfflineSnapshot,
+    PriorEpochMark, QueueItemState, QueueStatusView, QueuedSaleEntry, SignSaleRequest,
+    SignedOfflineSale, SignedSaleLine, SignedSaleTender, SignedTally, SignedTallyRow,
+    SnapshotPriceRow, SnapshotProduct, SnapshotRefresh, StoreMeta, SyncBatchOutcome,
+    SyncOutcomeItem, SyncReport,
 };
+use crate::offline::server::{refusal_of, OfflineServer};
 
 const VALID_ID_TYPES: [&str; 5] = [
     "drivers_license",
@@ -498,11 +500,9 @@ impl OfflineCounter {
         Ok((conn, enrolment, mark, aead_key))
     }
 
-    /// Test seam: stores the core's sealed copy of a register snapshot
-    /// (ADR 0011 section 5.4). The page never supplies the snapshot the core
-    /// prices and signs from: the core fetches it itself from the enrolled
-    /// origin with the keychain token (O2 and ADR 0012). Until that lands no
-    /// build but the tests can install one, so the shipped shell cannot sign.
+    /// Test seam: stores a register snapshot directly. The shipped shell's
+    /// only writer of the snapshot is `refresh_snapshot`, which takes it from
+    /// the enrolled server's own answer; the page never supplies one.
     #[cfg(test)]
     pub(crate) fn install_test_snapshot(
         &self,
@@ -510,34 +510,245 @@ impl OfflineCounter {
     ) -> Result<(), OfflineError> {
         let _ops = self.lock_ops();
         let (conn, enrolment, _, aead_key) = self.open_verified_store()?;
-        if snapshot.register_id != enrolment.register_id
-            || snapshot.device_epoch != enrolment.device_epoch
-        {
+        store_snapshot(&conn, &aead_key, &enrolment, &snapshot)
+    }
+
+    /// Fetches the register's snapshot from the enrolled server and keeps it
+    /// sealed beside the queue (ADR 0011 5.4). The core asks only once every
+    /// queued sale has been answered (6.2: the device drains before it
+    /// refreshes) and names its own high sequence; the copy must be the
+    /// register's, of its epoch, and issued since its till session opened.
+    pub fn refresh_snapshot(
+        &self,
+        caller_origin: Option<&str>,
+        server: &dyn OfflineServer,
+    ) -> Result<SnapshotRefresh, OfflineError> {
+        self.check_origin(caller_origin)?;
+        let (register, high_seq) = {
+            let _ops = self.lock_ops();
+            let (conn, enrolment, mark, aead_key) = self.open_verified_store()?;
+            let sales = read_all_sales(&conn, &aead_key, &enrolment)?;
+            if let Some(waiting) = sales.iter().find(|e| awaits_an_answer(e.state)) {
+                return Err(OfflineError::new(
+                    "queue_not_drained",
+                    format!(
+                        "Sale {} has not been answered by the server yet: the register sends it before it takes new prices, and keeps selling on the prices it holds.",
+                        waiting.sale.offline_ref
+                    ),
+                ));
+            }
+            (enrolment.register_id.clone(), mark.last_seq)
+        };
+        let answer = server.get_snapshot(&register, high_seq)?;
+        if answer.status != 200 {
+            return Err(refusal_of(&answer));
+        }
+        let snapshot: OfflineSnapshot = serde_json::from_str(&answer.body).map_err(|_| {
+            OfflineError::new(
+                "snapshot_unreadable",
+                "the server's snapshot could not be read by this register",
+            )
+        })?;
+        let _ops = self.lock_ops();
+        let (conn, enrolment, _, aead_key) = self.open_verified_store()?;
+        let previous = read_raw_snapshot(&conn, &aead_key, &enrolment)
+            .ok()
+            .map(|s| s.snapshot_id);
+        store_snapshot(&conn, &aead_key, &enrolment, &snapshot)?;
+        Ok(SnapshotRefresh {
+            status: if previous.as_deref() == Some(snapshot.snapshot_id.as_str()) {
+                "unchanged".to_string()
+            } else {
+                "updated".to_string()
+            },
+            snapshot_id: snapshot.snapshot_id,
+            issued_at: snapshot.issued_at,
+        })
+    }
+
+    /// Prices the clerk's cart from the core's own snapshot copy through the
+    /// sign path's own code (ADR 0011 5.3): the lines, the tax, the totals,
+    /// and, when tenders are named, the change or why they would be refused,
+    /// with the account's room and the queue's room. Nothing is written.
+    pub fn price_cart(
+        &self,
+        caller_origin: Option<&str>,
+        req: SignSaleRequest,
+    ) -> Result<CartPreview, OfflineError> {
+        self.check_origin(caller_origin)?;
+        let _ops = self.lock_ops();
+        let (conn, enrolment, _, aead_key) = self.open_verified_store()?;
+        let snapshot = read_raw_snapshot(&conn, &aead_key, &enrolment)?;
+        if !snapshot.policy.enabled {
             return Err(OfflineError::new(
-                "snapshot_unknown",
-                "snapshot does not match the enrolled register and device epoch",
+                "offline_disabled",
+                "offline selling is disabled for this branch",
             ));
         }
         if snapshot.issued_at < snapshot.till_session.opened_at {
             return Err(OfflineError::new(
                 "snapshot_stale",
-                "snapshot was issued before the current till session opened",
+                "the register snapshot predates the open till session",
             ));
         }
-        let bytes = serde_json::to_vec(&snapshot)
-            .map_err(|_| OfflineError::new("serialize_failed", "failed to serialize snapshot"))?;
-        let aad = format!(
-            "snapshot:{}:{}",
-            enrolment.register_id, enrolment.device_epoch
-        );
-        let sealed = seal_bytes(&aead_key, &aad, &bytes)?;
-        conn.execute(
-            "INSERT INTO offline_snapshot (id, sealed) VALUES (1, ?1)
-             ON CONFLICT(id) DO UPDATE SET sealed = excluded.sealed",
-            params![sealed],
-        )
-        .map_err(|_| OfflineError::new("store_io_error", "failed to write snapshot"))?;
-        Ok(())
+        check_declaration(&req)?;
+        let priced = price_cart_lines(&snapshot, &req)?;
+        let existing = read_all_sales(&conn, &aead_key, &enrolment)?;
+        let (waiting_count, waiting_total) = waiting_figures(&existing);
+        let account_room_cents = priced
+            .account
+            .map(|acc| account_room(&snapshot, acc, &existing).max(0));
+        let (change_cents, tender_refusal) = if req.tenders.is_empty() {
+            (None, None)
+        } else {
+            match check_tenders(&snapshot, &req, &priced, &existing) {
+                Ok(stage) => (Some(stage.change_cents), None),
+                Err(e) => (None, Some(e)),
+            }
+        };
+        Ok(CartPreview {
+            snapshot_id: snapshot.snapshot_id.clone(),
+            currency: priced.currency.clone(),
+            tax_rate: priced.tax_rate.clone(),
+            tax_exempt: priced.tax_exempt,
+            lines: priced.lines.clone(),
+            subtotal_cents: priced.subtotal_cents,
+            tax_cents: priced.tax_cents,
+            total_cents: priced.total_cents,
+            change_cents,
+            tender_refusal,
+            account_room_cents,
+            queue_room_count: (snapshot.policy.max_queue_count - waiting_count).max(0),
+            queue_room_cents: (snapshot.policy.max_queue_total_cents - waiting_total).max(0),
+        })
+    }
+
+    /// Sends every sale the server has not settled to the enrolled server's
+    /// sync, with the device's own mark, and records the server's answer
+    /// (ADR 0011 sections 3 and 6.2). Items with a manager are sent again
+    /// each time, so the register learns when one is resolved. The store's
+    /// lock is not held while the request runs, so the clerk keeps selling.
+    pub fn sync_queue(
+        &self,
+        caller_origin: Option<&str>,
+        server: &dyn OfflineServer,
+    ) -> Result<SyncReport, OfflineError> {
+        self.check_origin(caller_origin)?;
+        let (register, epoch, last_seq, items) = {
+            let _ops = self.lock_ops();
+            let (conn, enrolment, mark, aead_key) = self.open_verified_store()?;
+            let mut items: Vec<SignedOfflineSale> = read_all_sales(&conn, &aead_key, &enrolment)?
+                .into_iter()
+                .filter(|e| e.state.is_unsettled() && e.state != QueueItemState::Signing)
+                .map(|e| e.sale)
+                .collect();
+            items.sort_by_key(|s| s.device_seq);
+            (
+                enrolment.register_id.clone(),
+                enrolment.device_epoch,
+                mark.last_seq,
+                items,
+            )
+        };
+        if items.is_empty() {
+            let queue = self.queue_status(caller_origin)?;
+            return Ok(SyncReport {
+                sent: 0,
+                posted: 0,
+                refused: 0,
+                held: 0,
+                resolved: 0,
+                errors: 0,
+                confirmed_seq: queue.confirmed_seq,
+                open_exception_count: queue.review_count,
+                queue,
+            });
+        }
+        let batch_id = uuid::Uuid::new_v4().to_string();
+        let body = serde_json::json!({
+            "batch_id": batch_id,
+            "register_id": register,
+            "device_epoch": epoch,
+            "reported_seq": last_seq,
+            "items": items,
+        })
+        .to_string();
+        let answer = server.post_sync(&body, &batch_id)?;
+        if answer.status != 200 {
+            return Err(refusal_of(&answer));
+        }
+        let wire: WireSyncResult = serde_json::from_str(&answer.body).map_err(|_| {
+            OfflineError::new(
+                "sync_unreadable",
+                "the server's sync answer could not be read by this register",
+            )
+        })?;
+        let mut report = SyncReport {
+            sent: items.len() as i64,
+            posted: 0,
+            refused: 0,
+            held: 0,
+            resolved: 0,
+            errors: 0,
+            confirmed_seq: wire.confirmed_seq,
+            open_exception_count: wire.open_exception_count,
+            queue: QueueStatusView {
+                register_id: String::new(),
+                device_epoch: 0,
+                last_seq: 0,
+                confirmed_seq: 0,
+                chain_head: String::new(),
+                waiting_count: 0,
+                waiting_total_cents: 0,
+                pending_count: 0,
+                review_count: 0,
+                synced_count: 0,
+                items: vec![],
+            },
+        };
+        let mut outcomes = Vec::with_capacity(wire.items.len());
+        for item in wire.items {
+            if item.device_epoch != epoch {
+                continue;
+            }
+            let status = match item.outcome.as_str() {
+                "posted" | "duplicate" => {
+                    report.posted += 1;
+                    QueueItemState::Synced
+                }
+                "resolved" => {
+                    report.resolved += 1;
+                    QueueItemState::Synced
+                }
+                "refused" => {
+                    report.refused += 1;
+                    QueueItemState::Review
+                }
+                "held" => {
+                    report.held += 1;
+                    QueueItemState::Review
+                }
+                _ => {
+                    report.errors += 1;
+                    QueueItemState::Pending
+                }
+            };
+            outcomes.push(SyncOutcomeItem {
+                client_id: item.client_id,
+                device_seq: item.device_seq,
+                status,
+                invoice_id: item.invoice_id,
+                invoice_number: item.invoice_number,
+                reason_code: item.reason_code,
+                reason_message: item.reason_message,
+            });
+        }
+        let _ops = self.lock_ops();
+        report.queue = self.record_outcomes_held(SyncBatchOutcome {
+            confirmed_seq: wire.confirmed_seq,
+            items: outcomes,
+        })?;
+        Ok(report)
     }
 
     /// Loads the core's snapshot copy with each product's `in_stock` figure
@@ -835,6 +1046,13 @@ impl OfflineCounter {
     ) -> Result<QueueStatusView, OfflineError> {
         self.check_origin(caller_origin)?;
         let _ops = self.lock_ops();
+        self.record_outcomes_held(outcome)
+    }
+
+    fn record_outcomes_held(
+        &self,
+        outcome: SyncBatchOutcome,
+    ) -> Result<QueueStatusView, OfflineError> {
         let (mut conn, enrolment, mut mark, aead_key) = self.open_verified_store()?;
         let mut meta = read_sealed_meta(
             &conn,
@@ -1510,6 +1728,74 @@ fn check_tenders(
     })
 }
 
+/// Seals and stores the core's snapshot copy, after checking it is the
+/// enrolled register's, of its epoch, and issued since its session opened.
+fn store_snapshot(
+    conn: &Connection,
+    aead_key: &ZeroizingKey,
+    enrolment: &EnrolmentRecord,
+    snapshot: &OfflineSnapshot,
+) -> Result<(), OfflineError> {
+    if snapshot.register_id != enrolment.register_id
+        || snapshot.device_epoch != enrolment.device_epoch
+    {
+        return Err(OfflineError::new(
+            "snapshot_unknown",
+            "snapshot does not match the enrolled register and device epoch",
+        ));
+    }
+    if snapshot.issued_at < snapshot.till_session.opened_at {
+        return Err(OfflineError::new(
+            "snapshot_stale",
+            "snapshot was issued before the current till session opened",
+        ));
+    }
+    let bytes = serde_json::to_vec(snapshot)
+        .map_err(|_| OfflineError::new("serialize_failed", "failed to serialize snapshot"))?;
+    let aad = format!(
+        "snapshot:{}:{}",
+        enrolment.register_id, enrolment.device_epoch
+    );
+    let sealed = seal_bytes(aead_key, &aad, &bytes)?;
+    conn.execute(
+        "INSERT INTO offline_snapshot (id, sealed) VALUES (1, ?1)
+         ON CONFLICT(id) DO UPDATE SET sealed = excluded.sealed",
+        params![sealed],
+    )
+    .map_err(|_| OfflineError::new("store_io_error", "failed to write snapshot"))?;
+    Ok(())
+}
+
+/// A sale the server has not answered yet: signed and not sent, or sent and
+/// not judged. One with a manager (refused or held) is answered.
+fn awaits_an_answer(state: QueueItemState) -> bool {
+    matches!(
+        state,
+        QueueItemState::Signing | QueueItemState::Waiting | QueueItemState::Pending
+    )
+}
+
+/// The server's sync answer, as the core reads it.
+#[derive(serde::Deserialize)]
+struct WireSyncResult {
+    confirmed_seq: i64,
+    #[serde(default)]
+    open_exception_count: i64,
+    items: Vec<WireSyncItem>,
+}
+
+#[derive(serde::Deserialize)]
+struct WireSyncItem {
+    client_id: String,
+    device_epoch: i64,
+    device_seq: i64,
+    outcome: String,
+    invoice_id: Option<String>,
+    invoice_number: Option<String>,
+    reason_code: Option<String>,
+    reason_message: Option<String>,
+}
+
 /// The room left on a cached account on this register: the least of the
 /// snapshot's offline room, the credit limit less the open receivable and
 /// the branch's per account cap, less every account tender this register
@@ -1897,6 +2183,16 @@ pub fn canonical_sale_bytes(sale: &SignedOfflineSale) -> Result<Vec<u8>, Offline
 /// Computes the 64-character lowercase hex SHA-256 digest of `bytes`.
 pub fn sha256_hex(bytes: &[u8]) -> String {
     hex::encode(digest(&SHA256, bytes).as_ref())
+}
+
+/// Test seam for the shared signing vector: signs canonical bytes with a
+/// given seed, the sign path's own signing.
+#[cfg(test)]
+pub(crate) fn sign_canonical_for_vector(
+    seed_hex: &str,
+    canonical_bytes: &[u8],
+) -> Result<String, OfflineError> {
+    sign_canonical_bytes(seed_hex, canonical_bytes)
 }
 
 fn sign_canonical_bytes(seed_hex: &str, canonical_bytes: &[u8]) -> Result<String, OfflineError> {

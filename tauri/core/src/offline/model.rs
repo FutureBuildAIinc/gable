@@ -486,6 +486,56 @@ pub struct SyncBatchOutcome {
     pub items: Vec<SyncOutcomeItem>,
 }
 
+/// The core's price of a cart the clerk is building (ADR 0011 5.3): every
+/// figure the counter shows, derived from the core's own snapshot copy by the
+/// sign path's own code; nothing is written, nothing is signed.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CartPreview {
+    pub snapshot_id: String,
+    pub currency: String,
+    pub tax_rate: String,
+    pub tax_exempt: bool,
+    pub lines: Vec<SignedSaleLine>,
+    pub subtotal_cents: i64,
+    pub tax_cents: i64,
+    pub total_cents: i64,
+    /// The change the tenders leave, when tenders were named and they pass.
+    pub change_cents: Option<i64>,
+    /// Why the named tenders would be refused, when they would.
+    pub tender_refusal: Option<OfflineError>,
+    /// The room left on the named cached account on this register.
+    pub account_room_cents: Option<i64>,
+    /// What the queue caps still allow: sales and cents.
+    pub queue_room_count: i64,
+    pub queue_room_cents: i64,
+}
+
+/// What a snapshot refresh did.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SnapshotRefresh {
+    /// `updated` (a new copy is stored) or `unchanged` (the same one).
+    pub status: String,
+    pub snapshot_id: String,
+    pub issued_at: String,
+}
+
+/// What one sync of the queue did (ADR 0011 section 4: "Sent 12, 1 needs a
+/// manager").
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SyncReport {
+    pub sent: i64,
+    pub posted: i64,
+    pub refused: i64,
+    pub held: i64,
+    pub resolved: i64,
+    pub errors: i64,
+    pub confirmed_seq: i64,
+    /// The register's exception rows waiting on a manager, as the server
+    /// counts them.
+    pub open_exception_count: i64,
+    pub queue: QueueStatusView,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct OfflineError {
     pub code: String,
