@@ -465,3 +465,27 @@ func TestOfflineResolve_WhoMayResolveAndWhat(t *testing.T) {
 	}
 	wantNothingPosted(t, f, sale)
 }
+
+// RULE (ADR 0011 6.2, the room, O4): an account sale refused for stock and
+// retried is judged against the room without its own exception row, and a
+// written off account sale no longer holds any room: only open and held rows
+// are subtracted.
+func TestOfflineResolve_TheAccountRoomCountsOnlyOpenRows(t *testing.T) {
+	f := newFixture(t, testutil.RequireDB(t))
+	offlinePolicyOn(t, f)
+	b := newOfflineBench(t, f)
+	b.snap.Accounts[0].OfflineRoomCents = 1500
+	b.issue(t)
+	onAccount := saleSpec{customer: uuidPtr(f.customerID), lines: []offlineLine{line(f.productID, "2")},
+		tenders: []pos.SignedSaleTender{{Method: "account"}}}
+	mustExec(t, f.db, `UPDATE inventory SET quantity = 1 WHERE product_id = $1`, f.productID)
+	rA, sA := b.build(t, onAccount)
+	idA := *wantOutcome(t, b.sync(t, rA), sA, pos.OfflineRefused, "insufficient_stock").ExceptionID
+	// the first written off holds no room
+	mustResolve(t, f, idA, pos.ResolveWriteOff)
+	rB, sB := b.build(t, onAccount)
+	idB := *wantOutcome(t, b.sync(t, rB), sB, pos.OfflineRefused, "insufficient_stock").ExceptionID
+	// the second, retried, is not counted against itself
+	mustExec(t, f.db, `UPDATE inventory SET quantity = 100 WHERE product_id = $1`, f.productID)
+	wantPosted(t, f, mustResolve(t, f, idB, pos.ResolveRetry), sB)
+}
