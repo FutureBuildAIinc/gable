@@ -18,6 +18,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 
@@ -405,4 +406,50 @@ func TestQE05_KitQuoteConcurrency_Pool4ThreeContenders(t *testing.T) {
 	if bad != 0 {
 		t.Errorf("%d kit quotes hold a wrong line count, want 0", bad)
 	}
+}
+
+// RULE (QE-05, money checklist 16): a refused kit leaves nothing behind. A
+// kit line whose definition is empty is refused by the explosion, inside the
+// draft's own transaction, so the quote and its lines are never written.
+func TestQE05_RefusedKitWritesNothing(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	f := newFixture(t, testutil.RequireDB(t))
+	ctx := context.Background()
+	emptyKit := uuid.New()
+	emptySKU := "KIT-EMPTY-" + uuid.NewString()[:8]
+	if _, err := f.db.Pool.Exec(ctx, `
+		INSERT INTO products (id, sku, description, uom_primary, base_price, is_kit, taxable)
+		VALUES ($1, $2, 'A kit with no parts', 'EA', 50.00, TRUE, TRUE)`, emptyKit, emptySKU); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = f.db.Pool.Exec(ctx, `DELETE FROM products WHERE id = $1`, emptyKit)
+	})
+
+	before := quoteCount(t, f, f.customerID)
+	refused := f.do("POST", "/api/v1/quotes", f.createBody(map[string]any{
+		"product_id": emptyKit.String(), "sku": emptySKU, "description": "A kit with no parts",
+		"quantity": "1", "uom": "EA", "unit_price_ten_thousandths": 500000,
+	}))
+	if refused.status != http.StatusBadRequest {
+		t.Fatalf("create = %d: %s", refused.status, refused.raw)
+	}
+	if !strings.Contains(string(refused.raw), "no components") {
+		t.Errorf("refusal = %s, want it to name the empty definition", refused.raw)
+	}
+	if after := quoteCount(t, f, f.customerID); after != before {
+		t.Errorf("%d quotes written for a refused kit, want %d", after-before, before)
+	}
+}
+
+// quoteCount counts the quotes a customer owns, the rows a refused draft must
+// leave unwritten.
+func quoteCount(t *testing.T, f *fixture, customerID uuid.UUID) int {
+	t.Helper()
+	var n int
+	if err := f.db.Pool.QueryRow(context.Background(),
+		`SELECT count(*) FROM quotes WHERE customer_id = $1`, customerID).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	return n
 }
