@@ -65,6 +65,23 @@ func sweepC(w *arWorld, dryRun bool) *account.HoldEvaluation {
 	return ev
 }
 
+// placesFor picks the placements about the world's own account out of the
+// sweep's plan. The sweep reads every account with a balance on the shared
+// test database: its customer list narrows the accounts with a credit
+// limit, not the ones with a balance, so the plan's length and the count
+// the sweep reports are over the whole book and are not this test's to
+// assert. What the test owns is the world's account and the sweep's answer
+// about it.
+func placesFor(ev *account.HoldEvaluation, customerID uuid.UUID) []account.HoldPlacement {
+	var out []account.HoldPlacement
+	for _, p := range ev.WouldPlace {
+		if p.CustomerID == customerID {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
 // The rule itself lives in credit_hold_rules_internal_test.go (the pure
 // functions are unexported); this file holds the database half: the sweep in
 // both modes, the manual hold and its idempotency, the override window, the
@@ -80,14 +97,12 @@ func TestHoldSweepDryRun(t *testing.T) {
 	if !ev.DryRun || ev.Placed != 0 || ev.Released != 0 {
 		t.Fatalf("a dry run reported %+v, want a preview that placed nothing", ev)
 	}
-	if ev.Evaluated != 1 {
-		t.Fatalf("evaluated %d accounts, want the world's one", ev.Evaluated)
+	places := placesFor(ev, w.customerID)
+	if len(places) != 1 || places[0].HoldType != "over_limit" {
+		t.Fatalf("would place %+v, want one over_limit hold on the world's account", places)
 	}
-	if len(ev.WouldPlace) != 1 || ev.WouldPlace[0].HoldType != "over_limit" {
-		t.Fatalf("would place %+v, want one over_limit hold", ev.WouldPlace)
-	}
-	if ev.WouldPlace[0].CustomerID != w.customerID || ev.WouldPlace[0].Reason == "" {
-		t.Fatalf("the placement names the wrong account or no reason: %+v", ev.WouldPlace[0])
+	if places[0].Reason == "" {
+		t.Fatal("the placement gives no reason")
 	}
 	if w.creditHoldRows() != 0 || w.creditFlag() {
 		t.Fatal("a dry run wrote a hold or moved the flag")
@@ -102,15 +117,17 @@ func TestHoldSweepPlacesAndLifts(t *testing.T) {
 	w.setCreditLimit(10_000)
 	w.invoice(50_000, daysFromNow(-40))
 
-	if ev := sweepC(w, false); ev.Placed != 1 || len(ev.WouldPlace) != 1 || ev.WouldPlace[0].HoldID == "" {
-		t.Fatalf("the executed sweep placed %+v, want one hold with its id", ev.WouldPlace)
+	ev := sweepC(w, false)
+	placed := placesFor(ev, w.customerID)
+	if len(placed) != 1 || placed[0].HoldID == "" {
+		t.Fatalf("the executed sweep placed %+v, want one hold with its id", placed)
 	}
 	if w.creditHoldRows() != 1 || !w.creditFlag() {
 		t.Fatalf("after the sweep: %d holds, flag %v", w.creditHoldRows(), w.creditFlag())
 	}
 	// The second run converges: nothing new to place.
-	if ev := sweepC(w, false); ev.Placed != 0 || len(ev.WouldPlace) != 0 {
-		t.Fatalf("the second sweep placed %+v, want nothing", ev.WouldPlace)
+	if ev := sweepC(w, false); len(placesFor(ev, w.customerID)) != 0 {
+		t.Fatalf("the second sweep placed %+v, want nothing", placesFor(ev, w.customerID))
 	}
 	if w.creditHoldRows() != 1 {
 		t.Fatalf("the second sweep left %d holds, want one", w.creditHoldRows())
@@ -151,8 +168,8 @@ func TestHoldSweepSparesManualAndOverriddenHolds(t *testing.T) {
 	}
 	// An overridden automatic hold stands its window.
 	w.exec(`DELETE FROM credit_holds WHERE customer_id = $1`, w.customerID)
-	if ev := sweepC(w, false); ev.Placed != 1 {
-		t.Fatalf("the sweep placed %d, want the automatic hold", ev.Placed)
+	if ev := sweepC(w, false); len(placesFor(ev, w.customerID)) != 1 {
+		t.Fatalf("the sweep placed %+v, want the automatic hold", placesFor(ev, w.customerID))
 	}
 	until := time.Now().Add(48 * time.Hour)
 	if _, err := w.svc.OverrideHold(context.Background(), w.standingHold().ID,

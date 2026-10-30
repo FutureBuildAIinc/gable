@@ -220,7 +220,9 @@ repeat a used sequence by definition), `bad_signature` rows (whose
 sequence and `id` are not proven, so the true sale of that number and `id`
 can still be recorded) and `replay_mismatch` rows (whose sequence and `id`
 differ from the sale already on file, so the row cannot take the same
-keys; the unique `sale_id` is partial the same way), and the check above
+keys; the unique `sale_id` is partial the same way) and `sequence_gap` and
+unknown tail rows (which name a range and sit at a number a `late_after_gap` row
+may hold, and two of one epoch may share one), and the check above
 reads both before either insert. A `sequence_reused` item
 that a manager accepts posts with its device sequence left null on the sale
 row and kept on its exception row, so the posting never collides with the
@@ -290,14 +292,20 @@ unchanged and never taken here):
   by an exception resolution, first;
 - **0b. the exception row**, `FOR UPDATE`, taken only by a resolution of
   that exception (3.4), after 0a;
-- **1. the sale rows**, in id order: the offline sale's row, inserted with
-  its client `id` (a conflict on the primary key is the duplicate answer,
-  the transaction rolls back), its lines as recorded, the session it names,
-  `offline_ref`, epoch, sequence, snapshot id and signature digest; and,
-  when the sale names `replaces_sale_id` (5.3), that live sale's row `FOR
-  NO KEY UPDATE`;
+- **1. the sale rows**: when the sale names `replaces_sale_id` (5.3), that
+  live sale's row `FOR NO KEY UPDATE` first, whatever its id (the offline
+  sale's row is not yet inserted, so no other act can wait on it); then the
+  session `FOR SHARE` (1b) and, for a named customer, the credit advisory
+  lock (1a), both before the insert, because the sale row's customer foreign
+  key takes the customer row `FOR KEY SHARE` and a live completion of the
+  same customer holds 1a before it takes that row `FOR UPDATE` (step 7);
+  then the offline sale's row, inserted with its client `id` (a conflict on
+  the primary key is the duplicate answer, the transaction rolls back), its
+  lines as recorded, the session it names, `offline_ref`, epoch, sequence,
+  snapshot id and signature digest;
 - **then the body's own order, unchanged** (`complete.go`, read at source):
-  the session `FOR SHARE`; the credit advisory lock for an account tender;
+  the session `FOR SHARE` and the credit advisory lock for a named customer
+  (both taken again, already held);
   the open credit memos (never reached offline: store credit is refused);
   the inventory rows in product order (`IssueQty`); then
   `CreateCounterInvoice`, which takes the customer row, the gapless mint
@@ -742,11 +750,11 @@ tab at the dealer installs nothing, so a browser
 session never serves a stale desk bundle. Bundling the desk into the
 app's `frontendDist` is rejected: the page's origin would become the app's,
 every API call would cross origins, and the framed protocol's one origin
-rule would break. Slice C1 proves the service worker in each shell's
-webview. Where a webview refuses it, an offline reload is not possible: the
+rule would break. Slice C1 proves the service worker in WebKitGTK, the
+work shell's Linux webview; WKWebView and WebView2 are proven in P1. Where a webview refuses it, an offline reload is not possible: the
 counter says "Do not reload while offline", the queue stays safe in the
-Rust store (5.1), and selling resumes after the connection returns; C1
-records which webviews pass. Either way, a counter already open never
+Rust store (5.1), and selling resumes after the connection returns; C1 and
+P1 record which webviews pass. Either way, a counter already open never
 navigates away while offline.
 
 **5.3 The offline cart.** While online, the counter keeps working as today
@@ -1093,8 +1101,11 @@ gave it is refused, `queue_mark_unverified`), and checks that the queue
 count is at least the sale's sequence less that confirmed mark, because
 the sales after the confirmed mark were not yet answered when the item
 was made. It then checks the count against the count cap and the total
-against the total cap, and adds the register's open and held exception
-items to the count it holds. The bound the server can prove is the count
+against the total cap. The count checked is the larger of the signed
+count and the sale's sequence less the confirmed mark; the server does not
+add the register's open and held exception rows to it, because the device's
+queue count already counts every item not yet answered, those included,
+and adding them again would refuse honest sales near the cap. The bound the server can prove is the count
 times the per sale cap, since the count is what the sequence pins down;
 the total is the device's own figure, and it only has to be under the cap.
 A register that has synced more sales than the queue count cap keeps
@@ -1416,10 +1427,10 @@ data and security change and gets the project's money review.
 | O2 | Device enrolment and revocation routes (with the session revocation of 6.1); the snapshot route (refusing `queue_not_drained`) with the precomputed account price sheet, computed at the branch's business date, each row carrying the unit the engine answered in, the levels' rows for the branch's products as the fallback, the exact pair each unit a product is sold in takes to each of those price units and to the stocking unit, the kit flag and the unit set's cross section, its storage and its size measured on the demo seed; the confirmed mark every sync answer carries back to the device; the enrolment and revocation routes' authority (owner or admin, never a machine key, the counter PIN, audited); the pricing `Request` option that skips rung 2 and leaves the live path untouched. | 24 to 40 |
 | O3 | The sync rebuilt: the offline verdict in `completeSaleTx` (3.1), verification (signature, chain over every verified item, snapshot price, tax and each line's taxable flag, the account room across batches and snapshots, the signed queue figures and the confirmed mark they are checked against), the drain test against the highest sequence the server has recorded, the replaced cart lock and check, duplicates across both tables (bad signature rows not counted, superseded), the strict chain with held `broken_chain` items re-offered automatically under a savepoint, the chain restart after an accepted gap, `late_after_gap`, the price key bound to the customer, `sequence_reused`, the `replay_mismatch` row that advances nothing, is never read as the record of its id and counts for nothing in the drain test, the replaced cart's own register and session, the stale snapshot, the line's stock figures against the snapshot (not run on a line a manager's restatement changed), the exception write repeating the duplicate check under 0a and the session lock, open account exceptions subtracted from the room once, the two session rules of 6.3, the OPEN to ABANDONED transition, the tally rows stored with the line, the two legs check the live path runs before its transaction, the delete of the three step path in `sync.go`. Concurrency, numbering and no re-decision tests, and the Go half of the shared arithmetic fixture. | 47 to 72 |
 | O4 | The exception list, its resolutions (retry, accept, late post with no session and the cash and check reclass and the branch day lock, write off, settled replaced cart, post as a separate sale, the restatement of the stock figures with its conversion and its audit row) under locks 0a and 0b, the unknown tail item as an open exception and its accept, the close reading the exception rows without a row lock, and the till close and day close refusals with their race test. | 24 to 40 |
-| C1 | The Rust queue store, keychain keys, signing, commands and fence in `tauri/core` and `tauri/gable-work`; the core's own copy of the snapshot, its pricing, its tax, the room, the caps and the queue figures, and the sequence and chain link it assigns itself; the sign path that refuses a sale whose figures differ from that copy, the keychain's last assigned sequence and chain head and the rollback they catch (the store written first, then the mark, then the sign), the line's stock figures, the kit line it refuses from the snapshot's kit flag and the tally it completes from the clerk's rows and the snapshot's cross section; the core's exact arithmetic (the extension with the snapshot's pairs for the unit the row answers in, the tax, the tender sums), its half of the shared arithmetic fixture, so it agrees with the server to the cent; the capability added at run time for the Gable the shell loaded, and the enrolment's own setting that replaces the `GABLE_WORK_URL` environment variable; the refusal to sell offline when the store is missing under a live enrolment; the service worker for `/pos` on the running Gable's origin, registered only in the shell's frame and proven in each webview, and the "do not reload" warning where one refuses it. | 37 to 60 |
-| C2 | The counter's offline mode in `POSTerminal.ts`: the local cart, whose lines, units, quantities and tender the page holds and whose every figure the Rust core answers (5.1, 5.3), the page computing none of them, the result unknown cart with the default `replaces_sale_id`, the "different customer" declaration and the waiting till close, the tender rules, the banner and strip (the kit line it refuses at the counter), the offline receipt, the sync driver with the drain before any snapshot refresh and the reconnect handling of an unknown cart, the signed queue figures and the confirmed mark, the drain before close. `work-offline` keeps its fence and names the counter's queue as the one exception. | 30 to 45 |
+| C1 | The Rust queue store, keychain keys, signing, commands and fence in `tauri/core` and `tauri/gable-work`; the core's own copy of the snapshot, its pricing, its tax, the room, the caps and the queue figures, and the sequence and chain link it assigns itself; the sign path that refuses a sale whose figures differ from that copy, the keychain's last assigned sequence and chain head and the rollback they catch (the store written first, then the mark, then the sign), the line's stock figures, the kit line it refuses from the snapshot's kit flag and the tally it completes from the clerk's rows and the snapshot's cross section; the core's exact arithmetic (the extension with the snapshot's pairs for the unit the row answers in, the tax, the tender sums), its half of the shared arithmetic fixture, so it agrees with the server to the cent; the capability added at run time for the Gable the shell loaded, and the enrolment's own setting that replaces the `GABLE_WORK_URL` environment variable; the refusal to sell offline when the store is missing under a live enrolment; the service worker for `/pos` on the running Gable's origin, precaching the build's whole asset list, registered only in the shell's frame and proven in WebKitGTK, the work shell's Linux webview, running an offline reload of `/pos` from the cache (the WKWebView and WebView2 proofs are P1's), and the mark on the document that a webview refused it. | 37 to 60 |
+| C2 | The counter's offline mode in `POSTerminal.ts`: the local cart, whose lines, units, quantities and tender the page holds and whose every figure the Rust core answers (5.1, 5.3), the page computing none of them, the result unknown cart with the default `replaces_sale_id`, the "different customer" declaration and the waiting till close, the tender rules, the banner and strip (the kit line it refuses at the counter, and "Do not reload while offline" where C1 marks that the webview refused the service worker), the offline receipt, the sync driver with the drain before any snapshot refresh and the reconnect handling of an unknown cart, the signed queue figures and the confirmed mark, the drain before close. `work-offline` keeps its fence and names the counter's queue as the one exception. | 30 to 45 |
 | C3 | The manager screens: offline exceptions on the branch day page, the counter's offline settings, device enrolment with the counter PIN. | 13 to 22 |
-| P1 | The Playwright and two register proofs of section 7, the walk in `docs/parity/WALKS.md`, the parity row and the superseded documents of the Status updated. | 10 to 16 |
+| P1 | The service worker's offline reload of `/pos` proven in WKWebView (macOS) and WebView2 (Windows), which C1's box cannot run, with C1's WebKitGTK proof as the pattern. These two proofs need a real macOS machine and a real Windows machine, not a simulator, and CP-13 is not done until both are shown; the Playwright and two register proofs of section 7, the walk in `docs/parity/WALKS.md`, the parity row and the superseded documents of the Status updated. | 10 to 16 |
 | | **Total** | **197 to 313** |
 
 O1 to O4 can run beside C1. C2 needs O2 and C1; C3 needs O4; P1 is last.

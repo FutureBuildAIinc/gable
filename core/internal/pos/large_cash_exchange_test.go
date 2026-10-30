@@ -75,10 +75,10 @@ func TestCP17_ExchangeCarriesThePayerAcrossTheThreshold(t *testing.T) {
 	if refused.status != http.StatusConflict || !strings.Contains(string(refused.raw), "payer_details_required") {
 		t.Fatalf("the exchange without the payer = %d: %s, want 409 payer_details_required", refused.status, refused.raw)
 	}
-	if n := f.scalar(`SELECT count(*) FROM large_cash_events`); n.(int64) != 0 {
+	if n := countOf(t, f.db, `SELECT count(*) FROM large_cash_events WHERE branch_id = $1`, f.branchID); n != 0 {
 		t.Errorf("the refused exchange recorded %v crossings, want none", n)
 	}
-	if n := f.scalar(`SELECT count(*) FROM pos_returns`); n.(int64) != 0 {
+	if n := countOf(t, f.db, `SELECT count(*) FROM pos_returns WHERE branch_id = $1`, f.branchID); n != 0 {
 		t.Errorf("the refused exchange wrote %v returns, want none", n)
 	}
 
@@ -90,7 +90,7 @@ func TestCP17_ExchangeCarriesThePayerAcrossTheThreshold(t *testing.T) {
 	}
 	var total int64
 	var state, rule string
-	if err := f.db.Pool.QueryRow(ctxBG(), `SELECT total_cents, state, rule_family FROM large_cash_events`).Scan(&total, &state, &rule); err != nil {
+	if err := f.db.Pool.QueryRow(ctxBG(), `SELECT total_cents, state, rule_family FROM large_cash_events WHERE branch_id = $1`, f.branchID).Scan(&total, &state, &rule); err != nil {
 		t.Fatalf("no crossing was recorded: %v", err)
 	}
 	if rule != "US_8300" || state != "reportable" {
@@ -140,7 +140,7 @@ func TestCP17_ExchangeUnderTheThresholdAsksNothing(t *testing.T) {
 	if r.status != http.StatusCreated {
 		t.Fatalf("the exchange under the threshold = %d: %s", r.status, r.raw)
 	}
-	if n := f.scalar(`SELECT count(*) FROM large_cash_events`); n.(int64) != 0 {
+	if n := countOf(t, f.db, `SELECT count(*) FROM large_cash_events WHERE branch_id = $1`, f.branchID); n != 0 {
 		t.Errorf("the exchange under the threshold recorded %v crossings, want none", n)
 	}
 }

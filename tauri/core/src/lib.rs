@@ -17,6 +17,7 @@
 
 pub mod custody;
 pub mod fence;
+pub mod offline;
 pub mod profiles;
 pub mod shell;
 pub mod signin;

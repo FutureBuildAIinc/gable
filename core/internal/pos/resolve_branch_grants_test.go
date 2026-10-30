@@ -103,7 +103,7 @@ func TestTheResolutionHoldsTheSaleToTheCallersGrantsWithoutAHeader(t *testing.T)
 	if got := f.accountBalance("1010"); got != 0 {
 		t.Errorf("card balance = %d, want 0 (charged 599, refunded 599 exactly once)", got)
 	}
-	if got := countOf(t, f.db, `SELECT count(*) FROM payment_refunds`); got != 1 {
+	if got := f.counterRefunds(t); got != 1 {
 		t.Errorf("%d refund rows, want 1 (one booked refund of the one tender)", got)
 	}
 
@@ -151,7 +151,7 @@ func TestTheResolutionHoldsTheSaleToTheCallersGrantsWithoutAHeader(t *testing.T)
 	if calls != 4 {
 		t.Errorf("%d gateway refund calls, want 4 (each sale's stranded call and its one later act)", calls)
 	}
-	if got := countOf(t, f.db, `SELECT count(*) FROM payment_refunds`); got != 2 {
+	if got := f.counterRefunds(t); got != 2 {
 		t.Errorf("%d refund rows, want 2 (one booked refund per sale)", got)
 	}
 	f.assertARInvariants(t)

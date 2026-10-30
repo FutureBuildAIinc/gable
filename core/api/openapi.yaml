@@ -44,6 +44,7 @@ tags:
   - name: integration
   - name: inventory
   - name: invoice
+  - name: large-cash
   - name: links
   - name: location
   - name: marketIndex
@@ -6508,7 +6509,7 @@ paths:
       tags: [documents]
       summary: Email a customer statement
       description: >-
-        Renders the statement as the print route does and sends it to the customer's email address from a background task, answering 202 at once. The send is recorded in email_deliveries (GET /api/v1/email-deliveries) with the sender's answer or its error. A customer with no email address is a 400 naming customer. Same parameters, roles and branch rules as the print route.
+        Renders the statement as the print route does and sends it to the customer's email address from a background task, answering 202 at once with the queued delivery row's delivery_id. The send resolves that row in email_deliveries (GET /api/v1/email-deliveries) to sent, logged or failed, with the sender's answer or its error. A customer with no email address is a 400 naming customer. Same parameters, roles and branch rules as the print route.
       security:
         - BearerJWT: []
       parameters:
@@ -6588,7 +6589,7 @@ paths:
       tags: [documents]
       summary: Email a quote to its customer
       description: >-
-        Renders the quote as the print route does and sends it to the customer's email address from a background task, answering 202 at once. The send is recorded in email_deliveries. A customer with no email address is a 400 naming customer.
+        Renders the quote as the print route does and sends it to the customer's email address from a background task, answering 202 at once with the queued delivery row's delivery_id. The send resolves that row in email_deliveries to sent, logged or failed. A customer with no email address is a 400 naming customer.
       security:
         - BearerJWT: []
       parameters:
@@ -7542,7 +7543,7 @@ paths:
           required: false
           schema:
             type: string
-            enum: [sent, failed]
+            enum: [queued, sent, logged, failed]
         - name: document_id
           in: query
           required: false
@@ -9199,7 +9200,7 @@ paths:
       tags:
         - invoice
       summary: Email invoice to customer
-      description: Queues an email to the customer with the invoice PDF attached, sent through the configured sender (SMTP when SMTP_HOST is set, otherwise the log sender). Returns 202 Accepted immediately; the email is dispatched asynchronously and its outcome, the sender's answer or its error, is written to email_deliveries (GET /api/v1/email-deliveries). Fails if the customer has no email address on file.
+      description: Queues an email to the customer with the invoice PDF attached, sent through the configured sender (SMTP when SMTP_HOST is set, otherwise the log sender, which records the mail without sending it). Returns 202 Accepted immediately with the id of the queued delivery row; the email is dispatched asynchronously and resolves that row to sent (the SMTP server took it), logged (the log sender took it, nothing left the process) or failed, with the sender's answer or its error (GET /api/v1/email-deliveries). Fails if the customer has no email address on file.
       parameters:
         - name: id
           in: path
@@ -9570,6 +9571,156 @@ paths:
         '428':
           $ref: '#/components/responses/WirePreconditionRequired'
         '500': *id004
+  /api/v1/large-cash/worklist:
+    get:
+      operationId: largeCashWorklist
+      tags: [large-cash]
+      summary: The manager's large cash worklist
+      description: >-
+        Every crossing the dealer owes a filing on, one row per crossing, in the order the manager should work them. The severity ranks by the deadline first and the amount second, so a small filing due tomorrow sits above a large filing due in ten days, and the recommended action is the ladder: capture the payer's details, then file, then chase a filing past its deadline, then issue the customer statement. A row that is not reportable (a Canadian record, an identity declined crossing) offers no filing; the identity declined row says so in words and asks a manager to look at it. The deadline is computed as a rule, the receipt anchor plus 15 days, and the row carries whether it is past. The row never carries the payer's taxpayer identification number. A branch scoped caller sees only the crossings its branch received cash for or contributed cash to; the aggregate each row carries is the dealer's central one.
+      parameters:
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: The ranked worklist.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LargeCashWorklist"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/v1/large-cash/events/{id}/filing:
+    post:
+      operationId: largeCashRecordFiling
+      tags: [large-cash]
+      summary: Record the filing of a Form 8300 for a crossing
+      description: >-
+        The manager's record of the Form 8300 they filed for this crossing: the day they filed it, the BSA E-Filing acknowledgement number they typed and who recorded it. Every reportable crossing is over the threshold, so its filing is required: a request for a voluntary filing (a below threshold report) is answered 409. The crossing's filing row is taken in place: two managers recording a filing on one crossing at the same time cannot both land, and the one that loses is answered 409 (the crossing is already filed). A Canadian crossing and an identity declined crossing are not filings at all and are answered 409. The act is a manager's, so a machine key is refused 403.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: The crossing the filing is for.
+          schema: {type: string, format: uuid}
+        - $ref: "#/components/parameters/XBranchId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LargeCashFilingRequest"
+      responses:
+        "200":
+          description: The recorded filing.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LargeCashFiling"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "409":
+          $ref: "#/components/responses/WireConflict"
+  /api/v1/large-cash/events/{id}/form-8300:
+    get:
+      operationId: largeCashForm8300
+      tags: [large-cash]
+      summary: The Form 8300 data set for a crossing
+      description: >-
+        The data set the filer types into BSA E-Filing: the payer's name, address, taxpayer identification number, date of birth and occupation, the amount and the dates of the cash, and the branch the filing is made for. This is the one surface that carries the taxpayer identification number, because the IRS form cannot be completed without it, so the route is the dealer's own and admin's only and a machine key is refused 403. The export is audited without the number in the audit body. Gable does not file: the export carries the sentence that says so.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: The crossing the form is for.
+          schema: {type: string, format: uuid}
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: The Form 8300 data set.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LargeCashForm8300"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "409":
+          $ref: "#/components/responses/WireConflict"
+  /api/v1/large-cash/statements:
+    get:
+      operationId: largeCashStatements
+      tags: [large-cash]
+      summary: The customer statements for a year
+      description: >-
+        The customer statements for a year, one per payer who had reportable cash in it: the business name and address, the contact name and telephone number, the aggregate amount of reportable cash received in the year, and the sentence that says the information was furnished to the IRS. The statement is a separate obligation from the filing and runs on its own clock: it is due on or before the last day of the first month of the year after the cash was received. The statement never carries the payer's taxpayer identification number and never says the dealer noted the transaction was suspicious. A branch scoped caller sees the payers whose crossings touched its branch; the aggregate each statement carries is the dealer's whole year for that payer, because the United States aggregation is deliberately central.
+      parameters:
+        - name: year
+          in: query
+          required: false
+          description: The year the cash was received. The current year when it is absent.
+          schema: {type: integer, minimum: 2000, maximum: 2100}
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: The year's statements.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LargeCashStatements"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/v1/large-cash/events/{id}/statement:
+    post:
+      operationId: largeCashIssueStatement
+      tags: [large-cash]
+      summary: Issue the customer statement for a crossing's payer
+      description: >-
+        The customer statement for the crossing's payer and the year the cash was received, issued once. A statement says the information was furnished to the IRS, so it is issued only for a reportable crossing whose Form 8300 is recorded as filed (409 otherwise). The generator also refuses to carry the dealer's suspicion of the transaction on the customer's statement and refuses a voluntary filing; these are rules in the code rather than a training note. Of several managers issuing one statement exactly one is answered 200 and the rest 409. The act is a manager's, so a machine key is refused 403.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: The crossing whose payer the statement is for.
+          schema: {type: string, format: uuid}
+        - $ref: "#/components/parameters/XBranchId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LargeCashStatementRequest"
+      responses:
+        "200":
+          description: The issued statement.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LargeCashStatement"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "409":
+          $ref: "#/components/responses/WireConflict"
   /api/v1/links/quotes/{id}:
     get:
       operationId: linksQuoteResolve
@@ -14211,7 +14362,7 @@ paths:
         - name: status
           in: query
           required: false
-          schema: {type: string, enum: [open, held, completed, voided]}
+          schema: {type: string, enum: [open, held, completed, voided, abandoned]}
         - name: q
           in: query
           required: false
@@ -14315,7 +14466,7 @@ paths:
       tags: [pos]
       summary: Email the sale's receipt
       description: >-
-        Sends the sale's invoice to the account's contact exactly as the invoice email route does (the same service call, the same words, 202 and {"status":"queued"}; the outcome is written to email_deliveries), under the counter's own roles admin, owner and cashier. The sale is read as the sale read reads it (404 for a sale the caller cannot read). A sale that is not completed or has no invoice answers 409 with the blocker no_receipt; a walk in sale (no customer, or the shared walk in customer, whatever address that row holds), or an account with no email address on file, answers 409 with the blocker no_contact and words the card can show. Nothing is sent for any refusal.
+        Sends the sale's invoice to the account's contact exactly as the invoice email route does (the same service call, the same words, 202 and {"status":"queued"} with the queued delivery row's delivery_id; the send resolves that row to sent, logged or failed in email_deliveries), under the counter's own roles admin, owner and cashier. The sale is read as the sale read reads it (404 for a sale the caller cannot read). A sale that is not completed or has no invoice answers 409 with the blocker no_receipt; a walk in sale (no customer, or the shared walk in customer, whatever address that row holds), or an account with no email address on file, answers 409 with the blocker no_contact and words the card can show. Nothing is sent for any refusal.
       parameters:
         - name: id
           in: path
@@ -14671,7 +14822,7 @@ paths:
       tags: [pos]
       summary: What the large cash rule asks of this payment
       description: >-
-        The counter's look before Pay (CP-17a): the server classifies the named tenders against the sale it holds under the branch's country rule (the United States Form 8300 family, or the Canadian dealer threshold when the dealer has it on) and answers whether the payer's details will be required and which fields the rule needs. The branch's walk-in identity floor rides the same answer: over the floor the counter asks a walk-in who paid cash to identify themselves, so their cash sales are counted together, and the identity the counter already holds may be carried here so the preview and the completion key the same person. Writes nothing; the completion's own capture is the authority.
+        The counter's look before Pay (CP-17a): the server classifies the named tenders against the sale it holds under the branch's country rule (the United States Form 8300 family, or the Canadian dealer threshold when the dealer has it on) and answers whether the payer's details will be required and which fields the rule needs. The branch's walk-in identity floor rides the same answer: over the floor the counter asks a walk-in who paid cash to identify themselves, so their cash sales are counted together, and the identity the counter already holds may be carried here so the preview and the completion key the same person. A payer carried on a server with no valid vault key is refused 503 with the blocker large_cash_vault_unavailable, as the completion refuses it. Writes nothing; the completion's own capture is the authority.
       requestBody:
         required: true
         content:
@@ -14695,6 +14846,8 @@ paths:
           $ref: "#/components/responses/WireNotFound"
         "500":
           $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
   /api/v1/pos/transactions/{id}/void:
     post:
       operationId: posTransactionVoid
@@ -15301,6 +15454,68 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/ForbiddenEither"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/pos/offline/policy:
+    get:
+      operationId: posOfflinePolicyGet
+      tags: [pos]
+      summary: A branch's offline counter policy
+      description: >-
+        The branch's resolved offline selling policy (ADR 0011 section 4): the branch's own row in pos_offline_policy when set (source branch), else the database wide defaults in system_settings (source default), else off (source none). Includes enrolled_register_count and max_account_exposure_cents (account_cap_cents times the branch's enrolled registers). Admin, owner and finance; a branch the caller may not target is 403, and an unknown branch is 404.
+      parameters:
+        - name: branch_id
+          in: query
+          required: true
+          schema: {type: string, format: uuid}
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: The resolved offline counter policy.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PosOfflinePolicy"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    put:
+      operationId: posOfflinePolicyPut
+      tags: [pos]
+      summary: Set or clear a branch's offline counter policy
+      description: >-
+        Sets the branch's own offline counter policy in pos_offline_policy, or clears it with clear true so the database wide defaults (or none) apply again. Only cash, check and account tenders may be allowed offline. Admin and owner only (finance may read, not write), never a machine key; a branch the caller may not target is 403, and an unknown branch is 404. Audited as pos.offline.policy in the same transaction.
+      parameters:
+        - $ref: "#/components/parameters/XBranchId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PosOfflinePolicyRequest"
+      responses:
+        "200":
+          description: The offline counter policy now in force.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PosOfflinePolicy"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
         "500":
           $ref: "#/components/responses/InternalError"
   /api/v1/pos/end-of-day:
@@ -27719,6 +27934,10 @@ components:
         status:
           type: string
           enum: [queued]
+        delivery_id:
+          type: string
+          format: uuid
+          description: The queued email_deliveries row, already written; read its status (sent, logged or failed) from GET /api/v1/email-deliveries. Absent only when the row could not be written.
     OrdersDraftStatus:
       type: string
       enum: [open, promoted, discarded]
@@ -28056,7 +28275,9 @@ components:
           description: The document's number; the account number for a statement.
         status:
           type: string
-          enum: [sent, failed]
+          enum: [queued, sent, logged, failed]
+          description: >-
+            queued the moment the sending route answers 202, then sent (the SMTP server took it), logged (a log sender took it: nothing left the process, email is not set up on this server) or failed (the send errored).
         sender_answer:
           type: [string, "null"]
           description: The sender's own answer; the SMTP server's reply, or a note that the log sender logged and did not send.
@@ -30032,6 +30253,7 @@ components:
           description: Required by a void.
     InvoiceEmailResponse:
       type: object
+      description: The queued send. The 202 alone never says the mail went out; the delivery row the delivery_id names is where the outcome lands.
       required:
         - status
       properties:
@@ -30039,6 +30261,10 @@ components:
           type: string
           enum:
             - queued
+        delivery_id:
+          type: string
+          format: uuid
+          description: The queued email_deliveries row, already written; read its status (sent, logged or failed) from GET /api/v1/email-deliveries. Absent only when the row could not be written.
     CreditMemoSummary:
       type: object
       description: A credit memo header, used as a list item and as the head of the full document.
@@ -30777,6 +31003,183 @@ components:
             - 'null'
         limit:
           type: integer
+    LargeCashWorklist:
+      type: object
+      required: [items, count, generated_at]
+      properties:
+        items:
+          type: array
+          items: {$ref: "#/components/schemas/LargeCashWorklistRow"}
+        count: {type: integer}
+        generated_at: {type: string, format: date-time}
+    LargeCashWorklistRow:
+      type: object
+      required: [event_id, payer_key, payer_name, branch_id, branch_name, branch_address, contributed_branch_ids, currency, total_cents, rule_family, threshold_cents, transaction_count, tender_count, event_state, filing_state, past_deadline, statement_state, payer_details_captured, severity_score, recommended_action, adviser_note]
+      properties:
+        event_id: {type: string, format: uuid}
+        payer_key:
+          type: string
+          description: >-
+            The aggregation key: the named customer's id, else the captured identity's digest. It is a digest, never the taxpayer identification number.
+        payer_name: {type: string, description: The customer's name, else the name captured at the counter.: ''}
+        customer_id: {type: [string, "null"], format: uuid}
+        customer_account: {type: string}
+        branch_id: {type: string, format: uuid}
+        branch_name: {type: string}
+        branch_address: {type: string}
+        contributed_branch_ids:
+          type: array
+          description: Every branch that contributed to the aggregate.
+          items: {type: string, format: uuid}
+        currency: {type: string}
+        total_cents: {type: integer, format: int64, description: The reportable cash total since the last report.}
+        rule_family: {type: string, enum: [US_8300, CA_DEALER]}
+        threshold_cents: {type: integer, format: int64}
+        transaction_count: {type: integer, description: The cash transactions in the aggregate.}
+        tender_count: {type: integer, description: The cash tenders counted in the aggregate.}
+        first_date: {type: [string, "null"], format: date-time, description: The first cash in the aggregate.}
+        last_date: {type: [string, "null"], format: date-time, description: The most recent cash in the aggregate.}
+        event_state: {type: string, enum: [reportable, recorded, identity declined]}
+        filing_state:
+          type: string
+          enum: [not_reportable, reportable, filed, voluntary]
+          description: >-
+            Not yet reportable, reportable and not filed, filed, or voluntary (the payer asked not to be reported).
+        filing_deadline:
+          type: [string, "null"]
+          format: date-time
+          description: The receipt anchor plus 15 days. Null when there is no filing to make.
+        past_deadline: {type: boolean}
+        filed_date: {type: [string, "null"], format: date-time}
+        acknowledgement_no: {type: string}
+        statement_state: {type: string, enum: [not_issued, issued]}
+        statement_issued_date: {type: [string, "null"], format: date-time}
+        payer_details_captured: {type: boolean}
+        severity_score: {type: integer, format: int64}
+        recommended_action:
+          type: string
+          enum: [capture_payer_details, file, chase_filing, issue_statement, manager_review, dealer_record]
+        note: {type: string, description: The plain sentence that says what the row is.}
+        adviser_note: {type: string, description: The dealer confirms each filing with its own adviser.}
+    LargeCashFilingRequest:
+      type: object
+      properties:
+        filed_date:
+          type: string
+          format: date
+          description: The day the Form 8300 was filed. The server's day when it is absent.
+        acknowledgement_no:
+          type: string
+          maxLength: 64
+          description: >-
+            The BSA E-Filing acknowledgement number the manager typed. Required for a filing.
+        voluntary:
+          type: boolean
+          description: >-
+            Always refused with 409 on a reportable crossing: every reportable crossing is over the threshold, so its filing is required.
+    LargeCashFiling:
+      type: object
+      required: [event_id, state, recorded_by, recorded_at, past_deadline]
+      properties:
+        event_id: {type: string, format: uuid}
+        state: {type: string, enum: [filed, voluntary]}
+        filed_date: {type: [string, "null"], format: date-time}
+        acknowledgement_no: {type: string}
+        recorded_by: {type: string}
+        recorded_at: {type: string, format: date-time}
+        past_deadline: {type: boolean}
+    LargeCashForm8300:
+      type: object
+      required: [event_id, form, currency, amount_cents, transaction_count, tender_count, first_date, last_date, received_at, filing_deadline, payer, filer, note, adviser_note]
+      properties:
+        event_id: {type: string, format: uuid}
+        form: {type: string, description: The IRS form the data set is for.}
+        currency: {type: string}
+        amount_cents: {type: integer, format: int64}
+        transaction_count: {type: integer}
+        tender_count: {type: integer}
+        first_date: {type: string, format: date-time}
+        last_date: {type: string, format: date-time}
+        received_at: {type: string, format: date-time}
+        filing_deadline: {type: string, format: date-time}
+        payer:
+          type: object
+          description: "Form 8300 Part I: the payer as the form takes it."
+          required: [name, address, taxpayer_id]
+          properties:
+            name: {type: string}
+            address: {type: string}
+            taxpayer_id:
+              type: string
+              description: >-
+                The payer's taxpayer identification number, in full. This is the one surface that carries it.
+            date_of_birth: {type: string}
+            occupation: {type: string}
+        third_party_payer:
+          type: [object, "null"]
+          description: "Form 8300 Part II: the person on whose behalf the transaction was conducted."
+          properties:
+            name: {type: string}
+        filer:
+          type: object
+          description: "The legal person the filing is made for: the branch that received the cash."
+          required: [branch_id, branch_name]
+          properties:
+            branch_id: {type: string, format: uuid}
+            branch_name: {type: string}
+            address: {type: string}
+        note: {type: string, 'description:"Gable does not file': the filer types these figures into BSA E-Filing."}
+        adviser_note: {type: string, description: The dealer confirms each filing with its own adviser.}
+        taxpayer_id_hint:
+          type: [string, "null"]
+          description: The masked hint of the taxpayer identification number, for the filer to check.
+    LargeCashStatements:
+      type: object
+      required: [year, items, count]
+      properties:
+        year: {type: integer}
+        items:
+          type: array
+          items: {$ref: "#/components/schemas/LargeCashStatement"}
+        count: {type: integer}
+    LargeCashStatement:
+      type: object
+      required: [payer_key, year, payer_name, payer_address, business_name, business_address, contact_name, telephone, aggregate_cents, currency, crossing_count, state, due_date, note, adviser_note]
+      properties:
+        payer_key: {type: string, 'description:"The aggregation key': the payer the statement is for."}
+        year: {type: integer}
+        payer_name: {type: string, description: The addressee.}
+        payer_address: {type: string, description: The addressee's address.}
+        business_name: {type: string, description: The dealer's name, from the dealer profile or the receiving branch.: ''}
+        business_address: {type: string, description: The dealer's information contact address, the receiving branch's.: ''}
+        contact_name: {type: string, description: The dealer's information contact, the receiving branch.: ''}
+        telephone: {type: string, description: The dealer's information contact telephone.}
+        aggregate_cents:
+          type: integer
+          format: int64
+          description: >-
+            The payer's counted cash received in the calendar year in the receiving branch's own zone, summed from the counted tenders.
+        currency: {type: string}
+        crossing_count: {type: integer}
+        first_date: {type: [string, "null"], format: date-time}
+        last_date: {type: [string, "null"], format: date-time}
+        state: {type: string, enum: [not_issued, issued]}
+        issued_date: {type: [string, "null"], format: date-time}
+        issued_by: {type: string}
+        due_date:
+          type: string
+          format: date-time
+          description: >-
+            The statement's own deadline: the last day of the first month of the year after the cash was received.
+        note: {type: string, description: The information was furnished to the IRS.}
+        adviser_note: {type: string, description: The dealer confirms each filing with its own adviser.}
+    LargeCashStatementRequest:
+      type: object
+      properties:
+        include_suspicion:
+          type: boolean
+          description: >-
+            Asks the generator to put the dealer's suspicion of the transaction on the customer's statement. The generator refuses.
     LinkAnswer:
       type: object
       description: >-
@@ -31318,8 +31721,9 @@ components:
         - provider
         - ship_to_rate
         - branch_rate
+        - offline_rate
         - legacy
-      description: How the order's tax was found (ADR 0005 section 3). Rows written before cycle 2 are legacy.
+      description: How the order's tax was found (ADR 0005 section 3; ADR 0011 section 3.2). Rows written before cycle 2 are legacy.
     SalesLineType:
       type: string
       enum:
@@ -34574,7 +34978,7 @@ components:
             $ref: "#/components/schemas/PortalPaymentAllocation"
     PosStatus:
       type: string
-      enum: [open, held, completed, voided]
+      enum: [open, held, completed, voided, abandoned]
     PosTenderMethod:
       type: string
       enum: [cash, check, card, account, store_credit]
@@ -34615,7 +35019,7 @@ components:
             $ref: "#/components/schemas/PosTenderRequest"
         picked_up_by: {type: [string, "null"], description: "Who collected the basket, at most 200 characters."}
         revision: {type: integer, format: int64, minimum: 1, description: "The sale's revision; or send If-Match."}
-        payer: {$ref: "#/components/schemas/PosPayerCapture", description: "The payer's details the counter captured for a large cash crossing (CP-17a); required when this payment takes the payer over the branch's threshold, refused 409 payer_details_required without them."}
+        payer: {$ref: "#/components/schemas/PosPayerCapture", description: "The payer's details the counter captured for a large cash crossing (CP-17a); required when this payment takes the payer over the branch's threshold, refused 409 payer_details_required without them, and refused 503 large_cash_vault_unavailable on a server with no valid vault key, never stored in clear."}
         payer_declined: {type: boolean, description: "The counter's record that the walk-in declined to identify over the branch's walk-in identity floor (CP-17a); the sale goes ahead and the fact is recorded for the manager's worklist as an identity declined."}
         suspected_avoidance: {type: boolean, description: "The manager's mark that an instrument may be being used to avoid reporting (CP-17a); it makes a qualifying instrument count as cash whatever was sold."}
     PosPayerCapture:
@@ -34932,7 +35336,7 @@ components:
           description: >-
             The customer's counter alerts the clerk read and acknowledged before taking the exchange's replacement sale. A warning that asks to be acknowledged must be named here, or the exchange is refused with 409 alert_unacknowledged and nothing is written.
           items: {type: string, format: uuid}
-        payer: {$ref: "#/components/schemas/PosPayerCapture", description: "The payer's details the counter captured for a large cash crossing (CP-17a); required when this exchange's cash difference takes the payer over the branch's threshold, refused 409 payer_details_required without them."}
+        payer: {$ref: "#/components/schemas/PosPayerCapture", description: "The payer's details the counter captured for a large cash crossing (CP-17a); required when this exchange's cash difference takes the payer over the branch's threshold, refused 409 payer_details_required without them, and refused 503 large_cash_vault_unavailable on a server with no valid vault key, never stored in clear."}
         payer_declined: {type: boolean, description: "The counter's record that the walk-in declined to identify over the branch's walk-in identity floor (CP-17a); the exchange goes ahead and the fact is recorded for the manager's worklist as an identity declined."}
         suspected_avoidance: {type: boolean, description: "The manager's suspected avoidance mark (CP-17a); it makes a qualifying instrument count as cash whatever was sold."}
         tender_method: {type: string, enum: [cash, check, card], description: "The preview only: the method the counter will tender for the difference, so the server can say what the branch's large cash rule needs of this exchange before it is rung. The exchange takes the tender itself in tenders."}
@@ -35580,6 +35984,58 @@ components:
       properties:
         branch_id: {type: string, format: uuid}
         variance_threshold_cents: {type: [integer, "null"], format: int64, minimum: 0, description: "Null clears the branch's override."}
+    PosOfflineTender:
+      type: string
+      enum: [cash, check, account]
+    PosOfflinePolicy:
+      type: object
+      required:
+        - branch_id
+        - enabled
+        - tenders
+        - sale_cap_cents
+        - check_cap_cents
+        - account_cap_cents
+        - queue_total_cap_cents
+        - max_queued
+        - enrolled_register_count
+        - max_account_exposure_cents
+        - source
+        - updated_by
+        - updated_at
+        - revision
+      properties:
+        branch_id: {type: string, format: uuid}
+        enabled: {type: boolean}
+        tenders:
+          type: array
+          items: {$ref: "#/components/schemas/PosOfflineTender"}
+        sale_cap_cents: {type: integer, format: int64, minimum: 0}
+        check_cap_cents: {type: integer, format: int64, minimum: 0}
+        account_cap_cents: {type: integer, format: int64, minimum: 0}
+        queue_total_cap_cents: {type: integer, format: int64, minimum: 0}
+        max_queued: {type: integer, minimum: 0}
+        enrolled_register_count: {type: integer, minimum: 0, description: "Active (unrevoked) enrolled registers on the branch."}
+        max_account_exposure_cents: {type: integer, format: int64, minimum: 0, description: "Worst case exposure for one account across the branch's enrolled registers (account_cap_cents times enrolled_register_count)."}
+        source: {type: string, enum: [branch, default, none]}
+        updated_by: {type: [string, "null"]}
+        updated_at: {type: [string, "null"], format: date-time}
+        revision: {type: [integer, "null"], format: int64}
+    PosOfflinePolicyRequest:
+      type: object
+      required: [branch_id]
+      properties:
+        branch_id: {type: string, format: uuid}
+        clear: {type: boolean, description: "When true, deletes the branch override so the database wide defaults or none apply."}
+        enabled: {type: boolean, description: "Required unless clear is true."}
+        tenders:
+          type: array
+          items: {$ref: "#/components/schemas/PosOfflineTender"}
+        sale_cap_cents: {type: integer, format: int64, minimum: 0}
+        check_cap_cents: {type: integer, format: int64, minimum: 0}
+        account_cap_cents: {type: integer, format: int64, minimum: 0}
+        queue_total_cap_cents: {type: integer, format: int64, minimum: 0}
+        max_queued: {type: integer, minimum: 0, maximum: 100000}
     PosSettings:
       type: object
       required: [revision, rules]

@@ -204,35 +204,33 @@ func (s *Service) AttachCustomer(ctx context.Context, saleID uuid.UUID, in Attac
 		// (a ship to with no delivery type is a delivery: it names where the
 		// goods go). The departed customer's ship to never stays the sale's
 		// place of receipt.
+		var newShipTo *uuid.UUID
+		newDelivery := ""
 		switch {
 		case in.CustomerID == nil:
-			if err := s.repo.SetSaleDelivery(ctx, saleID, nil, ""); err != nil {
-				return err
-			}
 		case in.ShipToID != nil:
-			dt := in.DeliveryType
-			if dt == "" {
-				dt = "delivery"
-			}
-			if err := s.repo.SetSaleDelivery(ctx, saleID, in.ShipToID, dt); err != nil {
-				return err
+			newShipTo, newDelivery = in.ShipToID, in.DeliveryType
+			if newDelivery == "" {
+				newDelivery = "delivery"
 			}
 		case in.DeliveryType != "":
-			if err := s.repo.SetSaleDelivery(ctx, saleID, nil, in.DeliveryType); err != nil {
-				return err
-			}
-		default:
-			if err := s.repo.SetSaleDelivery(ctx, saleID, nil, ""); err != nil {
-				return err
-			}
+			newDelivery = in.DeliveryType
 		}
+		if err := s.repo.SetSaleDelivery(ctx, saleID, newShipTo, newDelivery); err != nil {
+			return err
+		}
+		// the tax follows the delivery answer too: a changed ship to or a
+		// switch between pickup and delivery moves the zone, so the stored
+		// totals are rebuilt the same way a moved customer rebuilds them
+		deliveryChanged := !sameShipTo(sale.ShipToID, newShipTo) || !sameDelivery(sale.DeliveryType, newDelivery)
+		sale.ShipToID, sale.DeliveryType = newShipTo, newDelivery
 		// the lines and the totals follow the customer now standing on the
 		// sale, when the customer moved on a sale with lines: the engine
 		// prices for that customer (the account's level, the walk-in's
 		// retail), and the tax honours its exemption
 		customerMoved := (sale.CustomerID == nil) != (in.CustomerID == nil) ||
 			(sale.CustomerID != nil && in.CustomerID != nil && *sale.CustomerID != *in.CustomerID)
-		if customerMoved {
+		if customerMoved || deliveryChanged {
 			lines, err := s.repo.GetLines(ctx, saleID)
 			if err != nil {
 				return err
@@ -242,8 +240,10 @@ func (s *Service) AttachCustomer(ctx context.Context, saleID uuid.UUID, in Attac
 				if in.CustomerID == nil {
 					sale.WalkInID = walkIn
 				}
-				if err := s.repriceSaleLines(ctx, sale, lines, actor); err != nil {
-					return err
+				if customerMoved {
+					if err := s.repriceSaleLines(ctx, sale, lines, actor); err != nil {
+						return err
+					}
 				}
 				if err := s.recalcTotals(ctx, sale); err != nil {
 					return err
@@ -306,10 +306,7 @@ func (s *Service) repriceSaleLines(ctx context.Context, sale *Sale, lines []sale
 				family[j].Position = places[len(places)-1] + (j - len(places) + 1)
 			}
 		}
-		if err := s.repo.RemoveLine(ctx, sale.ID, old.ID); err != nil {
-			return err
-		}
-		if err := s.repo.AddLines(ctx, sale.ID, family); err != nil {
+		if err := s.reAddLine(ctx, sale.ID, old, family); err != nil {
 			return err
 		}
 	}
@@ -320,4 +317,23 @@ func (s *Service) repriceSaleLines(ctx context.Context, sale *Sale, lines []sale
 // branch reach holds. The wall is the repository's.
 func (s *Service) ListRegisters(ctx context.Context) ([]CounterRegister, error) {
 	return s.repo.ListRegisters(ctx)
+}
+
+func sameShipTo(a, b *uuid.UUID) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	return *a == *b
+}
+
+// sameDelivery compares delivery answers as the column stores them: an empty
+// answer and a pickup are one answer, and case does not matter.
+func sameDelivery(a, b string) bool {
+	norm := func(v string) string {
+		if v == "" {
+			return "pickup"
+		}
+		return strings.ToLower(v)
+	}
+	return norm(a) == norm(b)
 }

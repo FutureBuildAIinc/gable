@@ -58,7 +58,7 @@ func TestDeliveryOrderTakesTheShipToZoneRate(t *testing.T) {
 	}
 
 	r := f.do("POST", "/api/v1/orders", map[string]any{
-		"customer_id": f.customerID.String(), "delivery_type": "delivery", "ship_to_id": shipTo.String(),
+		"customer_id": f.customerID.String(), "branch_id": f.branchID.String(), "delivery_type": "delivery", "ship_to_id": shipTo.String(),
 		"lines": []map[string]any{f.line("10")},
 	})
 	if r.status != http.StatusCreated {
@@ -103,7 +103,7 @@ func TestDeliveryOrderOutsideAnyZoneKeepsTheTypedRate(t *testing.T) {
 		t.Fatal(err)
 	}
 	r := f.do("POST", "/api/v1/orders", map[string]any{
-		"customer_id": f.customerID.String(), "delivery_type": "delivery", "ship_to_id": shipTo.String(),
+		"customer_id": f.customerID.String(), "branch_id": f.branchID.String(), "delivery_type": "delivery", "ship_to_id": shipTo.String(),
 		"lines": []map[string]any{f.line("10")},
 	})
 	if r.status != http.StatusCreated {

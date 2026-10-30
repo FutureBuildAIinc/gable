@@ -696,11 +696,18 @@ func (s *Service) priceLine(ctx context.Context, sale *Sale, pl salesdoc.ParsedL
 		// as its own amount.
 		//
 		// The dealer's rule is the only charge (money checklist item 6: the
-		// rule the screen shows is enforced on the server): what the
-		// request carried is overwritten here, and the colorant total and
-		// the base tier are read from the server's own rows, so the charge
-		// frozen on the record is the charge the price carries, never the
-		// number the screen happened to send.
+		// rule the screen shows is enforced on the server): the charge
+		// number the request carried is overwritten here. The base tier is
+		// read from the server's own rows when a formula is named; the
+		// colorant total is summed from the components the request sent
+		// (the clerk who mixes the can types those amounts), so the charge
+		// frozen on the record is the charge the price carries.
+		//
+		// The charge is per container, that is per sale unit, while the
+		// price is per price unit and the extension scales it by the unit
+		// ratio. The charge is therefore added as charge x uom_qty /
+		// price_uom_qty, so quantity x charge lands on the line exactly. A
+		// ratio that does not divide the charge exactly is refused.
 		if pl.Tint != nil {
 			rule, err := s.repo.TintChargeRule(ctx)
 			if err != nil {
@@ -714,7 +721,14 @@ func (s *Service) priceLine(ctx context.Context, sale *Sale, pl salesdoc.ParsedL
 			c := httpx.Cents(charge)
 			pl.Tint.TintChargeCents = &c
 			if charge > 0 && line.UnitPrice != nil {
-				p := *line.UnitPrice + httpx.Price(charge*100)
+				add, ok := tintPricePerUnit(charge, line.UOMQty, line.PriceUOMQty)
+				if !ok {
+					return line, out, invalid("line.tint",
+						"the tint charge is per container and cannot be carried exactly when this line is sold in "+
+							derefString(line.UOM)+" and priced per "+derefString(line.PriceUOM)+
+							": sell it in its price unit or remove the tint")
+				}
+				p := *line.UnitPrice + add
 				line.UnitPrice = &p
 			}
 			line.Tint = pl.Tint
@@ -914,6 +928,9 @@ func (s *Service) AddLine(ctx context.Context, saleID uuid.UUID, parsed []salesd
 				if old.ParentLineID != nil {
 					return invalid("line_id", "is a kit component: change the kit line, its components follow")
 				}
+				if err := refuseWeighedChange(old, in); err != nil {
+					return err
+				}
 				merged := mergeReplacedLine(old, in)
 				line, pricedOut, err := s.priceLine(ctx, sale, merged, actor)
 				if err != nil {
@@ -940,10 +957,7 @@ func (s *Service) AddLine(ctx context.Context, saleID uuid.UUID, parsed []salesd
 						family[j].Position = places[len(places)-1] + (j - len(places) + 1)
 					}
 				}
-				if err := s.repo.RemoveLine(ctx, saleID, old.ID); err != nil {
-					return err
-				}
-				if err := s.repo.AddLines(ctx, saleID, family); err != nil {
+				if err := s.reAddLine(ctx, saleID, old, family); err != nil {
 					return err
 				}
 				if in.UnitPrice != nil || old.PriceSource != salesdoc.PriceSourceOverride {
@@ -999,6 +1013,50 @@ func (s *Service) AddLine(ctx context.Context, saleID uuid.UUID, parsed []salesd
 		return nil, err
 	}
 	return out, nil
+}
+
+// refuseWeighedChange refuses a replace that moves a weighed line's product,
+// unit, quantity or line type: those are the scale's, as they are on the plus button. A
+// request that restates what the line already holds (a price override sends
+// the whole line) passes.
+func refuseWeighedChange(old *salesdoc.Line, in salesdoc.ParsedLine) error {
+	if old.WeightSource == nil {
+		return nil
+	}
+	changed := (in.LineType != "" && in.LineType != old.LineType) ||
+		(in.ProductID != nil && (old.ProductID == nil || *in.ProductID != *old.ProductID)) ||
+		(in.UOM != "" && (old.UOM == nil || in.UOM != *old.UOM)) ||
+		(in.HasQuantity && (old.Quantity == nil || in.Quantity != *old.Quantity))
+	if changed {
+		return invalid("line_id", "is weighed: the quantity is the scale's; remove the line and weigh again")
+	}
+	return nil
+}
+
+// reAddLine swaps a cart line for its priced rebuild (a price override, a
+// reprice for a new customer). The rebuilt top line takes the weight block
+// the old one carried and the scale ticket is pointed at it again, so
+// rebuilding a weighed line never loses the record of its weighing. The
+// ticket's link is written after the re-add so the foreign key never chases
+// the deleted row.
+func (s *Service) reAddLine(ctx context.Context, saleID uuid.UUID, old *salesdoc.Line, family []salesdoc.Line) error {
+	if old.WeightSource != nil && len(family) > 0 {
+		top := &family[0]
+		top.WeightSource, top.WeightGrossLb, top.WeightTareLb, top.WeightNetLb = old.WeightSource, old.WeightGrossLb, old.WeightTareLb, old.WeightNetLb
+		top.WeightNetBasis, top.ScaleDeviceID, top.ScaleTicketID = old.WeightNetBasis, old.ScaleDeviceID, old.ScaleTicketID
+		top.ScaleTicketNumber, top.ManualWeightReason = old.ScaleTicketNumber, old.ManualWeightReason
+		top.WeightCapturedBy, top.WeightCapturedAt = old.WeightCapturedBy, old.WeightCapturedAt
+	}
+	if err := s.repo.RemoveLine(ctx, saleID, old.ID); err != nil {
+		return err
+	}
+	if err := s.repo.AddLines(ctx, saleID, family); err != nil {
+		return err
+	}
+	if old.ScaleTicketID != nil && len(family) > 0 {
+		return s.repo.LinkScaleTicketLine(ctx, *old.ScaleTicketID, family[0].ID)
+	}
+	return nil
 }
 
 // mergeReplacedLine overlays a line request onto the existing cart line it
@@ -1224,7 +1282,11 @@ func parsedFromLine(l *salesdoc.Line, qty httpx.Quantity) salesdoc.ParsedLine {
 	// the dealer's tint charge once.
 	if l.Tint != nil {
 		if pl.UnitPrice != nil && l.Tint.TintChargeCents != nil && *l.Tint.TintChargeCents > 0 {
-			base := *pl.UnitPrice - httpx.Price(int64(*l.Tint.TintChargeCents)*100)
+			// ok cannot be false for a line this code wrote: the add put in
+			// this same charge under this same unit pair and refused any pair
+			// that could not carry it exactly.
+			add, _ := tintPricePerUnit(int64(*l.Tint.TintChargeCents), l.UOMQty, l.PriceUOMQty)
+			base := *pl.UnitPrice - add
 			if base < 0 {
 				base = 0
 			}
@@ -1386,4 +1448,27 @@ func (s *Service) ReceiptInvoice(ctx context.Context, saleID uuid.UUID) (invoice
 		return uuid.Nil, false, err
 	}
 	return *sale.InvoiceID, walkInID == *sale.CustomerID, nil
+}
+
+// tintPricePerUnit is the tint charge (cents per container) as an amount per
+// PRICE unit, in price ten-thousandths: charge x 100 x uom_qty / price_uom_qty.
+// A missing pair is 1 and 1. It answers false where the division is not
+// exact, so the extension (quantity x price x price_uom_qty / uom_qty) lands
+// the charge to the cent with no drift.
+func tintPricePerUnit(chargeCents int64, uomQty, priceUOMQty *httpx.Quantity) (httpx.Price, bool) {
+	uq, pq := int64(salesdoc.One), int64(salesdoc.One)
+	if uomQty != nil {
+		uq = int64(*uomQty)
+	}
+	if priceUOMQty != nil {
+		pq = int64(*priceUOMQty)
+	}
+	if uq <= 0 || pq <= 0 {
+		return 0, false
+	}
+	n := chargeCents * 100 * uq
+	if n%pq != 0 {
+		return 0, false
+	}
+	return httpx.Price(n / pq), true
 }

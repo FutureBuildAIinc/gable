@@ -14,10 +14,15 @@ type Service struct{ repo Repository }
 
 func NewService(repo Repository) *Service { return &Service{repo: repo} }
 
-// Record writes one delivery row. A sending route calls it after the send,
-// with the sender's answer or its error.
+// Record writes one delivery row. A sending route calls it before the send,
+// with the queued status, so the row exists the moment the route answers.
 func (s *Service) Record(ctx context.Context, e Entry) (*Delivery, error) {
 	return s.repo.Insert(ctx, e)
+}
+
+// SetOutcome resolves one queued row with the send's outcome.
+func (s *Service) SetOutcome(ctx context.Context, id uuid.UUID, status, senderAnswer, sendError string) error {
+	return s.repo.SetOutcome(ctx, id, status, senderAnswer, sendError)
 }
 
 // List returns one page and whether more follow (the repository reads one

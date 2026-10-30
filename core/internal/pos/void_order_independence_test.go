@@ -134,12 +134,31 @@ func orderGateway(t *testing.T, shape orderShape) *fakeGateway {
 	return gw
 }
 
-// walkInBalance reads the walk-in customer's subledger balance in cents.
+// walkInBalance reads the walk-in customer's subledger balance in cents,
+// over the rows this fixture's own documents made. The walk-in row is shared
+// by every counter in the deployment, so its balance is the sum of the rows
+// the documents of this fixture named, never the customer's whole balance:
+// another package's walk-in sale would move that.
 func (f *fixture) walkInBalance(t *testing.T) int64 {
 	t.Helper()
 	var n int64
-	if err := f.db.Pool.QueryRow(context.Background(),
-		`SELECT ROUND(balance_due * 100)::bigint FROM customers WHERE account_number = 'WALK-IN'`).Scan(&n); err != nil {
+	if err := f.db.Pool.QueryRow(context.Background(), `
+		SELECT COALESCE(SUM(amount)::bigint, 0) FROM customer_transactions
+		WHERE customer_id = (SELECT id FROM customers WHERE account_number = 'WALK-IN')
+			AND reference_id IN (
+				(SELECT id FROM invoices WHERE branch_id = $1)
+				UNION (SELECT id FROM credit_memos WHERE branch_id = $1)
+				UNION (SELECT id FROM payments WHERE branch_id = $1)
+				UNION (SELECT id FROM pos_transactions WHERE branch_id = $1)
+				UNION (SELECT id FROM pos_returns WHERE branch_id = $1)
+				UNION (SELECT id FROM ar_applications
+					WHERE invoice_id IN (SELECT id FROM invoices WHERE branch_id = $1)
+						OR payment_id IN (SELECT id FROM payments WHERE branch_id = $1)
+						OR credit_memo_id IN (SELECT id FROM credit_memos WHERE branch_id = $1))
+				UNION (SELECT id FROM payment_refunds
+					WHERE payment_id IN (SELECT id FROM payments WHERE branch_id = $1)
+						OR credit_memo_id IN (SELECT id FROM credit_memos WHERE branch_id = $1)))`,
+		f.branchID).Scan(&n); err != nil {
 		t.Fatal(err)
 	}
 	return n

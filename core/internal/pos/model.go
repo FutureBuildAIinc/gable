@@ -23,6 +23,7 @@ const (
 	StatusHeld      SaleStatus = "HELD"
 	StatusCompleted SaleStatus = "COMPLETED"
 	StatusVoided    SaleStatus = "VOIDED"
+	StatusAbandoned SaleStatus = "ABANDONED"
 )
 
 // Status returns the wire spelling.

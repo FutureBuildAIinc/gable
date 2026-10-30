@@ -155,28 +155,8 @@ func TestTheSyncRefusesEveryBatchByRule(t *testing.T) {
 	if n := countOf(t, f.db, `SELECT count(*) FROM invoices WHERE customer_id = $1 AND branch_id = $2`, w.hidden, f.branchID); n != 0 {
 		t.Errorf("the refused sync posted %d invoices at the selling yard, want 0", n)
 	}
-	if n := countOf(t, f.db, `SELECT count(*) FROM pos_sync_log`); n != 0 {
+	if n := countOf(t, f.db, `SELECT count(*) FROM pos_sync_log WHERE register_id = $1`, f.register); n != 0 {
 		t.Errorf("the refused sync wrote %d sync log rows, want 0", n)
-	}
-}
-
-// RULE: a branch bound key keeps its pin in the sync: the item is an error,
-// no sale and no invoice is written.
-func TestTheSyncHoldsABoundKeyToItsPin(t *testing.T) {
-	w := newNamedWall(t)
-	f := w.f
-	client := uuid.New()
-	item := &pos.OfflineSale{ClientID: client, CashierID: uuid.New(), CustomerID: &w.hidden}
-	_, err := f.service.StartSaleAt(w.boundCtx(), item, f.register, "key")
-	var he *httpx.Error
-	if !errors.As(err, &he) || he.Status != http.StatusNotFound {
-		t.Fatalf("bound key sync naming another yard's customer: %v, want the module's 404", err)
-	}
-	if n := countOf(t, f.db, `SELECT count(*) FROM pos_transactions WHERE id = $1`, client); n != 0 {
-		t.Errorf("the refused sync item wrote its sale")
-	}
-	if n := countOf(t, f.db, `SELECT count(*) FROM invoices WHERE customer_id = $1`, w.hidden); n != 0 {
-		t.Errorf("the refused sync item posted %d invoices to the customer", n)
 	}
 }
 

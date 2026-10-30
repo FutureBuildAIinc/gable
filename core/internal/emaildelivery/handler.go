@@ -64,7 +64,8 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 			"document_type", "must be one of: invoice, statement, quote, purchase_order")
 	}
 	if f.Status != "" {
-		v.Check(f.Status == StatusSent || f.Status == StatusFailed, "status", "must be one of: sent, failed")
+		v.Check(f.Status == StatusQueued || f.Status == StatusSent || f.Status == StatusLogged || f.Status == StatusFailed,
+			"status", "must be one of: queued, sent, logged, failed")
 	}
 	if raw := q.Get("document_id"); raw != "" {
 		s := raw

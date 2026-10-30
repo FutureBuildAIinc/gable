@@ -174,9 +174,29 @@ func TestClientListMembershipsFiltersByUser(t *testing.T) {
 	if err != nil || !found || m.ID != "m9" {
 		t.Fatalf("m=%+v found=%v err=%v", m, found, err)
 	}
-	joined := strings.Join(queries, "|")
-	if !strings.Contains(joined, `equal("userId"`) || !strings.Contains(joined, "u9") {
-		t.Fatalf("request did not filter by user id: %q", joined)
+	if len(queries) != 2 {
+		t.Fatalf("queries = %q, want two", queries)
+	}
+	var byUser struct {
+		Method    string   `json:"method"`
+		Attribute string   `json:"attribute"`
+		Values    []string `json:"values"`
+	}
+	if err := json.Unmarshal([]byte(queries[0]), &byUser); err != nil {
+		t.Fatalf("first query is not JSON: %q: %v", queries[0], err)
+	}
+	if byUser.Method != "equal" || byUser.Attribute != "userId" || len(byUser.Values) != 1 || byUser.Values[0] != "u9" {
+		t.Fatalf("request did not filter by user id: %+v", byUser)
+	}
+	var page struct {
+		Method string `json:"method"`
+		Values []int  `json:"values"`
+	}
+	if err := json.Unmarshal([]byte(queries[1]), &page); err != nil {
+		t.Fatalf("second query is not JSON: %q: %v", queries[1], err)
+	}
+	if page.Method != "limit" || len(page.Values) != 1 || page.Values[0] != 25 {
+		t.Fatalf("request did not set the page size: %+v", page)
 	}
 }
 
@@ -238,8 +258,14 @@ func TestClientFindUserByEmail(t *testing.T) {
 	answer := `{"users":[{"$id":"u1","email":"a@example.com","status":true,"emailVerification":true}]}`
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /v1/users", func(w http.ResponseWriter, r *http.Request) {
-		if !strings.Contains(r.URL.RawQuery, "equal") {
-			t.Errorf("query = %s, want an equal filter on email", r.URL.RawQuery)
+		var byEmail struct {
+			Method    string   `json:"method"`
+			Attribute string   `json:"attribute"`
+			Values    []string `json:"values"`
+		}
+		qs := r.URL.Query()["queries[]"]
+		if len(qs) != 2 || json.Unmarshal([]byte(qs[0]), &byEmail) != nil || byEmail.Method != "equal" || byEmail.Attribute != "email" || len(byEmail.Values) != 1 {
+			t.Errorf("queries = %q, want a JSON equal filter on email and a limit", qs)
 		}
 		_, _ = w.Write([]byte(answer))
 	})

@@ -30,9 +30,13 @@ func TestAcceptAndConvert_ConvertsThePairAndConfirms(t *testing.T) {
 	db := testutil.RequireDB(t)
 	ctx := context.Background()
 	customerID, productID := uuid.New(), uuid.New()
-	branch := `(SELECT value::uuid FROM system_settings WHERE key = 'default_branch_id')`
+	// The branch the fixture owns: a locations row of its own carrying its
+	// own tax rate. The quote names it, so the quote and the order it
+	// converts to stand on a branch no other package's fixture writes and
+	// no other package's fixture can move.
+	branch := testutil.OwnBranch(t, db, "0.088750")
 	if _, err := db.Pool.Exec(ctx, `INSERT INTO customers (id, name, account_number, primary_branch_id)
-		VALUES ($1, 'Seam Test Co', $2, `+branch+`)`, customerID, "SEAM-"+uuid.NewString()[:8]); err != nil {
+		VALUES ($1, 'Seam Test Co', $2, $3)`, customerID, "SEAM-"+uuid.NewString()[:8], branch); err != nil {
 		t.Fatalf("seed customer: %v", err)
 	}
 	if _, err := db.Pool.Exec(ctx, `INSERT INTO products (id, sku, description, uom_primary, base_price)
@@ -44,12 +48,6 @@ func TestAcceptAndConvert_ConvertsThePairAndConfirms(t *testing.T) {
 	if _, err := db.Pool.Exec(ctx, `INSERT INTO product_units (product_id, uom, unit_qty, stock_qty, sell, purchase, price)
 		VALUES ($1, 'MBF', 1, 187.5, TRUE, TRUE, TRUE)`, productID); err != nil {
 		t.Fatalf("seed unit set: %v", err)
-	}
-	// A migrated, unseeded database has no branch tax rate; the convert's
-	// order needs one.
-	if _, err := db.Pool.Exec(ctx, `UPDATE locations SET default_tax_rate = 0.088750
-		WHERE id = (SELECT value::uuid FROM system_settings WHERE key = 'default_branch_id')`); err != nil {
-		t.Fatalf("seed branch rate: %v", err)
 	}
 	t.Cleanup(func() {
 		_, _ = db.Pool.Exec(ctx, `DELETE FROM events_outbox WHERE entity_id IN (SELECT id FROM orders WHERE customer_id = $1)`, customerID)
@@ -65,7 +63,7 @@ func TestAcceptAndConvert_ConvertsThePairAndConfirms(t *testing.T) {
 	quoteSvc := quote.NewService(quote.NewRepository(db)).WithTxRunner(db).WithOrderCreator(orderSvc)
 	// 187.5 PCS at 500.00 per MBF: the line the seam refused before cycle 2.
 	q, err := quoteSvc.Create(ctx, &quote.Draft{
-		CustomerID: customerID, DeliveryType: quote.DeliveryPickup, Source: "manual",
+		CustomerID: customerID, DeliveryType: quote.DeliveryPickup, Source: "manual", BranchID: &branch,
 		Lines: []quote.DraftLine{{
 			ProductID: &productID, SKU: "S", Description: "D", Quantity: 1875000, UOM: "PCS",
 			PriceUOM: "MBF", UOMQty: httpx.Quantity(1875000), PriceUOMQty: 10000, UnitPrice: 5000000,
@@ -121,9 +119,13 @@ func TestAcceptAndConvert_RefusesANonStockUnit(t *testing.T) {
 	db := testutil.RequireDB(t)
 	ctx := context.Background()
 	customerID, productID := uuid.New(), uuid.New()
-	branch := `(SELECT value::uuid FROM system_settings WHERE key = 'default_branch_id')`
+	// The branch the fixture owns: a locations row of its own carrying its
+	// own tax rate. The quote names it, so the quote and the order it
+	// converts to stand on a branch no other package's fixture writes and
+	// no other package's fixture can move.
+	branch := testutil.OwnBranch(t, db, "0.088750")
 	if _, err := db.Pool.Exec(ctx, `INSERT INTO customers (id, name, account_number, primary_branch_id)
-		VALUES ($1, 'Seam Test Co', $2, `+branch+`)`, customerID, "SEAM-"+uuid.NewString()[:8]); err != nil {
+		VALUES ($1, 'Seam Test Co', $2, $3)`, customerID, "SEAM-"+uuid.NewString()[:8], branch); err != nil {
 		t.Fatalf("seed customer: %v", err)
 	}
 	if _, err := db.Pool.Exec(ctx, `INSERT INTO products (id, sku, description, uom_primary, base_price)
@@ -135,12 +137,6 @@ func TestAcceptAndConvert_RefusesANonStockUnit(t *testing.T) {
 	if _, err := db.Pool.Exec(ctx, `INSERT INTO product_units (product_id, uom, unit_qty, stock_qty, sell, purchase, price)
 		VALUES ($1, 'MBF', 1, 187.5, TRUE, TRUE, TRUE)`, productID); err != nil {
 		t.Fatalf("seed unit set: %v", err)
-	}
-	// A migrated, unseeded database has no branch tax rate; the convert's
-	// order needs one.
-	if _, err := db.Pool.Exec(ctx, `UPDATE locations SET default_tax_rate = 0.088750
-		WHERE id = (SELECT value::uuid FROM system_settings WHERE key = 'default_branch_id')`); err != nil {
-		t.Fatalf("seed branch rate: %v", err)
 	}
 	t.Cleanup(func() {
 		_, _ = db.Pool.Exec(ctx, `DELETE FROM events_outbox WHERE entity_id IN (SELECT id FROM orders WHERE customer_id = $1)`, customerID)
@@ -155,7 +151,7 @@ func TestAcceptAndConvert_RefusesANonStockUnit(t *testing.T) {
 	orderSvc := order.NewService(order.NewRepository(db)).WithTxRunner(db)
 	quoteSvc := quote.NewService(quote.NewRepository(db)).WithTxRunner(db).WithOrderCreator(orderSvc)
 	q, err := quoteSvc.Create(ctx, &quote.Draft{
-		CustomerID: customerID, DeliveryType: quote.DeliveryPickup, Source: "manual",
+		CustomerID: customerID, DeliveryType: quote.DeliveryPickup, Source: "manual", BranchID: &branch,
 		Lines: []quote.DraftLine{{
 			ProductID: &productID, SKU: "S", Description: "D", Quantity: 10000, UOM: "MBF",
 			PriceUOM: "MBF", UOMQty: 10000, PriceUOMQty: 10000, UnitPrice: 5000000,
@@ -201,6 +197,9 @@ type seamWorld struct {
 	customerID uuid.UUID
 	productID  uuid.UUID
 	other      uuid.UUID
+	// own is the branch the world owns: a locations row of its own
+	// carrying its own tax rate, which the quotes it makes name.
+	own uuid.UUID
 }
 
 func newSeamWorld(t *testing.T) *seamWorld {
@@ -209,9 +208,14 @@ func newSeamWorld(t *testing.T) *seamWorld {
 	db := testutil.RequireDB(t)
 	ctx := context.Background()
 	w := &seamWorld{db: db, customerID: uuid.New(), productID: uuid.New(), other: uuid.New()}
-	branch := `(SELECT value::uuid FROM system_settings WHERE key = 'default_branch_id')`
+	// The branch the world owns: a locations row of its own carrying its
+	// own tax rate. The quotes name it, so a quote and the order it
+	// converts to stand on a branch no other package's fixture writes and
+	// no other package's fixture can move.
+	branch := testutil.OwnBranch(t, db, "0.10")
+	w.own = branch
 	if _, err := db.Pool.Exec(ctx, `INSERT INTO customers (id, name, account_number, primary_branch_id)
-		VALUES ($1, 'Seam Test Co', $2, `+branch+`)`, w.customerID, "SEAM-"+uuid.NewString()[:8]); err != nil {
+		VALUES ($1, 'Seam Test Co', $2, $3)`, w.customerID, "SEAM-"+uuid.NewString()[:8], branch); err != nil {
 		t.Fatalf("seed customer: %v", err)
 	}
 	if _, err := db.Pool.Exec(ctx, `INSERT INTO products (id, sku, description, uom_primary, base_price)
@@ -222,13 +226,6 @@ func newSeamWorld(t *testing.T) *seamWorld {
 		w.other, "SM-"+w.other.String()[:8]); err != nil {
 		t.Fatalf("seed branch: %v", err)
 	}
-	var oldRate *string
-	if err := db.Pool.QueryRow(ctx, `SELECT default_tax_rate::text FROM locations WHERE id = `+branch).Scan(&oldRate); err != nil {
-		t.Fatalf("read default branch rate: %v", err)
-	}
-	if _, err := db.Pool.Exec(ctx, `UPDATE locations SET default_tax_rate = 0.10 WHERE id = `+branch); err != nil {
-		t.Fatalf("seed default branch rate: %v", err)
-	}
 	t.Cleanup(func() {
 		_, _ = db.Pool.Exec(ctx, `DELETE FROM events_outbox WHERE entity_id IN (SELECT id FROM orders WHERE customer_id = $1)`, w.customerID)
 		_, _ = db.Pool.Exec(ctx, `DELETE FROM order_lines WHERE order_id IN (SELECT id FROM orders WHERE customer_id = $1)`, w.customerID)
@@ -238,7 +235,6 @@ func newSeamWorld(t *testing.T) *seamWorld {
 		_, _ = db.Pool.Exec(ctx, `DELETE FROM products WHERE id = $1`, w.productID)
 		_, _ = db.Pool.Exec(ctx, `DELETE FROM customers WHERE id = $1`, w.customerID)
 		_, _ = db.Pool.Exec(ctx, `DELETE FROM locations WHERE id = $1`, w.other)
-		_, _ = db.Pool.Exec(ctx, `UPDATE locations SET default_tax_rate = $1 WHERE id = `+branch, oldRate)
 	})
 	w.orderSvc = order.NewService(order.NewRepository(db)).WithOutbox(outbox.NewWriter(db, "")).WithTxRunner(db)
 	w.quoteSvc = quote.NewService(quote.NewRepository(db)).WithOutbox(outbox.NewWriter(db, "")).WithTxRunner(db).WithOrderCreator(w.orderSvc)
@@ -309,7 +305,7 @@ func TestAcceptAndConvert_OverLimitKeepsTheSeam409AndTheHold(t *testing.T) {
 	if _, err := w.db.Pool.Exec(ctx, `UPDATE customers SET credit_limit = 10.00 WHERE id = $1`, w.customerID); err != nil {
 		t.Fatal(err)
 	}
-	q := w.quoteAt(t, nil, 10*10000)
+	q := w.quoteAt(t, &w.own, 10*10000)
 	rec := w.acceptAndConvert(q)
 	var orderID uuid.UUID
 	if err := w.db.Pool.QueryRow(ctx, `SELECT id FROM orders WHERE quote_id = $1`, q.ID).Scan(&orderID); err != nil {
@@ -352,8 +348,7 @@ func TestAcceptAndConvert_ShortOrderReportsConfirmed(t *testing.T) {
 	ctx := context.Background()
 	w.orderSvc.WithInventory(inventory.NewService(inventory.NewRepository(w.db)))
 	yard := uuid.New()
-	branch := `(SELECT value::uuid FROM system_settings WHERE key = 'default_branch_id')`
-	if _, err := w.db.Pool.Exec(ctx, `INSERT INTO locations (id, type, code, parent_id, branch_id) VALUES ($1, 'YARD', $2, `+branch+`, `+branch+`)`, yard, "SH-"+yard.String()[:8]); err != nil {
+	if _, err := w.db.Pool.Exec(ctx, `INSERT INTO locations (id, type, code, parent_id, branch_id) VALUES ($1, 'YARD', $2, $3, $3)`, yard, "SH-"+yard.String()[:8], w.own); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := w.db.Pool.Exec(ctx, `INSERT INTO inventory (product_id, location_id, location, quantity, allocated) VALUES ($1, $2, 'Y', 4, 0)`, w.productID, yard); err != nil {
@@ -365,7 +360,7 @@ func TestAcceptAndConvert_ShortOrderReportsConfirmed(t *testing.T) {
 		_, _ = w.db.Pool.Exec(context.Background(), `DELETE FROM locations WHERE id = $1`, yard)
 	})
 	// 10 PCS ordered, 4 on hand.
-	q := w.quoteAt(t, nil, 10*10000)
+	q := w.quoteAt(t, &w.own, 10*10000)
 	rec := w.acceptAndConvert(q)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("accept-and-convert of a short order = %d %s, want 200", rec.Code, rec.Body.String())

@@ -75,6 +75,7 @@ type Service struct {
 	yards       YardReader
 	jobs        JobReader
 	statements  StatementReader
+	tenders     InvoiceTenderReader
 }
 
 func NewService(productRepo product.Repository) *Service {
@@ -89,6 +90,16 @@ func (s *Service) WithYards(r YardReader) *Service { s.yards = r; return s }
 
 // WithJobs sets the reader of a job's name.
 func (s *Service) WithJobs(r JobReader) *Service { s.jobs = r; return s }
+
+// InvoiceTenderReader reads the tender legs of the counter sale behind an
+// invoice; an invoice that is not a counter sale has none.
+type InvoiceTenderReader interface {
+	InvoiceTenders(ctx context.Context, invoiceID uuid.UUID) ([]ThermalTender, error)
+}
+
+// WithInvoiceTenders sets the reader of a counter sale's tenders for the
+// invoice layout of the receipt.
+func (s *Service) WithInvoiceTenders(r InvoiceTenderReader) *Service { s.tenders = r; return s }
 
 // WithStatements sets the AR statement reader.
 func (s *Service) WithStatements(r StatementReader) *Service { s.statements = r; return s }
@@ -491,8 +502,28 @@ func (s *Service) GenerateInvoicePDF(ctx context.Context, inv *invoice.Invoice, 
 	m.AddRow(15,
 		text.NewCol(12, "TOTAL DUE: "+b.style.Money(inv.TotalCents), props.Text{Top: 5, Style: fontstyle.Bold, Align: align.Right, Size: 12}),
 	)
+	s.invoiceTenderRows(ctx, m, b, inv.ID)
 	b.foot(m, true)
 	return finish(m)
+}
+
+// invoiceTenderRows adds the tender lines of a counter sale under its total:
+// each leg's method (a card's brand and last four) and amount, and the change
+// given. An invoice with no counter sale behind it prints none.
+func (s *Service) invoiceTenderRows(ctx context.Context, m *collector, b *branding, invoiceID uuid.UUID) {
+	if s.tenders == nil {
+		return
+	}
+	legs, err := s.tenders.InvoiceTenders(ctx, invoiceID)
+	if err != nil || len(legs) == 0 {
+		return
+	}
+	for _, t := range legs {
+		m.AddRow(6, text.NewCol(12, tenderLabel(t)+": "+b.style.Money(t.AmountCents), props.Text{Align: align.Right, Size: 9}))
+		if t.ChangeCents > 0 {
+			m.AddRow(5, text.NewCol(12, "Change: "+b.style.Money(t.ChangeCents), props.Text{Align: align.Right, Size: 8}))
+		}
+	}
 }
 
 func deref(s *string) string {

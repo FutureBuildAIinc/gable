@@ -2721,7 +2721,7 @@ export interface paths {
         put?: never;
         /**
          * Email a customer statement
-         * @description Renders the statement as the print route does and sends it to the customer's email address from a background task, answering 202 at once. The send is recorded in email_deliveries (GET /api/v1/email-deliveries) with the sender's answer or its error. A customer with no email address is a 400 naming customer. Same parameters, roles and branch rules as the print route.
+         * @description Renders the statement as the print route does and sends it to the customer's email address from a background task, answering 202 at once with the queued delivery row's delivery_id. The send resolves that row in email_deliveries (GET /api/v1/email-deliveries) to sent, logged or failed, with the sender's answer or its error. A customer with no email address is a 400 naming customer. Same parameters, roles and branch rules as the print route.
          */
         post: operations["arStatementEmail"];
         delete?: never;
@@ -2761,7 +2761,7 @@ export interface paths {
         put?: never;
         /**
          * Email a quote to its customer
-         * @description Renders the quote as the print route does and sends it to the customer's email address from a background task, answering 202 at once. The send is recorded in email_deliveries. A customer with no email address is a 400 naming customer.
+         * @description Renders the quote as the print route does and sends it to the customer's email address from a background task, answering 202 at once with the queued delivery row's delivery_id. The send resolves that row in email_deliveries to sent, logged or failed. A customer with no email address is a 400 naming customer.
          */
         post: operations["quoteEmail"];
         delete?: never;
@@ -3939,7 +3939,7 @@ export interface paths {
         put?: never;
         /**
          * Email invoice to customer
-         * @description Queues an email to the customer with the invoice PDF attached, sent through the configured sender (SMTP when SMTP_HOST is set, otherwise the log sender). Returns 202 Accepted immediately; the email is dispatched asynchronously and its outcome, the sender's answer or its error, is written to email_deliveries (GET /api/v1/email-deliveries). Fails if the customer has no email address on file.
+         * @description Queues an email to the customer with the invoice PDF attached, sent through the configured sender (SMTP when SMTP_HOST is set, otherwise the log sender, which records the mail without sending it). Returns 202 Accepted immediately with the id of the queued delivery row; the email is dispatched asynchronously and resolves that row to sent (the SMTP server took it), logged (the log sender took it, nothing left the process) or failed, with the sender's answer or its error (GET /api/v1/email-deliveries). Fails if the customer has no email address on file.
          */
         post: operations["invoiceEmail"];
         delete?: never;
@@ -4070,6 +4070,106 @@ export interface paths {
          * @description Uses the open credit of an open or partial credit memo on invoices of the same customer and currency. No ledger entry (both sides are in 1020) and no subledger row; each application is a CREDIT_MEMO application. The precondition is the credit memo's revision. Refused with 409 exceeds_open_credit, exceeds_open_amount, invoice_void, customer_mismatch or currency_mismatch. Writes credit_memo.partial or credit_memo.applied, and invoice.partial or invoice.paid per invoice.
          */
         post: operations["creditMemoApply"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/large-cash/worklist": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The manager's large cash worklist
+         * @description Every crossing the dealer owes a filing on, one row per crossing, in the order the manager should work them. The severity ranks by the deadline first and the amount second, so a small filing due tomorrow sits above a large filing due in ten days, and the recommended action is the ladder: capture the payer's details, then file, then chase a filing past its deadline, then issue the customer statement. A row that is not reportable (a Canadian record, an identity declined crossing) offers no filing; the identity declined row says so in words and asks a manager to look at it. The deadline is computed as a rule, the receipt anchor plus 15 days, and the row carries whether it is past. The row never carries the payer's taxpayer identification number. A branch scoped caller sees only the crossings its branch received cash for or contributed cash to; the aggregate each row carries is the dealer's central one.
+         */
+        get: operations["largeCashWorklist"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/large-cash/events/{id}/filing": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Record the filing of a Form 8300 for a crossing
+         * @description The manager's record of the Form 8300 they filed for this crossing: the day they filed it, the BSA E-Filing acknowledgement number they typed and who recorded it. Every reportable crossing is over the threshold, so its filing is required: a request for a voluntary filing (a below threshold report) is answered 409. The crossing's filing row is taken in place: two managers recording a filing on one crossing at the same time cannot both land, and the one that loses is answered 409 (the crossing is already filed). A Canadian crossing and an identity declined crossing are not filings at all and are answered 409. The act is a manager's, so a machine key is refused 403.
+         */
+        post: operations["largeCashRecordFiling"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/large-cash/events/{id}/form-8300": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The Form 8300 data set for a crossing
+         * @description The data set the filer types into BSA E-Filing: the payer's name, address, taxpayer identification number, date of birth and occupation, the amount and the dates of the cash, and the branch the filing is made for. This is the one surface that carries the taxpayer identification number, because the IRS form cannot be completed without it, so the route is the dealer's own and admin's only and a machine key is refused 403. The export is audited without the number in the audit body. Gable does not file: the export carries the sentence that says so.
+         */
+        get: operations["largeCashForm8300"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/large-cash/statements": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The customer statements for a year
+         * @description The customer statements for a year, one per payer who had reportable cash in it: the business name and address, the contact name and telephone number, the aggregate amount of reportable cash received in the year, and the sentence that says the information was furnished to the IRS. The statement is a separate obligation from the filing and runs on its own clock: it is due on or before the last day of the first month of the year after the cash was received. The statement never carries the payer's taxpayer identification number and never says the dealer noted the transaction was suspicious. A branch scoped caller sees the payers whose crossings touched its branch; the aggregate each statement carries is the dealer's whole year for that payer, because the United States aggregation is deliberately central.
+         */
+        get: operations["largeCashStatements"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/large-cash/events/{id}/statement": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Issue the customer statement for a crossing's payer
+         * @description The customer statement for the crossing's payer and the year the cash was received, issued once. A statement says the information was furnished to the IRS, so it is issued only for a reportable crossing whose Form 8300 is recorded as filed (409 otherwise). The generator also refuses to carry the dealer's suspicion of the transaction on the customer's statement and refuses a voluntary filing; these are rules in the code rather than a training note. Of several managers issuing one statement exactly one is answered 200 and the rest 409. The act is a manager's, so a machine key is refused 403.
+         */
+        post: operations["largeCashIssueStatement"];
         delete?: never;
         options?: never;
         head?: never;
@@ -6264,7 +6364,7 @@ export interface paths {
         put?: never;
         /**
          * Email the sale's receipt
-         * @description Sends the sale's invoice to the account's contact exactly as the invoice email route does (the same service call, the same words, 202 and {"status":"queued"}; the outcome is written to email_deliveries), under the counter's own roles admin, owner and cashier. The sale is read as the sale read reads it (404 for a sale the caller cannot read). A sale that is not completed or has no invoice answers 409 with the blocker no_receipt; a walk in sale (no customer, or the shared walk in customer, whatever address that row holds), or an account with no email address on file, answers 409 with the blocker no_contact and words the card can show. Nothing is sent for any refusal.
+         * @description Sends the sale's invoice to the account's contact exactly as the invoice email route does (the same service call, the same words, 202 and {"status":"queued"} with the queued delivery row's delivery_id; the send resolves that row to sent, logged or failed in email_deliveries), under the counter's own roles admin, owner and cashier. The sale is read as the sale read reads it (404 for a sale the caller cannot read). A sale that is not completed or has no invoice answers 409 with the blocker no_receipt; a walk in sale (no customer, or the shared walk in customer, whatever address that row holds), or an account with no email address on file, answers 409 with the blocker no_contact and words the card can show. Nothing is sent for any refusal.
          */
         post: operations["posTransactionReceiptEmail"];
         delete?: never;
@@ -6428,7 +6528,7 @@ export interface paths {
         put?: never;
         /**
          * What the large cash rule asks of this payment
-         * @description The counter's look before Pay (CP-17a): the server classifies the named tenders against the sale it holds under the branch's country rule (the United States Form 8300 family, or the Canadian dealer threshold when the dealer has it on) and answers whether the payer's details will be required and which fields the rule needs. The branch's walk-in identity floor rides the same answer: over the floor the counter asks a walk-in who paid cash to identify themselves, so their cash sales are counted together, and the identity the counter already holds may be carried here so the preview and the completion key the same person. Writes nothing; the completion's own capture is the authority.
+         * @description The counter's look before Pay (CP-17a): the server classifies the named tenders against the sale it holds under the branch's country rule (the United States Form 8300 family, or the Canadian dealer threshold when the dealer has it on) and answers whether the payer's details will be required and which fields the rule needs. The branch's walk-in identity floor rides the same answer: over the floor the counter asks a walk-in who paid cash to identify themselves, so their cash sales are counted together, and the identity the counter already holds may be carried here so the preview and the completion key the same person. A payer carried on a server with no valid vault key is refused 503 with the blocker large_cash_vault_unavailable, as the completion refuses it. Writes nothing; the completion's own capture is the authority.
          */
         post: operations["posLargeCashPreview"];
         delete?: never;
@@ -6758,6 +6858,30 @@ export interface paths {
          * @description Sets the branch's own threshold in cents, or clears it with null so the database wide default applies again. Finance and owner only, never a machine key; a branch the caller may not target is 403. Audited.
          */
         put: operations["posTillPolicyPut"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pos/offline/policy": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * A branch's offline counter policy
+         * @description The branch's resolved offline selling policy (ADR 0011 section 4): the branch's own row in pos_offline_policy when set (source branch), else the database wide defaults in system_settings (source default), else off (source none). Includes enrolled_register_count and max_account_exposure_cents (account_cap_cents times the branch's enrolled registers). Admin, owner and finance; a branch the caller may not target is 403, and an unknown branch is 404.
+         */
+        get: operations["posOfflinePolicyGet"];
+        /**
+         * Set or clear a branch's offline counter policy
+         * @description Sets the branch's own offline counter policy in pos_offline_policy, or clears it with clear true so the database wide defaults (or none) apply again. Only cash, check and account tenders may be allowed offline. Admin and owner only (finance may read, not write), never a machine key; a branch the caller may not target is 403, and an unknown branch is 404. Audited as pos.offline.policy in the same transaction.
+         */
+        put: operations["posOfflinePolicyPut"];
         post?: never;
         delete?: never;
         options?: never;
@@ -13219,6 +13343,11 @@ export interface components {
         DocumentEmailQueued: {
             /** @enum {string} */
             status: "queued";
+            /**
+             * Format: uuid
+             * @description The queued email_deliveries row, already written; read its status (sent, logged or failed) from GET /api/v1/email-deliveries. Absent only when the row could not be written.
+             */
+            delivery_id?: string;
         };
         /**
          * @description The draft lifecycle, lowercase on the wire; promoted is terminal.
@@ -13427,8 +13556,11 @@ export interface components {
             document_id: string | null;
             /** @description The document's number; the account number for a statement. */
             document_number: string | null;
-            /** @enum {string} */
-            status: "sent" | "failed";
+            /**
+             * @description queued the moment the sending route answers 202, then sent (the SMTP server took it), logged (a log sender took it: nothing left the process, email is not set up on this server) or failed (the send errored).
+             * @enum {string}
+             */
+            status: "queued" | "sent" | "logged" | "failed";
             /** @description The sender's own answer; the SMTP server's reply, or a note that the log sender logged and did not send. */
             sender_answer: string | null;
             error: string | null;
@@ -14509,9 +14641,15 @@ export interface components {
             /** @description Required by a void. */
             reason?: string;
         };
+        /** @description The queued send. The 202 alone never says the mail went out; the delivery row the delivery_id names is where the outcome lands. */
         InvoiceEmailResponse: {
             /** @enum {string} */
             status: "queued";
+            /**
+             * Format: uuid
+             * @description The queued email_deliveries row, already written; read its status (sent, logged or failed) from GET /api/v1/email-deliveries. Absent only when the row could not be written.
+             */
+            delivery_id?: string;
         };
         /** @description A credit memo header, used as a list item and as the head of the full document. */
         CreditMemoSummary: {
@@ -14884,6 +15022,200 @@ export interface components {
             next_cursor: string | null;
             limit: number;
         };
+        LargeCashWorklist: {
+            items: components["schemas"]["LargeCashWorklistRow"][];
+            count: number;
+            /** Format: date-time */
+            generated_at: string;
+        };
+        LargeCashWorklistRow: {
+            /** Format: uuid */
+            event_id: string;
+            /** @description The aggregation key: the named customer's id, else the captured identity's digest. It is a digest, never the taxpayer identification number. */
+            payer_key: string;
+            /** @description The customer's name */
+            payer_name: string;
+            /** Format: uuid */
+            customer_id?: string | null;
+            customer_account?: string;
+            /** Format: uuid */
+            branch_id: string;
+            branch_name: string;
+            branch_address: string;
+            /** @description Every branch that contributed to the aggregate. */
+            contributed_branch_ids: string[];
+            currency: string;
+            /**
+             * Format: int64
+             * @description The reportable cash total since the last report.
+             */
+            total_cents: number;
+            /** @enum {string} */
+            rule_family: "US_8300" | "CA_DEALER";
+            /** Format: int64 */
+            threshold_cents: number;
+            /** @description The cash transactions in the aggregate. */
+            transaction_count: number;
+            /** @description The cash tenders counted in the aggregate. */
+            tender_count: number;
+            /**
+             * Format: date-time
+             * @description The first cash in the aggregate.
+             */
+            first_date?: string | null;
+            /**
+             * Format: date-time
+             * @description The most recent cash in the aggregate.
+             */
+            last_date?: string | null;
+            /** @enum {string} */
+            event_state: "reportable" | "recorded" | "identity declined";
+            /**
+             * @description Not yet reportable, reportable and not filed, filed, or voluntary (the payer asked not to be reported).
+             * @enum {string}
+             */
+            filing_state: "not_reportable" | "reportable" | "filed" | "voluntary";
+            /**
+             * Format: date-time
+             * @description The receipt anchor plus 15 days. Null when there is no filing to make.
+             */
+            filing_deadline?: string | null;
+            past_deadline: boolean;
+            /** Format: date-time */
+            filed_date?: string | null;
+            acknowledgement_no?: string;
+            /** @enum {string} */
+            statement_state: "not_issued" | "issued";
+            /** Format: date-time */
+            statement_issued_date?: string | null;
+            payer_details_captured: boolean;
+            /** Format: int64 */
+            severity_score: number;
+            /** @enum {string} */
+            recommended_action: "capture_payer_details" | "file" | "chase_filing" | "issue_statement" | "manager_review" | "dealer_record";
+            /** @description The plain sentence that says what the row is. */
+            note?: string;
+            /** @description The dealer confirms each filing with its own adviser. */
+            adviser_note: string;
+        };
+        LargeCashFilingRequest: {
+            /**
+             * Format: date
+             * @description The day the Form 8300 was filed. The server's day when it is absent.
+             */
+            filed_date?: string;
+            /** @description The BSA E-Filing acknowledgement number the manager typed. Required for a filing. */
+            acknowledgement_no?: string;
+            /** @description Always refused with 409 on a reportable crossing: every reportable crossing is over the threshold, so its filing is required. */
+            voluntary?: boolean;
+        };
+        LargeCashFiling: {
+            /** Format: uuid */
+            event_id: string;
+            /** @enum {string} */
+            state: "filed" | "voluntary";
+            /** Format: date-time */
+            filed_date?: string | null;
+            acknowledgement_no?: string;
+            recorded_by: string;
+            /** Format: date-time */
+            recorded_at: string;
+            past_deadline: boolean;
+        };
+        LargeCashForm8300: {
+            /** Format: uuid */
+            event_id: string;
+            /** @description The IRS form the data set is for. */
+            form: string;
+            currency: string;
+            /** Format: int64 */
+            amount_cents: number;
+            transaction_count: number;
+            tender_count: number;
+            /** Format: date-time */
+            first_date: string;
+            /** Format: date-time */
+            last_date: string;
+            /** Format: date-time */
+            received_at: string;
+            /** Format: date-time */
+            filing_deadline: string;
+            /** @description Form 8300 Part I: the payer as the form takes it. */
+            payer: {
+                name: string;
+                address: string;
+                /** @description The payer's taxpayer identification number, in full. This is the one surface that carries it. */
+                taxpayer_id: string;
+                date_of_birth?: string;
+                occupation?: string;
+            };
+            /** @description Form 8300 Part II: the person on whose behalf the transaction was conducted. */
+            third_party_payer?: {
+                name?: string;
+            } | null;
+            /** @description The legal person the filing is made for: the branch that received the cash. */
+            filer: {
+                /** Format: uuid */
+                branch_id: string;
+                branch_name: string;
+                address?: string;
+            };
+            note: string;
+            /** @description The dealer confirms each filing with its own adviser. */
+            adviser_note: string;
+            /** @description The masked hint of the taxpayer identification number, for the filer to check. */
+            taxpayer_id_hint?: string | null;
+        };
+        LargeCashStatements: {
+            year: number;
+            items: components["schemas"]["LargeCashStatement"][];
+            count: number;
+        };
+        LargeCashStatement: {
+            payer_key: string;
+            year: number;
+            /** @description The addressee. */
+            payer_name: string;
+            /** @description The addressee's address. */
+            payer_address: string;
+            /** @description The dealer's name */
+            business_name: string;
+            /** @description The dealer's information contact address */
+            business_address: string;
+            /** @description The dealer's information contact */
+            contact_name: string;
+            /** @description The dealer's information contact telephone. */
+            telephone: string;
+            /**
+             * Format: int64
+             * @description The payer's counted cash received in the calendar year in the receiving branch's own zone, summed from the counted tenders.
+             */
+            aggregate_cents: number;
+            currency: string;
+            crossing_count: number;
+            /** Format: date-time */
+            first_date?: string | null;
+            /** Format: date-time */
+            last_date?: string | null;
+            /** @enum {string} */
+            state: "not_issued" | "issued";
+            /** Format: date-time */
+            issued_date?: string | null;
+            issued_by?: string;
+            /**
+             * Format: date-time
+             * @description The statement's own deadline: the last day of the first month of the year after the cash was received.
+             */
+            due_date: string;
+            /** @description The information was furnished to the IRS. */
+            note: string;
+            /** @description The dealer confirms each filing with its own adviser. */
+            adviser_note: string;
+        };
+        LargeCashStatementRequest: {
+            /** @description Asks the generator to put the dealer's suspicion of the transaction on the customer's statement. The generator refuses. */
+            include_suspicion?: boolean;
+        };
         /** @description Who the record is, and every frontend's URL for it. The record segment in the links is the document number when the entity has one, otherwise the UUID; draft links use the draft's UUID. Optional slots are present as null (ADR 0001 section 12). */
         LinkAnswer: {
             /** @description The entity name (quote, order, invoice, customer, product, draft). */
@@ -15244,10 +15576,10 @@ export interface components {
          */
         OrderDeliveryType: "pickup" | "delivery";
         /**
-         * @description How the order's tax was found (ADR 0005 section 3). Rows written before cycle 2 are legacy.
+         * @description How the order's tax was found (ADR 0005 section 3; ADR 0011 section 3.2). Rows written before cycle 2 are legacy.
          * @enum {string}
          */
-        OrderTaxSource: "exempt" | "provider" | "ship_to_rate" | "branch_rate" | "legacy";
+        OrderTaxSource: "exempt" | "provider" | "ship_to_rate" | "branch_rate" | "offline_rate" | "legacy";
         /**
          * @description The line types of ADR 0005 section 2.1, one shape on every sales document. kit and component lines are written by the server when a line names a kit product; a request never sends them.
          * @enum {string}
@@ -17198,7 +17530,7 @@ export interface components {
             allocations: components["schemas"]["PortalPaymentAllocation"][];
         };
         /** @enum {string} */
-        PosStatus: "open" | "held" | "completed" | "voided";
+        PosStatus: "open" | "held" | "completed" | "voided" | "abandoned";
         /** @enum {string} */
         PosTenderMethod: "cash" | "check" | "card" | "account" | "store_credit";
         /** @enum {string} */
@@ -17250,7 +17582,7 @@ export interface components {
              * @description The sale's revision; or send If-Match.
              */
             revision?: number;
-            /** @description The payer's details the counter captured for a large cash crossing (CP-17a); required when this payment takes the payer over the branch's threshold, refused 409 payer_details_required without them. */
+            /** @description The payer's details the counter captured for a large cash crossing (CP-17a); required when this payment takes the payer over the branch's threshold, refused 409 payer_details_required without them, and refused 503 large_cash_vault_unavailable on a server with no valid vault key, never stored in clear. */
             payer?: components["schemas"]["PosPayerCapture"];
             /** @description The counter's record that the walk-in declined to identify over the branch's walk-in identity floor (CP-17a); the sale goes ahead and the fact is recorded for the manager's worklist as an identity declined. */
             payer_declined?: boolean;
@@ -17676,7 +18008,7 @@ export interface components {
             picked_up_by?: string | null;
             /** @description The customer's counter alerts the clerk read and acknowledged before taking the exchange's replacement sale. A warning that asks to be acknowledged must be named here, or the exchange is refused with 409 alert_unacknowledged and nothing is written. */
             acknowledged_alert_ids?: string[];
-            /** @description The payer's details the counter captured for a large cash crossing (CP-17a); required when this exchange's cash difference takes the payer over the branch's threshold, refused 409 payer_details_required without them. */
+            /** @description The payer's details the counter captured for a large cash crossing (CP-17a); required when this exchange's cash difference takes the payer over the branch's threshold, refused 409 payer_details_required without them, and refused 503 large_cash_vault_unavailable on a server with no valid vault key, never stored in clear. */
             payer?: components["schemas"]["PosPayerCapture"];
             /** @description The counter's record that the walk-in declined to identify over the branch's walk-in identity floor (CP-17a); the exchange goes ahead and the fact is recorded for the manager's worklist as an identity declined. */
             payer_declined?: boolean;
@@ -18563,6 +18895,55 @@ export interface components {
              * @description Null clears the branch's override.
              */
             variance_threshold_cents: number | null;
+        };
+        /** @enum {string} */
+        PosOfflineTender: "cash" | "check" | "account";
+        PosOfflinePolicy: {
+            /** Format: uuid */
+            branch_id: string;
+            enabled: boolean;
+            tenders: components["schemas"]["PosOfflineTender"][];
+            /** Format: int64 */
+            sale_cap_cents: number;
+            /** Format: int64 */
+            check_cap_cents: number;
+            /** Format: int64 */
+            account_cap_cents: number;
+            /** Format: int64 */
+            queue_total_cap_cents: number;
+            max_queued: number;
+            /** @description Active (unrevoked) enrolled registers on the branch. */
+            enrolled_register_count: number;
+            /**
+             * Format: int64
+             * @description Worst case exposure for one account across the branch's enrolled registers (account_cap_cents times enrolled_register_count).
+             */
+            max_account_exposure_cents: number;
+            /** @enum {string} */
+            source: "branch" | "default" | "none";
+            updated_by: string | null;
+            /** Format: date-time */
+            updated_at: string | null;
+            /** Format: int64 */
+            revision: number | null;
+        };
+        PosOfflinePolicyRequest: {
+            /** Format: uuid */
+            branch_id: string;
+            /** @description When true, deletes the branch override so the database wide defaults or none apply. */
+            clear?: boolean;
+            /** @description Required unless clear is true. */
+            enabled?: boolean;
+            tenders?: components["schemas"]["PosOfflineTender"][];
+            /** Format: int64 */
+            sale_cap_cents?: number;
+            /** Format: int64 */
+            check_cap_cents?: number;
+            /** Format: int64 */
+            account_cap_cents?: number;
+            /** Format: int64 */
+            queue_total_cap_cents?: number;
+            max_queued?: number;
         };
         PosSettings: {
             /**
@@ -28930,7 +29311,7 @@ export interface operations {
                 /** @description A comma separated list of expansions. total adds the count of rows matching the filters, which costs a second query and is therefore opt in. */
                 include?: components["parameters"]["Include"];
                 document_type?: "invoice" | "statement" | "quote" | "purchase_order";
-                status?: "sent" | "failed";
+                status?: "queued" | "sent" | "logged" | "failed";
                 document_id?: string;
             };
             header?: {
@@ -30743,6 +31124,160 @@ export interface operations {
             422: components["responses"]["UnprocessableEntity"];
             428: components["responses"]["WirePreconditionRequired"];
             500: components["responses"]["InternalError"];
+        };
+    };
+    largeCashWorklist: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The ranked worklist. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LargeCashWorklist"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    largeCashRecordFiling: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path: {
+                /** @description The crossing the filing is for. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LargeCashFilingRequest"];
+            };
+        };
+        responses: {
+            /** @description The recorded filing. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LargeCashFiling"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["WireConflict"];
+        };
+    };
+    largeCashForm8300: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path: {
+                /** @description The crossing the form is for. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The Form 8300 data set. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LargeCashForm8300"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["WireConflict"];
+        };
+    };
+    largeCashStatements: {
+        parameters: {
+            query?: {
+                /** @description The year the cash was received. The current year when it is absent. */
+                year?: number;
+            };
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The year's statements. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LargeCashStatements"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    largeCashIssueStatement: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path: {
+                /** @description The crossing whose payer the statement is for. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LargeCashStatementRequest"];
+            };
+        };
+        responses: {
+            /** @description The issued statement. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LargeCashStatement"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["WireConflict"];
         };
     };
     linksQuoteResolve: {
@@ -34935,7 +35470,7 @@ export interface operations {
             query?: {
                 register_id?: string;
                 date?: string;
-                status?: "open" | "held" | "completed" | "voided";
+                status?: "open" | "held" | "completed" | "voided" | "abandoned";
                 q?: string;
                 /** @description The opaque cursor of the previous page's next_cursor, passed back verbatim. A malformed cursor, or one minted for another ordering, is a 400 naming cursor. */
                 cursor?: components["parameters"]["Cursor"];
@@ -35422,6 +35957,7 @@ export interface operations {
             403: components["responses"]["ForbiddenEither"];
             404: components["responses"]["WireNotFound"];
             500: components["responses"]["InternalError"];
+            503: components["responses"]["ServiceUnavailable"];
         };
     };
     posTransactionVoid: {
@@ -36018,6 +36554,70 @@ export interface operations {
             400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["ForbiddenEither"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    posOfflinePolicyGet: {
+        parameters: {
+            query: {
+                branch_id: string;
+            };
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The resolved offline counter policy. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PosOfflinePolicy"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["WireNotFound"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    posOfflinePolicyPut: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PosOfflinePolicyRequest"];
+            };
+        };
+        responses: {
+            /** @description The offline counter policy now in force. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PosOfflinePolicy"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["WireNotFound"];
             500: components["responses"]["InternalError"];
         };
     };

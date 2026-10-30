@@ -27,7 +27,10 @@ import (
 	"github.com/google/uuid"
 )
 
-const arBranch = `(SELECT value::uuid FROM system_settings WHERE key = 'default_branch_id')`
+// branchSQL is the world's own branch as a SQL expression. Every world
+// writes on a branch of its own (testutil.OwnBranch), never on the shared
+// default one, so a count or a sweep over a branch sees only its own rows.
+func (w *arWorld) branchSQL() string { return "'" + w.branchID.String() + "'::uuid" }
 
 // arWorld owns one throwaway customer (more on demand) and everything the AR
 // core writes for them.
@@ -48,14 +51,11 @@ func newARWorld(t *testing.T) *arWorld {
 
 func newARWorldOn(t *testing.T, db *database.DB) *arWorld {
 	t.Helper()
+	testutil.LockBranchDay(t)
 	loadBranchZone(db)
-	w := &arWorld{t: t, db: db, customerID: uuid.New()}
+	w := &arWorld{t: t, db: db, customerID: uuid.New(), branchID: testutil.OwnBranch(t, db, "0")}
 	w.svc = account.NewService(db, gl.NewService(gl.NewRepository(db), nil, slog.Default()), slog.Default())
-	ctx := context.Background()
-	if err := db.Pool.QueryRow(ctx, `SELECT `+arBranch).Scan(&w.branchID); err != nil {
-		t.Fatalf("default branch: %v", err)
-	}
-	w.exec(`INSERT INTO customers (id, name, account_number, primary_branch_id) VALUES ($1, 'AR Core Co', $2, `+arBranch+`)`,
+	w.exec(`INSERT INTO customers (id, name, account_number, primary_branch_id) VALUES ($1, 'AR Core Co', $2, `+w.branchSQL()+`)`,
 		w.customerID, "ARC-"+uuid.NewString()[:8])
 	t.Cleanup(w.cleanup)
 	return w
@@ -113,12 +113,10 @@ func (w *arWorld) cleanup() {
 		exec(`DELETE FROM credit_holds WHERE customer_id = $1`, c)
 		exec(`DELETE FROM customers WHERE id = $1`, c)
 	}
-	// The runs outlast no world: their items cascade with them, and a run may
-	// name several worlds' customers, so they are cleared whole.
-	exec(`DELETE FROM ar_finance_charge_items`)
-	exec(`DELETE FROM ar_finance_charge_runs`)
-	exec(`DELETE FROM ar_statement_run_items`)
-	exec(`DELETE FROM ar_statement_runs`)
+	// Only runs that hold no remaining items are removed, so another test's
+	// concurrent run is never deleted out from under it.
+	exec(`DELETE FROM ar_finance_charge_runs WHERE NOT EXISTS (SELECT 1 FROM ar_finance_charge_items i WHERE i.run_id = ar_finance_charge_runs.id)`)
+	exec(`DELETE FROM ar_statement_runs WHERE NOT EXISTS (SELECT 1 FROM ar_statement_run_items i WHERE i.run_id = ar_statement_runs.id)`)
 }
 
 // ---------------------------------------------------------------------------
@@ -358,7 +356,7 @@ func (w *arWorld) invoiceOn(customer uuid.UUID, total int64, on time.Time) uuid.
 func (w *arWorld) sideOn(total int64, on time.Time) uuid.UUID {
 	w.t.Helper()
 	customer := uuid.New()
-	w.exec(`INSERT INTO customers (id, name, account_number, primary_branch_id) VALUES ($1, 'Side Co', $2, `+arBranch+`)`,
+	w.exec(`INSERT INTO customers (id, name, account_number, primary_branch_id) VALUES ($1, 'Side Co', $2, `+w.branchSQL()+`)`,
 		customer, "SIDE-"+uuid.NewString()[:8])
 	w.side = append(w.side, customer)
 	w.invoiceOn(customer, total, on)
@@ -381,7 +379,7 @@ func (w *arWorld) postInvoiceRow(customer uuid.UUID, inv *arInvoice, on time.Tim
 	}
 	w.exec(`INSERT INTO invoices (id, customer_id, branch_id, status, origin, number, currency, total_amount, subtotal,
 			tax_rate, tax_amount, amount_open, due_date, discount_due_date, discount_percent, invoice_date, project_id, ship_to_id)
-		VALUES ($1, $2, `+arBranch+`, 'UNPAID', 'POS', $3, 'USD', $4::bigint::numeric / 100, $4::bigint::numeric / 100,
+		VALUES ($1, $2, `+w.branchSQL()+`, 'UNPAID', 'POS', $3, 'USD', $4::bigint::numeric / 100, $4::bigint::numeric / 100,
 			0, 0, $4::bigint::numeric / 100, $5::date, $6::date, $7::numeric, $8::date, $9, $10)`,
 		inv.ID, customer, "IN-"+inv.ID.String()[:8], inv.Total, date(inv.Due), discountDue, discountPP, date(on), project, shipTo)
 }
@@ -1008,7 +1006,7 @@ func TestARCreditMemoApplyAndRefund(t *testing.T) {
 	memo := uuid.New()
 	w.exec(`INSERT INTO credit_memos (id, customer_id, branch_id, currency, reason_code, reason, amount, subtotal, tax_amount,
 			total_amount, status, memo_date)
-		VALUES ($1, $2, `+arBranch+`, 'USD', 'RETURN', 'returned goods', 0, 0, 0, 0, 'DRAFT', CURRENT_DATE)`, memo, w.customerID)
+		VALUES ($1, $2, `+w.branchSQL()+`, 'USD', 'RETURN', 'returned goods', 0, 0, 0, 0, 'DRAFT', CURRENT_DATE)`, memo, w.customerID)
 	w.mustAct("post the memo", func(ctx context.Context) (*account.Effects, error) {
 		return w.svc.PostCreditMemo(ctx, account.PostCreditMemoIn{MemoID: memo, CustomerID: w.customerID, Number: "CM-" + memo.String()[:8],
 			Currency: "USD", MemoDate: daysFromNow(-10), SubtotalCents: -5000, TotalCents: -5000, Actor: "u-test",
@@ -1083,7 +1081,7 @@ func refusalText(err error) string {
 func TestARApplicationRefusals(t *testing.T) {
 	w := newARWorld(t)
 	other := uuid.New()
-	w.exec(`INSERT INTO customers (id, name, account_number, primary_branch_id) VALUES ($1, 'AR Second Co', $2, `+arBranch+`)`,
+	w.exec(`INSERT INTO customers (id, name, account_number, primary_branch_id) VALUES ($1, 'AR Second Co', $2, `+w.branchSQL()+`)`,
 		other, "AR2-"+other.String()[:8])
 	inv := w.invoice(6000, daysFromNow(-30))
 	foreign := w.invoiceOn(other, 6000, daysFromNow(-30))
@@ -1326,7 +1324,7 @@ func TestAREveryWriteKindKeepsTheReconciliationClean(t *testing.T) {
 	memo := uuid.New()
 	w.exec(`INSERT INTO credit_memos (id, customer_id, branch_id, currency, reason_code, reason, amount, subtotal, tax_amount,
 			total_amount, status, memo_date)
-		VALUES ($1, $2, `+arBranch+`, 'USD', 'PRICE_ADJUSTMENT', 'price protection', 0, 0, 0, 0, 'DRAFT', CURRENT_DATE)`, memo, w.customerID)
+		VALUES ($1, $2, `+w.branchSQL()+`, 'USD', 'PRICE_ADJUSTMENT', 'price protection', 0, 0, 0, 0, 'DRAFT', CURRENT_DATE)`, memo, w.customerID)
 	w.mustAct("post memo", func(ctx context.Context) (*account.Effects, error) {
 		return w.svc.PostCreditMemo(ctx, account.PostCreditMemoIn{MemoID: memo, CustomerID: w.customerID, Number: "CM-" + memo.String()[:8],
 			Currency: "USD", MemoDate: daysFromNow(-20), SubtotalCents: -3000, TotalCents: -3000, Actor: "u-test",

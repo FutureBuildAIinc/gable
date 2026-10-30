@@ -14,22 +14,42 @@ import (
 
 	"github.com/gablelbm/gable/internal/emaildelivery"
 	"github.com/gablelbm/gable/internal/notification"
+	"github.com/google/uuid"
 )
 
+// deliveryOutcome is the one outcome a send wrote to its queued row.
+type deliveryOutcome struct {
+	id     uuid.UUID
+	status string
+	answer string
+	failed string
+}
+
 type recordedDeliveries struct {
-	mu      sync.Mutex
-	entries []emaildelivery.Entry
+	mu       sync.Mutex
+	entries  []emaildelivery.Entry
+	rows     []uuid.UUID
+	outcomes []deliveryOutcome
 }
 
 func (r *recordedDeliveries) Record(_ context.Context, e emaildelivery.Entry) (*emaildelivery.Delivery, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	id := uuid.New()
 	r.entries = append(r.entries, e)
-	return &emaildelivery.Delivery{}, nil
+	r.rows = append(r.rows, id)
+	return &emaildelivery.Delivery{ID: id, Status: e.Status}, nil
+}
+
+func (r *recordedDeliveries) SetOutcome(_ context.Context, id uuid.UUID, status, answer, sendError string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.outcomes = append(r.outcomes, deliveryOutcome{id: id, status: status, answer: answer, failed: sendError})
+	return nil
 }
 
 // A sender that accepts the connection and never speaks ends in an error
-// within the send timeout, the delivery row records the failure once, and the
+// within the send timeout, the queued row is resolved failed once, and the
 // goroutine that sent is gone.
 func TestDispatchAHungSenderEndsInOneFailedRow(t *testing.T) {
 	before := runtime.NumGoroutine()
@@ -80,12 +100,23 @@ func TestDispatchAHungSenderEndsInOneFailedRow(t *testing.T) {
 
 	rec.mu.Lock()
 	entries := rec.entries
+	outcomes := rec.outcomes
+	rows := rec.rows
 	rec.mu.Unlock()
-	if len(entries) != 1 {
-		t.Fatalf("delivery rows = %d, want exactly one", len(entries))
+	if len(entries) != 1 || len(rows) != 1 {
+		t.Fatalf("delivery rows = %d, want exactly one queued row", len(rows))
 	}
-	if entries[0].Status != emaildelivery.StatusFailed || entries[0].Error == "" {
-		t.Errorf("row = %+v, want a failed row with the error", entries[0])
+	if entries[0].Status != emaildelivery.StatusQueued {
+		t.Errorf("the row written before the send = %q, want queued", entries[0].Status)
+	}
+	if len(outcomes) != 1 {
+		t.Fatalf("outcomes = %+v, want exactly one", outcomes)
+	}
+	if outcomes[0].status != emaildelivery.StatusFailed || outcomes[0].failed == "" {
+		t.Errorf("outcome = %+v, want a failed outcome with the error", outcomes[0])
+	}
+	if outcomes[0].id != rows[0] {
+		t.Errorf("outcome id %s does not name the queued row %s", outcomes[0].id, rows[0])
 	}
 
 	ln.Close()

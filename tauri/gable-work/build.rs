@@ -19,6 +19,10 @@ const COMMANDS: &[&str] = &[
     "clear_tokens",
     "begin_sign_in",
     "refresh_tokens",
+    "offline_enrolment_status",
+    "load_offline_snapshot",
+    "sign_and_queue_offline_sale",
+    "offline_queue_status",
 ];
 
 fn drop_stale_permissions() {

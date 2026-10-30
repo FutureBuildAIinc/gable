@@ -141,6 +141,7 @@ type ThermalTintComponent struct {
 type ThermalTender struct {
 	Method      string
 	AmountCents httpx.Cents
+	Brand       string      // empty when not a card
 	LastFour    string      // empty when not a card
 	ChangeCents httpx.Cents // 0 when no change due
 }
@@ -309,10 +310,7 @@ func (s *Service) GenerateThermalReceiptPDF(ctx context.Context, branch uuid.UUI
 
 	// Tenders.
 	for _, t := range r.Tenders {
-		label := strings.TrimSpace(t.Method)
-		if t.LastFour != "" {
-			label = label + "  ****" + t.LastFour
-		}
+		label := tenderLabel(t)
 		add(thermalRowBody, text.NewCol(thermalGridSize, label, props.Text{Size: 8}))
 		add(thermalRowTiny, text.NewCol(thermalGridSize, b.style.Money(t.AmountCents), props.Text{Size: 8, Align: align.Right}))
 		if t.ChangeCents > 0 {
@@ -386,4 +384,17 @@ func wrapForWidth(s string, maxChars int) []string {
 		out = append(out, s)
 	}
 	return out
+}
+
+// tenderLabel is a tender's line on paper: the method, and for a card its
+// brand and last four.
+func tenderLabel(t ThermalTender) string {
+	label := strings.TrimSpace(t.Method)
+	if b := strings.TrimSpace(t.Brand); b != "" {
+		label += " " + b
+	}
+	if t.LastFour != "" {
+		label += "  ****" + t.LastFour
+	}
+	return label
 }
